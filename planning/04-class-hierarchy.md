@@ -1,6 +1,6 @@
 # Class Hierarchy Sketch
 
-Pre-implementation sketch of the OO design. Companion to [01-classic-rules](01-classic-rules-reference.md), [02-decisions](02-design-decisions.md), and [03-ai-design](03-ai-design.md).
+Pre-implementation sketch of the OO design. Companion to [01-game-rules-spec](01-game-rules-spec.md), [02-decisions](02-design-decisions.md), and [03-ai-design](03-ai-design.md).
 
 This is **not** the final class list — it's a structural plan establishing layers, ownership, and dependency direction. Expect refinement during implementation.
 
@@ -37,21 +37,21 @@ empire/
         │   ├── bus.py              # EventBus
         │   └── events.py           # event dataclasses
         ├── combat/
-        │   ├── resolver.py         # CombatResolver (classic attrition algorithm)
+        │   ├── resolver.py         # CombatResolver (per-blow attrition algorithm)
         │   └── evaluator.py        # CombatEvaluator (EV prediction)
         ├── mapgen/
         │   ├── generator.py        # abstract MapGenerator
-        │   ├── classic.py          # ClassicMapGenerator (port of make_map)
+        │   ├── height_field.py     # HeightFieldMapGenerator (smoothed height-field algorithm)
         │   └── profile.py          # MapProfile (size + ratios)
         ├── pathfinding/
         │   ├── pathfinder.py       # Pathfinder ABC, PathRequest
-        │   ├── bfs.py              # BFSPathfinder (classic weighted-objective BFS)
+        │   ├── bfs.py              # BFSPathfinder (weighted-objective perimeter BFS)
         │   ├── astar.py            # AStarPathfinder
         │   └── cost.py             # PathCostProfile
         ├── ai/
         │   ├── controller.py       # AIController ABC, TurnPlan, UnitMove, etc.
         │   ├── world_view.py       # WorldView (fog-of-war filtered)
-        │   ├── classic_ai.py       # ClassicAI personality
+        │   ├── baseline_ai.py      # BaselineAI personality
         │   ├── difficulty.py       # Difficulty, knob defaults
         │   ├── strategic/
         │   │   ├── ai.py           # StrategicAI composition
@@ -117,7 +117,7 @@ class Coord:
 8-direction enum (N, NE, E, SE, S, SW, W, NW). `Direction.offsets() -> Iterator[tuple[int,int]]` for iteration.
 
 ### `TerrainKind` (enum)
-`LAND`, `WATER`, `CITY`. (3 values — matches classic; see rules §2.)
+`LAND`, `WATER`, `CITY`. (3 values; see [`01-game-rules-spec.md`](01-game-rules-spec.md) §1.2.)
 
 ### `Tile`
 ```python
@@ -186,7 +186,7 @@ class City:
     coord: Coord
     owner: Player | None            # None = neutral
     production: ProductionState
-    default_orders: dict[UnitKind, OrderKind]  # the func[] array
+    default_orders: dict[UnitKind, OrderKind]  # per-kind default order on production
 ```
 
 ### `ProductionState`
@@ -266,7 +266,7 @@ Coherent bundle of rule values. **Every rule consultation goes through this.** N
 ```python
 @dataclass(frozen=True)
 class RuleSet:
-    name: str                                      # e.g., "CLASSIC", "MODERN"
+    name: str                                      # e.g., "STANDARD", "MODERN"
     # base constants
     map_profile: MapProfile
     num_cities: int
@@ -283,7 +283,7 @@ class RuleSet:
     # ... add as needed
 
 # Shipped presets
-CLASSIC = RuleSet(name="CLASSIC", ...)             # canonical VMS values
+STANDARD = RuleSet(name="STANDARD", ...)           # baseline values from 01-game-rules-spec.md
 # Future: MODERN, STACKED_COMBAT, etc. — each play-tested as a whole.
 ```
 
@@ -324,7 +324,7 @@ class TurnManager:
         #         CombatResolution (interleaved with movement), EndOfTurnCheck
 ```
 
-Each phase is a method (or its own small class if it grows complex). The order matches the classic: user moves, then AI moves, then end-of-round bookkeeping + endgame check.
+Each phase is a method (or its own small class if it grows complex). The order per round: user moves, then AI moves, then end-of-round bookkeeping + endgame check. See [`01-game-rules-spec.md`](01-game-rules-spec.md) §7.
 
 ---
 
@@ -358,14 +358,14 @@ class EventBus:
     def subscribe(self, event_type: type, handler: Callable) -> None
 ```
 
-Events are immutable dataclasses; subscribers don't mutate them. Used for both UI updates and replay/movie support (the classic's `empmovie.dat`).
+Events are immutable dataclasses; subscribers don't mutate them. Used for both UI updates and replay support (see §12 deferred items).
 
 ---
 
 ## 4. Combat (`empire.combat`)
 
 ### `CombatResolver`
-Owns the classic algorithm (per-blow `rng.randrange(2)` attrition loop). Returns a `CombatOutcome` plus the per-blow log (consumed by `CombatEvent`).
+Owns the per-blow attrition algorithm from [`01-game-rules-spec.md`](01-game-rules-spec.md) §4.2. Returns a `CombatOutcome` plus the per-blow log (consumed by `CombatEvent`).
 
 ### `CombatEvaluator`
 Pure prediction. Given two units (or hypothetical units) and an RNG, computes win probability and expected damage. Used by the smart AI to decide whether to engage. **Does not mutate.**
@@ -389,8 +389,14 @@ class MapGenerator(ABC):
     def generate(self, profile: MapProfile, rng: random.Random) -> tuple[Map, list[City]]
 ```
 
-### `ClassicMapGenerator`
-Port of `make_map()` + `place_cities()`. Same height-field smoothing, same water-line threshold, same Chebyshev-spaced city placement with `regen_land` fallback. Parameterized by `MapProfile` (size, water ratio, smooth iterations, city count, min city distance).
+### `HeightFieldMapGenerator`
+A height-field map generator designed during Phase 5. Algorithm sketch (subject to refinement):
+1. Assign each cell a random initial height in `[0, H_max]`.
+2. Smooth over `smooth_iterations` passes (each cell becomes the average of itself and its 8 neighbors).
+3. Cells below the water-line threshold become `WATER`; cells above become `LAND`.
+4. Place `num_cities` city sites on land with minimum Chebyshev spacing `min_city_distance`. If insufficient land for the required spacing, regenerate (with a retry cap).
+
+Parameterized by `MapProfile`. Specific threshold values, smoothing window, and retry behavior are our design choices, tuned during Phase 5 playtesting.
 
 ### `MapProfile`
 ```python
@@ -398,14 +404,15 @@ Port of `make_map()` + `place_cities()`. Same height-field smoothing, same water
 class MapProfile:
     width: int
     height: int
-    water_ratio: int           # percentage 0-100
+    water_ratio: int           # percentage 0-100 (water fraction target)
     smooth_iterations: int
     num_cities: int
+    min_city_distance: int
 
 # presets
-SMALL = MapProfile(50, 30, 70, 5, 25)
-CLASSIC = MapProfile(100, 60, 70, 5, 70)
-LARGE = MapProfile(150, 90, 70, 5, 140)
+SMALL    = MapProfile(50,  30, 70, 5,  25, 6)
+STANDARD = MapProfile(100, 60, 70, 5,  70, 8)
+LARGE    = MapProfile(150, 90, 70, 5, 140, 10)
 ```
 
 ---
@@ -433,7 +440,7 @@ class PathRequest:
 ```
 
 ### `BFSPathfinder`
-Classic-style perimeter BFS with weighted objective characters (`vmap_find_lobj` / `vmap_find_wobj` family). Used by `ClassicAI` and as a fallback when full A* is overkill.
+Perimeter-expansion BFS with weighted objective scoring. Used by `BaselineAI` and as a fallback when full A* is overkill.
 
 ### `AStarPathfinder`
 True A* with admissible Chebyshev heuristic. Used by `StrategicAI`. Optionally danger-weighted (cost penalty per cell within threat reach).
@@ -471,8 +478,8 @@ class WorldView:
     remembered_tiles: Mapping[Coord, RememberedTile]
     ...
 
-# ai/classic_ai.py
-class ClassicAI(AIController):
+# ai/baseline_ai.py
+class BaselineAI(AIController):
     pathfinder: BFSPathfinder
 
 # ai/strategic/ai.py
@@ -668,7 +675,7 @@ Anything circular is a smell — surface it during code review. `import-linter` 
 - **`combat`** — table-driven tests against the manpage's probability table (`vms-empire.6:218-228`). Run many seeded trials to verify our distribution matches.
 - **`mapgen`** — golden tests (fixed seed → expected map summary stats). Don't compare full maps; compare summaries (cell count by terrain, city count, continent count).
 - **`pathfinding`** — small handcrafted maps with known shortest paths.
-- **`ai`** — primarily integration tests: play `StrategicAI` vs `ClassicAI` for N games at a fixed seed range, expect win rate > 60%. Smaller unit tests on `IntelService` (deterministic given a `WorldView`) and `CombatEvaluator`.
+- **`ai`** — primarily integration tests: play `StrategicAI` vs `BaselineAI` for N games at a fixed seed range, expect win rate > 60%. Smaller unit tests on `IntelService` (deterministic given a `WorldView`) and `CombatEvaluator`.
 - **`persistence`** — round-trip every schema version. For each released schema, keep a golden save in `tests/fixtures/`.
 - **`tui`** — Textual has a pilot/snapshot mode. Snapshot tests of widget rendering for a handful of canned game states.
 - **`llm`** — replay-mode tests using recorded transcripts. Mock `LLMClient` returning canned responses. Validate prompt-building (golden prompts) and response parsing.

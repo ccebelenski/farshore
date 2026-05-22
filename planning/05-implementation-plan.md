@@ -77,12 +77,12 @@ Where work splits cleanly along file/interface boundaries, run agents in paralle
 
 - `Coord`, `Direction` (with offsets), `TerrainKind`, distance helpers.
 - `UnitId`, `CityId`, `PlayerId`, `TaskForceId`, `GoalId` as `NewType[int]`.
-- `RuleSet` dataclass + `CLASSIC` preset populated with canonical values from `01-classic-rules-reference.md`.
+- `RuleSet` dataclass + `STANDARD` preset populated with values from `01-game-rules-spec.md`.
 
 **Canary tests:**
 - `Coord` arithmetic round-trips (`step` then reverse-step returns original).
 - `Direction.offsets()` produces all 8 unique vectors.
-- `CLASSIC` preset loads and has the expected name/values for a handful of spot-checked fields.
+- `STANDARD` preset loads and has the expected name/values for a handful of spot-checked fields.
 
 **Exit gate:** Gates green. ~20-30 LOC of tests.
 
@@ -93,14 +93,14 @@ Where work splits cleanly along file/interface boundaries, run agents in paralle
 **Deliverable:** `Tile`, `Map`, `Unit` hierarchy + registry, `City` + `ProductionState`, `Player`, `ViewMap` — *positional and structural only*. No movement rules, no combat, no production tick yet.
 
 - `Map.place_unit / move_unit / remove_unit` maintain the spatial index but do NOT validate against `RuleSet`. Rule validation lands in Phase 8.
-- `Unit` subclasses with class-level attrs filled from `data.c:108-185`. `Unit.coord` is read-only via `@property`; `_set_coord` is called only by `Map`.
+- `Unit` subclasses with class-level attrs chosen per `01-game-rules-spec.md` §2. `Unit.coord` is read-only via `@property`; `_set_coord` is called only by `Map`.
 - `ProductionState` has the methods stubbed but no tick logic yet.
 - `ViewMap` exposes `update_from_scan`, `seen`, `render_char` — implementation can be naive (full visibility) for now; fog logic lands in Phase 8.
 
 **Canary tests:**
 - Spatial-index consistency: after `N` random placements/moves/removes, `Map.units_at(c)` matches a brute-force scan of all units.
 - Every `UnitKind` resolves to a concrete `Unit` subclass via the registry, and every subclass declares every required class attr (introspection test).
-- Unit class-attr values match a small golden table extracted from `data.c` (catches typos in the canonical attribute transcription).
+- Unit class-attr values match a small golden table committed to `tests/fixtures/unit_attributes.json` (catches typos against our spec).
 
 **Parallelism:** **Significant.** Once the `Unit` ABC is locked (1 sequential session — must be agreed first), the rest splits cleanly:
 - Agent A: `Tile` + `City` + `ProductionState` (all in `core`, no AI/combat deps).
@@ -162,7 +162,7 @@ Stitching: wire `EventBus` into `TurnManager`'s phase methods (one small edit). 
 
 ## Phase 5 — Mapgen (2 sessions)
 
-**Deliverable:** `ClassicMapGenerator` ports `make_map` + `place_cities`. Three `MapProfile` presets (`SMALL`, `CLASSIC`, `LARGE`).
+**Deliverable:** `HeightFieldMapGenerator` per `04-class-hierarchy.md` §5. Three `MapProfile` presets (`SMALL`, `STANDARD`, `LARGE`).
 
 **Canary tests (golden-summary, not golden-map):**
 - For each `(profile, seed)` pair in a fixed table (~6 entries), generate the map and assert: cell count by terrain ±2%, city count exactly matches, all cities are on land, no two cities within `min_city_distance`, ≥1 connected landmass.
@@ -234,20 +234,22 @@ This is the first phase where the game *plays* anything. Lands movement validati
 
 ---
 
-## Phase 9 — ClassicAI (3-4 sessions)
+## Phase 9 — BaselineAI (3-4 sessions)
 
-**Deliverable:** Direct OO port of `compmove.c`. Per-unit decision methods on `ClassicTactical`, weight tables loaded from data, `ClassicPathfinder` (classic perimeter BFS lives here too — or reuse from Phase 7).
+**Deliverable:** `BaselineAI` per `03-ai-design.md` §2 — a greedy per-unit AI. Per-unit decision methods on `BaselineTactical`, weight tables, BFS pathfinding via `BFSPathfinder` from Phase 7.
+
+**Approach:** For each owned unit, evaluate nearby objectives (capturable cities, attackable enemies, unexplored frontier, return-to-base for damaged units) with a weighted scoring function, then move toward the highest-scoring objective. No coordination across units. Weights are our design choices, tuned by self-play.
 
 **Canary tests:**
-- **Self-play stability:** 20 seeded `ClassicAI` vs `ClassicAI` games (seeds 0-19) run to completion without crashing. Game length and final-score distribution are recorded as a golden — sudden shifts are reviewed.
-- **Decision spot-checks:** ~5 canned `WorldView` situations where the original C source has a known correct decision (e.g., "army adjacent to undefended neutral city → move into city"). Our `ClassicAI` produces the same decision.
-- **Interface adapter:** `ClassicAI.revise_move()` returns a sensible step (re-runs per-unit decision); does not crash on any `Surprise` variant.
+- **Self-play stability:** 20 seeded `BaselineAI` vs `BaselineAI` games (seeds 0-19) run to completion without crashing. Game length and final-score distribution are recorded as a golden — sudden shifts are reviewed.
+- **Decision spot-checks:** ~5 canned `WorldView` situations with intuitively-correct decisions (army adjacent to undefended neutral city → moves into city; damaged unit far from any friendly city → routes toward repair; fighter low on fuel → returns to nearest friendly carrier or city). Our `BaselineAI` produces the expected decision.
+- **Interface adapter:** `BaselineAI.revise_move()` returns a sensible step (re-runs per-unit decision); does not crash on any `Surprise` variant.
 
-**Parallelism:** Significant. The `compmove.c` source has a per-unit decision function per piece type (`army_move`, `fighter_move`, `transport_move`, `ship_move`, etc.) — these become methods on `ClassicTactical`, one per unit kind. After the dispatch skeleton + weight-table loader are written single-threaded:
-- One agent per unit-kind decision function (one file each under `ai/classic/decisions/`), in parallel. Each agent reads the corresponding `compmove.c` section, ports to Python, adds a spot-check test.
-- Parallel to all of the above: one agent ports `ClassicPathfinder` (or reuses BFS from Phase 7).
+**Parallelism:** Significant. Each unit kind gets its own decision method (`army_decide`, `fighter_decide`, `transport_decide`, etc.) — these become methods on `BaselineTactical`, one per kind. After the dispatch skeleton + initial weight tables + objective-scoring helpers are written single-threaded:
+- One agent per unit-kind decision function (one file each under `ai/baseline/decisions/`), in parallel. Each agent designs the unit's heuristic from the spec, picks initial weights, adds a spot-check test.
+- Parallel to all of the above: one agent tunes the shared objective-scoring helpers if needed (or reuses `BFSPathfinder` directly).
 
-Stitching: register decisions in the dispatch map, run self-play. Net: ~4-6× wall-clock on the per-unit work, which is the bulk of the phase.
+Stitching: register decisions in the dispatch map, run self-play, tune weights iteratively. Net: ~4-6× wall-clock on the per-unit work, which is the bulk of the phase.
 
 **Exit gate:** Gates green. 20-game self-play completes; outcome distribution within tolerance of recorded golden (or, on first run, *establishes* the golden).
 
@@ -258,7 +260,7 @@ Stitching: register decisions in the dispatch map, run self-play. Net: ~4-6× wa
 No new code — a validation gate. Confirms that Phases 1-9 produced a sound engine.
 
 **Run:**
-- 50 seeded `ClassicAI` vs `ClassicAI` games to completion. Assertions:
+- 50 seeded `BaselineAI` vs `BaselineAI` games to completion. Assertions:
   - No crashes.
   - All games terminate within a turn cap (e.g., 500 turns) — non-termination is a bug.
   - Win-rate roughly balanced if continent quality is balanced (both sides win ~30-70% range).
@@ -347,7 +349,7 @@ Stitching: ensure every `(UnitKind, Role)` pair the strategist can emit resolves
 **Deliverable:** `StrategicAI` wired together; all four layers active.
 
 **Validation:**
-- 50 seeded `StrategicAI` vs `ClassicAI` games at NORMAL difficulty.
+- 50 seeded `StrategicAI` vs `BaselineAI` games at NORMAL difficulty.
 - **Quality gate: `StrategicAI` win-rate ≥ 60%.** If not, the "smarter" design isn't smarter — investigate before proceeding. Per-difficulty: EASY ~50%, NORMAL ≥60%, HARD ≥70%.
 - Save/load of mid-game `StrategicAI` state (including `AIMemory`, active TFs, goals) round-trips.
 
@@ -456,7 +458,7 @@ Net: ~4-5× wall-clock on the backend + prompt/parse work, which is most of the 
 - Phases 11-15 are the meat of the project: the new AI.
 - Phases 16-18 are polish, packaging, and the optional LLM experiment.
 
-**Estimated effort:** 30-45 focused sessions sequentially. With the parallelization callouts applied, realistic wall-clock is closer to **18-25 sessions** — the biggest wins are in Phase 2 (entities), Phase 9 (per-unit ClassicAI), Phase 14 (behaviors), Phase 17 (widgets), Phase 18 (LLM backends). Infrastructure phases (0-7) parallelize modestly; the AI and UI phases parallelize *heavily* because they're collections of independent implementations of a common interface.
+**Estimated effort:** 30-45 focused sessions sequentially. With the parallelization callouts applied, realistic wall-clock is closer to **18-25 sessions** — the biggest wins are in Phase 2 (entities), Phase 9 (per-unit BaselineAI), Phase 14 (behaviors), Phase 17 (widgets), Phase 18 (LLM backends). Infrastructure phases (0-7) parallelize modestly; the AI and UI phases parallelize *heavily* because they're collections of independent implementations of a common interface.
 
 **Phases that resist parallelism** (interface design is itself the deliverable, or one cohesive algorithm):
 - Phase 1 (too small to split usefully).

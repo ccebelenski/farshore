@@ -2,9 +2,9 @@
 
 Companion to [D-007](02-design-decisions.md) and [classic rules reference](01-classic-rules-reference.md).
 
-This document describes the AI architecture for the Empire reimplementation. There are **three** AI personalities planned, all conforming to a single `AIController` interface:
+This document describes the AI architecture. There are **three** AI personalities planned, all conforming to a single `AIController` interface:
 
-1. **`ClassicAI`** — faithful port of the VMS `compmove.c` algorithm. Greedy per-unit BFS with weight-driven objectives. **Purpose:** preserved as a baseline opponent for fairness testing and "play the original" mode. Selectable but not the default.
+1. **`BaselineAI`** — a greedy per-unit BFS AI with weight-driven objectives. **Purpose:** regression baseline against which `StrategicAI` is benchmarked, and a "lightweight opponent" mode for quick games. Selectable but not the default.
 2. **`StrategicAI` (default)** — hierarchical goal-seeking AI with explicit strategy, operational planning, and tactical execution layers. **Purpose:** the new default. Genuinely smarter than classic; respects fog of war.
 3. **`LLMAI`** — wraps `StrategicAI` but replaces the top `Strategist` component with an LLM-driven strategist. **Purpose:** optional opponent; explores how a reasoning model plays this game.
 
@@ -17,7 +17,7 @@ All three implement the same interface (`AIController.plan_turn(world_view) -> T
 These classes are used by **every** AI personality. They are pure data + utility — no AI policy lives in them.
 
 ### `WorldView`
-The AI's belief about the world, derived from the same `view_map_t` machinery the player uses (canonical fog of war — see `01-classic-rules-reference.md` §5). **The AI must not read the real `Map` directly except through this view.**
+The AI's belief about the world, filtered through the same fog-of-war machinery the player uses (see [`01-game-rules-spec.md`](01-game-rules-spec.md) §6). **The AI must not read the real `Map` directly except through this view.**
 
 `WorldView` is a **live filtered view**, not a snapshot. It holds references to the real `Player`/`City`/`Unit` objects but exposes only what fog-of-war permits. The AI sees current state every time it reads. Anything that must be frozen (intel summaries, planned moves) is the responsibility of the consumer — `IntelService` produces an immutable `IntelReport`, the strategist's `Goals` are frozen on emission, etc. Memory copies are avoided.
 
@@ -97,26 +97,25 @@ Mid-turn revision sees a **live `WorldView`** (current state) but a **frozen `In
 
 ---
 
-## 2. `ClassicAI` — faithful baseline
+## 2. `BaselineAI` — greedy baseline
 
-Direct port of `compmove.c`. Same per-unit decision priorities (`army_move`, `transport_move`, etc.), same weight tables (`tt_unload`, `army_fight`, etc.), same custom BFS pathfinding (`vmap_find_*` family), same `vmap_prune_explore_locs` predicted-terrain trick.
+A simple per-unit greedy AI. For each owned unit, evaluate nearby objectives (capturable cities, enemy units in range, unexplored frontier) with a weighted scoring function, then move toward the highest-scoring objective using BFS pathfinding. No cross-unit coordination, no strategic layer — just one independent decision per unit per turn.
 
-**Why preserve it:**
-- Regression target: if `StrategicAI` can't beat `ClassicAI` reliably, our "smarter" design isn't actually smarter.
-- Mode for purists: "play against the original AI".
-- Cheap to validate: outcomes match `compmove.c` traces given identical seeds and inputs.
+**Why include it:**
+- Regression target: if `StrategicAI` can't beat `BaselineAI` reliably, our "smarter" design isn't actually smarter. Self-play between the two is our quality gate (`05-implementation-plan.md` Phase 15).
+- Lightweight opponent mode for quick games or systems too constrained for `StrategicAI`'s overhead.
+- Validates the engine: a simple deterministic AI that can complete games proves the rules and combat systems work end-to-end.
 
-**Interface adapter notes.** `ClassicAI` has no `Behavior` objects, `Goal`s, or `TaskForce`s — it's strictly per-unit greedy. To satisfy the shared `AIController` protocol:
-- `revise_move()` re-runs the unit's classic per-unit decision function against the live `WorldView` and returns the resulting next step.
-- Combat engagement uses classic "always engage when adjacent" rules. The `CombatEvaluator` / behavior split (engagement policy lives in the behavior) is a `StrategicAI`/`LLMAI` feature only.
-- `IntelService`, `FeasibilityOracle`, `AIMemory` are not used by `ClassicAI`. Its only cross-turn state is what the original `compmove.c` carried.
+**Interface adapter notes.** `BaselineAI` has no `Behavior` objects, `Goal`s, or `TaskForce`s — it's strictly per-unit greedy. To satisfy the shared `AIController` protocol:
+- `revise_move()` re-runs the unit's per-unit decision function against the live `WorldView` and returns the resulting next step.
+- Combat engagement is simple: engage when adjacent to an enemy in the unit's `attack_preferences` list, otherwise route around. The `CombatEvaluator` / behavior split (engagement policy lives in the behavior) is a `StrategicAI`/`LLMAI` feature only; `BaselineAI` does not consult `CombatEvaluator`.
+- `IntelService`, `FeasibilityOracle`, `AIMemory` are not used by `BaselineAI`.
 
 **Notes for implementation:**
-- Weight tables become `data classes` or load from YAML — see `data.c:108-185` for the originals.
-- Per-unit move functions become methods on `ClassicTactical` (one per unit type) to keep OO discipline.
-- BFS perimeter expansion (`map.c:578-626`) lifts cleanly to a `ClassicPathfinder` class.
-
-Done well, `ClassicAI` is ~600 lines of clean Python — significantly shorter than `compmove.c` (30KB of C) because we get dicts/lists for free.
+- Weight tables (per unit kind: how strongly to weight "capture city" vs. "attack enemy" vs. "explore" vs. "return to base") are designed during Phase 9 and tuned by playtesting.
+- Per-unit move functions are methods on `BaselineTactical` (one method per unit kind) to keep OO discipline.
+- BFS perimeter expansion lives in `BaselineBFS` or reuses `BFSPathfinder` from `empire.pathfinding` (Phase 7).
+- Target size: a few hundred lines of clean Python. If it's growing past ~800 lines, something is wrong (over-clever weight tuning or strategic layer leakage).
 
 ---
 
@@ -145,7 +144,7 @@ Outputs:
 
 Implementation notes:
 - "Projected reach" uses each enemy unit type's speed table + the canonical Chebyshev distance. Conservative — assume enemies move optimally toward our assets.
-- Theater detection is a flood-fill on the `WorldView`, with predicted-terrain inference (the classic's `vmap_prune_explore_locs` trick) for unexplored cells.
+- Theater detection is a flood-fill on the `WorldView`, with predicted-terrain inference for unexplored cells (treat unexplored neighbors of land as probably-land, neighbors of water as probably-water).
 - All `IntelService` output is reproducible from the same `WorldView` — no hidden state.
 
 ### 3.2 `Strategist` — goal generation
@@ -242,7 +241,7 @@ Each `Behavior` exposes:
 
 **Pathfinding:** A* with terrain-aware costs and a danger-weighted heuristic that prefers cells far from `Threat.projected_reach`. The cost function is parameterized (`PathCostProfile`) so a fragile fighter takes safer paths than a battleship with HP to spare. Common ground for path queries lives in a `Pathfinder` service.
 
-**Combat decisions:** when a unit's path crosses an attackable enemy, the behavior consults a `CombatEvaluator` (using `attack_obj` math from the classic) to get an `ExpectedOutcome` — win probability and expected damage. **The evaluator does not decide whether to engage.** That decision belongs to the `Behavior`, which combines the expected outcome with strategic context from its task force's `Role` and `Goal`:
+**Combat decisions:** when a unit's path crosses an attackable enemy, the behavior consults a `CombatEvaluator` (which computes expected outcome from the combat probability formula defined in [`01-game-rules-spec.md`](01-game-rules-spec.md) §4.2) to get an `ExpectedOutcome` — win probability and expected damage. **The evaluator does not decide whether to engage.** That decision belongs to the `Behavior`, which combines the expected outcome with strategic context from its task force's `Role` and `Goal`:
 
 - An `ArmyAssaultBehavior` mid-invasion may engage at <50% win probability if defeating this defender clears the path to the target city (positional value > raw EV).
 - A `TransportFerryBehavior` carrying the assault force will evade even at high win probability — the cargo matters more than the kill.
@@ -383,7 +382,7 @@ User-facing controls:
 
 ## 5. Difficulty knobs
 
-All AI personalities support a `Difficulty` setting. Knobs apply to `StrategicAI` and `LLMAI`; `ClassicAI` has only the "continent quality" knob (matching the original's difficulty model).
+All AI personalities support a `Difficulty` setting. Knobs apply to `StrategicAI` and `LLMAI`; `BaselineAI` honors only the `continent_quality` knob.
 
 | Knob | Description | Default per difficulty |
 |---|---|---|
@@ -427,9 +426,9 @@ Suggested ordering, narrow-to-wide:
 
 1. Core domain (`Map`, `Tile`, `Unit`, `City`, `Game`, `RuleSet`, `WorldView`, `TurnPlan`) — see `04-class-hierarchy.md`.
 2. Engine turn loop + classic rules (no AI yet; play hotseat against yourself for validation).
-3. `ClassicAI` first — direct port from C. Validates the engine is correct (outcomes vs. the original).
+3. `BaselineAI` first — greedy per-unit. Validates the engine is correct (a simple deterministic AI completes games end-to-end).
 4. `IntelService` — useful for player UI too (threat/opportunity HUD).
-5. `StrategicAI` — strategist + operational + tactical, deterministic. Benchmark against `ClassicAI`.
+5. `StrategicAI` — strategist + operational + tactical, deterministic. Benchmark against `BaselineAI`.
 6. `LLMAI` — drop in last; the deterministic baseline shows whether the LLM is actually helping.
 
 This order also defers the most uncertain work (LLM integration) to the end, when everything around it is stable.
