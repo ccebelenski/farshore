@@ -201,10 +201,17 @@ def test_spatial_index_consistency_under_random_ops(player: Player) -> None:
 # --- ViewMap stub -------------------------------------------------------------
 
 
-def test_view_map_stub_reports_everything_seen() -> None:
-    """Phase-2 stub: ViewMap.seen() returns True everywhere. Replaced in Phase 8."""
+def test_view_map_default_sees_nothing() -> None:
+    """A fresh ViewMap has no visibility data, so seen() reports False."""
     v = ViewMap()
-    assert v.seen(Coord(0, 0)) is True
-    assert v.seen(Coord(100, 100)) is True
+    assert v.seen(Coord(0, 0)) is False
+    assert v.seen(Coord(100, 100)) is False
     assert v.remembered == {}
     assert v.visible == set()
+
+
+def test_view_map_seen_after_visibility_populated() -> None:
+    v = ViewMap()
+    v.visible.add(Coord(3, 4))
+    assert v.seen(Coord(3, 4)) is True
+    assert v.seen(Coord(0, 0)) is False

@@ -55,9 +55,14 @@ class RememberedTile:
 class ViewMap:
     """A player's fog-filtered view of the world.
 
-    Phase 2 ships a stub: `seen()` returns True everywhere. Real visibility
-    accounting (per-unit scan radii, city scan, satellite vision) lands in
-    Phase 8.
+    Owns two structures:
+      - `visible`: coordinates the player can see *this* turn.
+      - `remembered`: coordinates the player has seen at some past turn,
+        with stale snapshot data.
+
+    `seen()` reports whether a coord is in either set. Population of these
+    sets via scan logic (per-unit scan radii, city scan, satellite vision)
+    lands in Phase 8; `update_from_scan()` is a stub until then.
     """
 
     def __init__(self) -> None:
@@ -65,9 +70,8 @@ class ViewMap:
         self.visible: set[Coord] = set()
 
     def seen(self, c: Coord) -> bool:
-        """Phase 2: full visibility. Replace in Phase 8 with proper fog logic."""
-        del c  # parameter retained for API stability
-        return True
+        """True iff `c` is currently visible OR remembered from some past turn."""
+        return c in self.visible or c in self.remembered
 
     def update_from_scan(
         self,
@@ -75,13 +79,13 @@ class ViewMap:
         real_map: Map,
         turn: int,
     ) -> None:
-        """Phase 2: stub. Phase 8 replaces with real scan logic that commits
-        stale snapshots to `remembered` and updates `visible`.
+        """Phase 8 replaces with real scan logic that commits stale snapshots
+        to `remembered` and updates `visible`.
         """
         del scanned, real_map, turn  # stubbed
 
     def render_char(self, c: Coord) -> str:
-        """Phase 2: stub. Phase 8 ships the proper render with fog states."""
+        """Phase 8 ships the proper render with fog states."""
         del c
         return " "
 
