@@ -50,6 +50,10 @@ PROFILE_SEED_CASES = [
     pytest.param(SMALL, 7, id="small-seed7"),
     pytest.param(STANDARD_PROFILE, 0, id="standard-seed0"),
     pytest.param(STANDARD_PROFILE, 7, id="standard-seed7"),
+    # Seed 22 originally produced a landlocked 36-cell continent with one
+    # inland city. Kept in the case set so the property tests catch any
+    # regression in the coastal-cities constraint.
+    pytest.param(STANDARD_PROFILE, 22, id="standard-seed22"),
     pytest.param(LARGE, 0, id="large-seed0"),
 ]
 
@@ -153,6 +157,50 @@ def test_interior_cells_are_on_board(profile: MapProfile, seed: int) -> None:
 
 
 @pytest.mark.parametrize(("profile", "seed"), PROFILE_SEED_CASES)
+def test_every_continent_with_cities_has_a_coastal_city(
+    profile: MapProfile, seed: int,
+) -> None:
+    """A landlocked continent's cities can't host transports (spec §3.2)
+    and can't be invaded by sea — anyone starting there is stranded and
+    anyone trying to attack can't reach. The generator must regenerate
+    until every land component with cities has at least one coastal city.
+    """
+    gen = HeightFieldMapGenerator()
+    m, cities = gen.generate(profile, random.Random(seed))
+
+    # Walk every connected LAND+CITY component that contains a city.
+    visited: set[Coord] = set()
+    for start_city in cities:
+        if start_city.coord in visited:
+            continue
+        component: set[Coord] = set()
+        stack = [start_city.coord]
+        while stack:
+            c = stack.pop()
+            if c in component or not m.in_bounds(c):
+                continue
+            if m.terrain_at(c) not in {TerrainKind.LAND, TerrainKind.CITY}:
+                continue
+            component.add(c)
+            stack.extend(c.neighbors())
+        visited.update(component)
+
+        # Cities in this component.
+        cities_in_comp = [c for c in cities if c.coord in component]
+        # At least one must have a water neighbor.
+        has_coastal = any(
+            m.in_bounds(n) and m.terrain_at(n) is TerrainKind.WATER
+            for city in cities_in_comp
+            for n in city.coord.neighbors()
+        )
+        assert has_coastal, (
+            f"Landlocked continent: cities at "
+            f"{[(c.coord.x, c.coord.y) for c in cities_in_comp]} have no "
+            f"water neighbors. (Continent size: {len(component)} cells.)"
+        )
+
+
+@pytest.mark.parametrize(("profile", "seed"), PROFILE_SEED_CASES)
 def test_at_least_one_meaningful_connected_landmass(
     profile: MapProfile, seed: int,
 ) -> None:
@@ -244,7 +292,7 @@ def test_impossible_profile_raises_after_max_attempts() -> None:
         num_cities=50, min_city_distance=3,
     )
     gen = HeightFieldMapGenerator(max_regen_attempts=3)
-    with pytest.raises(MapGenerationError, match="Could not place"):
+    with pytest.raises(MapGenerationError, match="Could not produce valid map"):
         gen.generate(impossible, random.Random(0))
     assert gen.last_regen_count == 3
 

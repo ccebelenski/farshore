@@ -18,9 +18,13 @@ Algorithm (designed for this project; see
    each one whose Chebyshev distance to every already-placed city is
    `>= min_city_distance`. Stop when `num_cities` placed or the
    shuffled candidates are exhausted.
-6. If we couldn't place enough cities, regenerate the height field and
-   try again, up to `max_regen_attempts`. Failure raises
-   `MapGenerationError`.
+6. Verify every connected land component that contains cities has at
+   least one coastal city (a city adjacent to a water tile). A
+   landlocked continent's cities are unconquerable by sea, which
+   trivializes the game — fail this attempt if any violation found.
+7. If we couldn't place enough cities or any continent is landlocked,
+   regenerate the height field and try again, up to
+   `max_regen_attempts`. Failure raises `MapGenerationError`.
 """
 
 from __future__ import annotations
@@ -61,17 +65,21 @@ class HeightFieldMapGenerator(MapGenerator):
         self._last_regen_count = 0
         for attempt in range(self._max_regen_attempts):
             terrain_grid, city_coords = self._try_one(profile, rng)
-            if len(city_coords) >= profile.num_cities:
-                # Only keep the requested count (placement may have produced more
-                # only theoretically; it stops at num_cities by construction).
+            if (
+                len(city_coords) >= profile.num_cities
+                and self._all_continents_have_coastal_cities(
+                    terrain_grid, city_coords[: profile.num_cities], profile,
+                )
+            ):
                 return self._assemble(terrain_grid, city_coords[: profile.num_cities], profile)
             self._last_regen_count = attempt + 1
         raise MapGenerationError(
-            f"Could not place {profile.num_cities} cities for profile "
+            f"Could not produce valid map for profile "
             f"{profile.width}x{profile.height} water={profile.water_ratio}% "
-            f"min_distance={profile.min_city_distance} after "
-            f"{self._max_regen_attempts} attempts. Relax water_ratio, "
-            f"num_cities, or min_city_distance."
+            f"min_distance={profile.min_city_distance} num_cities={profile.num_cities} "
+            f"after {self._max_regen_attempts} attempts. Either packing failed "
+            f"(not enough room) or every attempt produced a landlocked "
+            f"continent. Relax water_ratio, num_cities, or min_city_distance."
         )
 
     # ---- one attempt ------------------------------------------------------
@@ -154,8 +162,17 @@ class HeightFieldMapGenerator(MapGenerator):
         profile: MapProfile,
         rng: random.Random,
     ) -> list[Coord]:
-        """Greedy random placement: shuffle candidates, accept each one whose
-        Chebyshev distance to every already-placed city is `>= min_city_distance`.
+        """Greedy placement biased toward coastal cells.
+
+        Candidates are shuffled then stable-sorted with coastal cells first.
+        This naturally satisfies the "every continent with cities has at
+        least one coastal city" invariant — by the time we run out of
+        coastal candidates and start placing inland, any continent that
+        was going to get cities has already gotten its coastal one.
+
+        Inland cities are still placed for the remaining slots (after
+        all coastal candidates have been consumed or are too close to
+        existing cities).
         """
         candidates: list[Coord] = [
             Coord(x, y)
@@ -164,6 +181,11 @@ class HeightFieldMapGenerator(MapGenerator):
             if terrain_grid[y][x] is TerrainKind.LAND
         ]
         rng.shuffle(candidates)
+        # Stable sort: coastal first, inland second. Within each group the
+        # random order from shuffle is preserved.
+        candidates.sort(
+            key=lambda c: 0 if self._is_coastal_land(terrain_grid, c, profile) else 1
+        )
 
         placed: list[Coord] = []
         d = profile.min_city_distance
@@ -173,6 +195,106 @@ class HeightFieldMapGenerator(MapGenerator):
             if all(c.chebyshev_to(p) >= d for p in placed):
                 placed.append(c)
         return placed
+
+    @staticmethod
+    def _is_coastal_land(
+        terrain_grid: list[list[TerrainKind]],
+        coord: Coord,
+        profile: MapProfile,
+    ) -> bool:
+        """True if `coord` is a land cell with at least one water neighbor."""
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = coord.x + dx, coord.y + dy
+                if (
+                    0 <= nx < profile.width
+                    and 0 <= ny < profile.height
+                    and terrain_grid[ny][nx] is TerrainKind.WATER
+                ):
+                    return True
+        return False
+
+    # ---- continent / coastal validation ----------------------------------
+
+    def _all_continents_have_coastal_cities(
+        self,
+        terrain_grid: list[list[TerrainKind]],
+        city_coords: list[Coord],
+        profile: MapProfile,
+    ) -> bool:
+        """Every connected land component containing at least one city must
+        have at least one city adjacent (8-direction) to a water tile.
+
+        Reasons this matters:
+        - Per spec §3.2, sea units may only occupy a CITY tile when it is
+          "adjacent to water (treated as a port)." A continent with only
+          inland cities literally cannot build or host transports — anyone
+          starting there is stranded.
+        - Symmetrically, an enemy cannot invade such a continent by sea,
+          making its cities unconquerable and the game uninteresting.
+        """
+        if not city_coords:
+            return True
+
+        width, height = profile.width, profile.height
+
+        def in_bounds(x: int, y: int) -> bool:
+            return 0 <= x < width and 0 <= y < height
+
+        def component_of(start_x: int, start_y: int) -> set[tuple[int, int]]:
+            """BFS the connected LAND component containing (start_x, start_y)."""
+            comp: set[tuple[int, int]] = set()
+            stack = [(start_x, start_y)]
+            while stack:
+                x, y = stack.pop()
+                if (x, y) in comp or not in_bounds(x, y):
+                    continue
+                # At this stage city locations are tracked in city_coords;
+                # terrain_grid still has LAND/WATER only (CITY is baked in
+                # during _build_tiles).
+                if terrain_grid[y][x] is not TerrainKind.LAND:
+                    continue
+                comp.add((x, y))
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        if dx == 0 and dy == 0:
+                            continue
+                        stack.append((x + dx, y + dy))
+            return comp
+
+        visited: set[tuple[int, int]] = set()
+        for city_coord in city_coords:
+            key = (city_coord.x, city_coord.y)
+            if key in visited:
+                continue
+            comp = component_of(city_coord.x, city_coord.y)
+            visited.update(comp)
+
+            # Cities in this component.
+            cities_in_comp = [c for c in city_coords if (c.x, c.y) in comp]
+
+            # At least one must be coastal.
+            has_coastal = False
+            for city in cities_in_comp:
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        if dx == 0 and dy == 0:
+                            continue
+                        nx, ny = city.x + dx, city.y + dy
+                        if in_bounds(nx, ny) and terrain_grid[ny][nx] is TerrainKind.WATER:
+                            has_coastal = True
+                            break
+                    if has_coastal:
+                        break
+                if has_coastal:
+                    break
+
+            if not has_coastal:
+                return False
+
+        return True
 
     # ---- assembly ---------------------------------------------------------
 
