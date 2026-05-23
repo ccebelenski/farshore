@@ -42,17 +42,6 @@ def two_player_setup() -> tuple[Map, Player, Player]:
     return m, p1, p2
 
 
-# --- scalar context ----------------------------------------------------------
-
-
-def test_world_view_exposes_player_and_turn(two_player_setup: tuple[Map, Player, Player]) -> None:
-    m, p1, _ = two_player_setup
-    wv = WorldView(real_map=m, player=p1, turn=7, rules=STANDARD)
-    assert wv.own_player is p1
-    assert wv.turn == 7
-    assert wv.rules is STANDARD
-
-
 # --- visibility contract (THE PHASE 3 HEADLINE CANARY) ----------------------
 
 

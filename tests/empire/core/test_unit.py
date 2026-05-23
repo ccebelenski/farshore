@@ -118,22 +118,43 @@ def test_coord_read_only_via_property(player: Player) -> None:
         a.coord = Coord(5, 5)  # type: ignore[misc]
 
 
-def test_moves_this_turn_scales_with_damage(player: Player) -> None:
-    d = Destroyer(UnitId(1), player, Coord(0, 0))  # max_hits=3, speed=3
+def test_moves_this_turn_scales_with_damage_using_ceil(player: Player) -> None:
+    """Damage scaling rounds UP, not down. Carrier (max_hits=8, speed=2)
+    distinguishes ceil from floor at low HP: at hits=3, ceil(6/8)=1 but
+    floor(6/8)=0. A unit that can't move is broken; rounding up keeps it
+    at least minimally functional until destroyed.
+    """
+    c = Carrier(UnitId(1), player, Coord(0, 0))  # max_hits=8, speed=2
+    assert c.moves_this_turn() == 2  # full HP
+    c.hits = 5
+    assert c.moves_this_turn() == 2  # ceil(10/8)=2, floor would give 1
+    c.hits = 3
+    assert c.moves_this_turn() == 1  # ceil(6/8)=1, floor would give 0
+    c.hits = 1
+    assert c.moves_this_turn() == 1  # ceil(2/8)=1, floor would give 0
+
+
+def test_effective_capacity_scales_with_damage_using_ceil(player: Player) -> None:
+    """Damage scaling on capacity also rounds UP. Carrier (max_hits=8,
+    capacity=8) at hits=3 gives ceil(24/8)=3; tests a different ratio
+    than the moves case above.
+    """
+    c = Carrier(UnitId(1), player, Coord(0, 0))  # max_hits=8, capacity=8
+    assert c.effective_capacity() == 8
+    c.hits = 5
+    assert c.effective_capacity() == 5
+    c.hits = 3
+    assert c.effective_capacity() == 3
+    c.hits = 1
+    assert c.effective_capacity() == 1  # ceil(8/8)=1
+
+
+def test_damage_scaling_for_three_hit_units(player: Player) -> None:
+    """Sanity at small max_hits: Destroyer (max_hits=3, speed=3)."""
+    d = Destroyer(UnitId(1), player, Coord(0, 0))
     assert d.moves_this_turn() == 3
-    d.hits = 2
-    assert d.moves_this_turn() == 2  # ceil(3*2/3) = 2
     d.hits = 1
-    assert d.moves_this_turn() == 1  # ceil(3*1/3) = 1
-
-
-def test_effective_capacity_scales_with_damage(player: Player) -> None:
-    t = Transport(UnitId(1), player, Coord(0, 0))  # max_hits=3, capacity=6
-    assert t.effective_capacity() == 6
-    t.hits = 2
-    assert t.effective_capacity() == 4  # ceil(6*2/3) = 4
-    t.hits = 1
-    assert t.effective_capacity() == 2
+    assert d.moves_this_turn() == 1
 
 
 def test_effective_capacity_zero_for_non_cargo_units(player: Player) -> None:

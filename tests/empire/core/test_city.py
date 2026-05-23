@@ -116,3 +116,23 @@ def test_consume_deducts_build_time() -> None:
     p.consume()
     assert p.work == 2
     assert p.building is UnitKind.ARMY
+
+
+def test_consume_at_exact_build_time_leaves_zero_work() -> None:
+    """Boundary: when accumulated work exactly equals build_time, one consume
+    drops work to 0 — not negative, not positive. The city is then ready to
+    start fresh on the same target."""
+    p = ProductionState(building=UnitKind.ARMY, work=5)  # build_time=5
+    assert p.ready()
+    p.consume()
+    assert p.work == 0
+    assert p.building is UnitKind.ARMY
+    assert not p.ready()  # back below threshold
+
+
+def test_consume_with_no_target_is_safe_noop() -> None:
+    """Calling consume() when no production target is set should not raise."""
+    p = ProductionState()
+    p.consume()
+    assert p.work == 0
+    assert p.building is None

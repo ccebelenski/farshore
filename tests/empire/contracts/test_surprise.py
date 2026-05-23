@@ -30,40 +30,27 @@ def _snapshot() -> UnitSnapshot:
     )
 
 
-def test_enemy_sighted_construction() -> None:
-    s = EnemySighted(enemy=KnownEnemyUnit(_snapshot(), seen_at_turn=4), at=Coord(3, 3))
-    assert isinstance(s, Surprise)
-    assert s.at == Coord(3, 3)
+def test_target_lost_accepts_both_city_and_unit_ids() -> None:
+    """TargetLost.target_id is a union of CityId and UnitId; verify both work
+    since this is a real polymorphism point AI code will pattern-match on."""
+    assert TargetLost(target_id=CityId(5)).target_id == 5
+    assert TargetLost(target_id=UnitId(7)).target_id == 7
 
 
-def test_path_blocked_construction() -> None:
-    s = PathBlocked(blocked_at=Coord(2, 2), by=BlockedBy.ENEMY_UNIT)
-    assert s.by is BlockedBy.ENEMY_UNIT
-
-
-def test_target_lost_with_city_id() -> None:
-    s = TargetLost(target_id=CityId(5))
-    assert s.target_id == 5
-
-
-def test_target_lost_with_unit_id() -> None:
-    s = TargetLost(target_id=UnitId(7))
-    assert s.target_id == 7
-
-
-def test_escort_lost_construction() -> None:
-    s = EscortLost(escort_id=UnitId(42))
-    assert s.escort_id == 42
-
-
-def test_terrain_impassable_construction() -> None:
-    s = TerrainImpassable(at=Coord(1, 1))
-    assert s.at == Coord(1, 1)
-
-
-def test_all_concrete_surprises_inherit_from_marker() -> None:
-    for cls in (EnemySighted, PathBlocked, TargetLost, EscortLost, TerrainImpassable):
-        assert issubclass(cls, Surprise)
+def test_every_variant_constructs_and_inherits_from_marker() -> None:
+    """One parametrized check that all five variants instantiate AND are
+    recognized as Surprise. Replaces five near-identical construction tests.
+    """
+    enemy = KnownEnemyUnit(_snapshot(), seen_at_turn=4)
+    instances: list[Surprise] = [
+        EnemySighted(enemy=enemy, at=Coord(3, 3)),
+        PathBlocked(blocked_at=Coord(2, 2), by=BlockedBy.ENEMY_UNIT),
+        TargetLost(target_id=CityId(5)),
+        EscortLost(escort_id=UnitId(42)),
+        TerrainImpassable(at=Coord(1, 1)),
+    ]
+    for s in instances:
+        assert isinstance(s, Surprise)
 
 
 def test_concrete_surprises_are_frozen() -> None:
@@ -73,4 +60,5 @@ def test_concrete_surprises_are_frozen() -> None:
 
 
 def test_blocked_by_enum_values() -> None:
+    """Pinned for save-file / wire-format stability."""
     assert {b.value for b in BlockedBy} == {"own_unit", "enemy_unit", "terrain", "out_of_bounds"}

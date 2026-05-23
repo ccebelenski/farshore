@@ -135,6 +135,43 @@ def test_remove_unit_drops_from_index(player: Player) -> None:
     assert m.unit_by_id(UnitId(1)) is None
 
 
+def test_remove_one_of_multiple_units_at_coord_preserves_others(player: Player) -> None:
+    """Removing one unit from a coord with multiple must leave the others in the index."""
+    m = _build_empty_map(5, 5)
+    u1 = Army(UnitId(1), player, Coord(0, 0))
+    u2 = Army(UnitId(2), player, Coord(0, 0))
+    u3 = Army(UnitId(3), player, Coord(0, 0))
+    m.place_unit(u1, Coord(1, 1))
+    m.place_unit(u2, Coord(1, 1))
+    m.place_unit(u3, Coord(1, 1))
+    m.remove_unit(u2)
+    remaining = set(m.units_at(Coord(1, 1)))
+    assert remaining == {u1, u3}
+    assert m.unit_by_id(UnitId(2)) is None
+    assert m.unit_by_id(UnitId(1)) is u1
+    assert m.unit_by_id(UnitId(3)) is u3
+
+
+def test_move_one_of_multiple_units_at_coord_preserves_others(player: Player) -> None:
+    """Moving one unit from a stack must leave the others at the source coord."""
+    m = _build_empty_map(5, 5)
+    u1 = Army(UnitId(1), player, Coord(0, 0))
+    u2 = Army(UnitId(2), player, Coord(0, 0))
+    m.place_unit(u1, Coord(1, 1))
+    m.place_unit(u2, Coord(1, 1))
+    m.move_unit(u1, Coord(3, 3))
+    assert tuple(m.units_at(Coord(1, 1))) == (u2,)
+    assert tuple(m.units_at(Coord(3, 3))) == (u1,)
+
+
+def test_remove_unit_never_placed_is_silent_noop(player: Player) -> None:
+    """remove_unit on a unit Map never knew about is harmless (idempotent removal)."""
+    m = _build_empty_map(5, 5)
+    u = Army(UnitId(99), player, Coord(0, 0))  # never placed
+    m.remove_unit(u)  # should not raise
+    assert m.unit_by_id(UnitId(99)) is None
+
+
 def test_all_units_iterator(player: Player) -> None:
     m = _build_empty_map(5, 5)
     u1 = Army(UnitId(1), player, Coord(0, 0))
@@ -214,4 +251,18 @@ def test_view_map_seen_after_visibility_populated() -> None:
     v = ViewMap()
     v.visible.add(Coord(3, 4))
     assert v.seen(Coord(3, 4)) is True
+    assert v.seen(Coord(0, 0)) is False
+
+
+def test_view_map_seen_includes_remembered_coords() -> None:
+    """seen() must count remembered coords, not just currently-visible ones.
+    A remembered tile is something the player saw at some past turn — still
+    "known" even if not currently in sight."""
+    from empire.core.map import RememberedTile
+
+    v = ViewMap()
+    v.remembered[Coord(5, 5)] = RememberedTile(
+        coord=Coord(5, 5), terrain=TerrainKind.LAND, remembered_at=2,
+    )
+    assert v.seen(Coord(5, 5)) is True
     assert v.seen(Coord(0, 0)) is False
