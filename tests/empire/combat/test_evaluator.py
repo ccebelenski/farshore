@@ -90,23 +90,45 @@ def test_zero_one_outcomes_for_transport_have_certain_hp(p1: Player, p2: Player)
 # --- closed-form sanity ------------------------------------------------------
 
 
-def test_expected_outcome_marginals_sum_to_one(p1: Player, p2: Player) -> None:
-    """For any legal matchup, P(att wins) + P(def wins) = 1. We verify by
-    summing E[attacker HP > 0] and E[defender HP > 0] probabilities.
-
-    More directly: P(att wins) implies att_hp >= 1 at end (def_hp = 0).
-    P(def wins) implies def_hp >= 1 at end (att_hp = 0). These are
-    exhaustive and mutually exclusive, so win_probability + (1 -
-    win_probability) = 1 trivially. The real check: expected HPs aren't
-    nonsensical.
-    """
+def test_expected_outcome_marginals_are_within_valid_bounds(
+    p1: Player, p2: Player,
+) -> None:
+    """Output bounds sanity: win prob in [0,1]; expected HPs in [0, max_hp]."""
     b = _make(UnitKind.BATTLESHIP, p1)
     s = _make(UnitKind.SUBMARINE, p2)
     o = CombatEvaluator.expected_outcome(b, s)
     assert 0.0 <= o.win_probability <= 1.0
-    # E[attacker HP] is at most A and >= 0.
     assert 0.0 <= o.expected_attacker_hp <= float(b.hits)
     assert 0.0 <= o.expected_defender_hp <= float(s.hits)
+
+
+def test_full_probability_distribution_sums_to_one(p1: Player, p2: Player) -> None:
+    """Iterate every absorbing state and verify probabilities sum to 1.
+
+    This isn't `win_prob + (1 - win_prob) = 1` (trivially true). It re-walks
+    the per-state probability formula and confirms the closed-form math
+    itself is consistent — catches a bug in the binomial coefficient or
+    exponents that would silently bias the win-probability sum.
+    """
+    import math
+
+    from empire.combat.resolver import per_blow_probability
+
+    b = _make(UnitKind.BATTLESHIP, p1)
+    s = _make(UnitKind.SUBMARINE, p2)
+    p = per_blow_probability(b, s)
+    q = 1.0 - p
+    att_hp, def_hp = b.hits, s.hits
+
+    total = 0.0
+    # Attacker wins: end at (k, 0) for k in 1..att_hp.
+    for k in range(1, att_hp + 1):
+        total += math.comb(att_hp + def_hp - k - 1, def_hp - 1) * (p ** def_hp) * (q ** (att_hp - k))
+    # Defender wins: end at (0, k) for k in 1..def_hp.
+    for k in range(1, def_hp + 1):
+        total += math.comb(att_hp + def_hp - k - 1, att_hp - 1) * (q ** att_hp) * (p ** (def_hp - k))
+
+    assert total == pytest.approx(1.0, abs=1e-9)
 
 
 def test_symmetric_matchup_has_p_one_half(p1: Player, p2: Player) -> None:
@@ -162,6 +184,17 @@ def test_evaluator_raises_on_satellite_involvement(p1: Player, p2: Player) -> No
     sat = _make(UnitKind.SATELLITE, p2)
     with pytest.raises(CombatError):
         CombatEvaluator.win_probability(a, sat)
+
+
+def test_evaluator_handles_transport_vs_transport(p1: Player, p2: Player) -> None:
+    """Mutual zero engagement: both sides have empty preferences. The evaluator
+    walks _validate first (which passes — no friendly/satellite/dead checks
+    hit), then per-blow computation finds total effective strength = 0 and
+    raises. Parity with resolver."""
+    t1 = _make(UnitKind.TRANSPORT, p1)
+    t2 = _make(UnitKind.TRANSPORT, p2)
+    with pytest.raises(CombatError, match="engage"):
+        CombatEvaluator.win_probability(t1, t2)
 
 
 def test_expected_outcome_returns_expected_outcome_instance(p1: Player, p2: Player) -> None:

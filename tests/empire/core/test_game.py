@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from empire.contracts.controller import AIController, NullController
+from empire.contracts.controller import NullController
 from empire.core.city import City
 from empire.core.coord import Coord
 from empire.core.events import GameEndedEvent, TurnAdvancedEvent
@@ -53,17 +53,14 @@ def test_game_seed_is_deterministic(players: list[Player]) -> None:
 # --- Controllers ------------------------------------------------------------
 
 
-def test_attach_controller_stores_in_dict(
-    players: list[Player], null_controller: AIController,
-) -> None:
-    g = Game(rules=STANDARD, real_map=_empty_map(), players=players)
-    g.attach_controller(PlayerId(2), null_controller)
-    assert g.controllers[PlayerId(2)] is null_controller
-
-
 def test_attach_controller_replaces_existing(players: list[Player]) -> None:
+    """attach_controller stores its argument AND replaces any prior controller
+    at the same PlayerId. Both behaviors in one test since the second case
+    subsumes the first."""
     g = Game(rules=STANDARD, real_map=_empty_map(), players=players)
-    g.attach_controller(PlayerId(2), NullController())
+    first = NullController()
+    g.attach_controller(PlayerId(2), first)
+    assert g.controllers[PlayerId(2)] is first
     second = NullController()
     g.attach_controller(PlayerId(2), second)
     assert g.controllers[PlayerId(2)] is second

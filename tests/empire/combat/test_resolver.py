@@ -230,6 +230,79 @@ def test_empirical_win_rate_matches_analytical(
 # --- damage-state combat -----------------------------------------------------
 
 
+_HP_CROSSCHECK_PAIRS = [
+    pytest.param(UnitKind.ARMY, UnitKind.ARMY, id="army-vs-army"),
+    pytest.param(UnitKind.BATTLESHIP, UnitKind.SUBMARINE, id="bb-vs-sub"),
+    pytest.param(UnitKind.SUBMARINE, UnitKind.TRANSPORT, id="sub-vs-transport"),
+    pytest.param(UnitKind.DESTROYER, UnitKind.DESTROYER, id="destroyer-vs-destroyer"),
+    pytest.param(UnitKind.CARRIER, UnitKind.SUBMARINE, id="carrier-vs-sub"),
+]
+
+
+@pytest.mark.parametrize(("att_kind", "def_kind"), _HP_CROSSCHECK_PAIRS)
+def test_evaluator_expected_hp_matches_empirical_mean(
+    att_kind: UnitKind, def_kind: UnitKind, p1: Player, p2: Player,
+) -> None:
+    """`CombatEvaluator.expected_outcome` returns predicted E[attacker HP] and
+    E[defender HP]. These should match the empirical means from many seeded
+    resolver duels. Bugs in the negative-binomial coefficient or in the
+    HP-weighting sum would slip past the win-probability canary but be
+    caught here.
+    """
+    ref_a = _make(att_kind, p1)
+    ref_d = _make(def_kind, p2)
+    predicted = CombatEvaluator.expected_outcome(ref_a, ref_d)
+
+    resolver = CombatResolver()
+    rng = random.Random(0xBADCAFE)
+    n = 1500
+    att_hp_total = 0
+    def_hp_total = 0
+    for _ in range(n):
+        a = _make(att_kind, p1)
+        d = _make(def_kind, p2)
+        resolver.resolve(a, d, rng)
+        att_hp_total += a.hits
+        def_hp_total += d.hits
+
+    empirical_att = att_hp_total / n
+    empirical_def = def_hp_total / n
+
+    # Tolerance based on roughly 2-3 stdev of the sample mean. HP is bounded
+    # by max_hits so sample stdev is at most max_hits/2; with n=1500, stdev
+    # of the mean is at most max_hits/(2*sqrt(1500)) ≈ max_hits/77.
+    # Use 0.4 HP as a generous absolute tolerance.
+    assert abs(empirical_att - predicted.expected_attacker_hp) < 0.4, (
+        f"{att_kind.value} vs {def_kind.value}: empirical E[att HP] "
+        f"{empirical_att:.3f} vs predicted {predicted.expected_attacker_hp:.3f}"
+    )
+    assert abs(empirical_def - predicted.expected_defender_hp) < 0.4, (
+        f"{att_kind.value} vs {def_kind.value}: empirical E[def HP] "
+        f"{empirical_def:.3f} vs predicted {predicted.expected_defender_hp:.3f}"
+    )
+
+
+def test_combat_blow_field_consistent_with_hp_deltas(p1: Player, p2: Player) -> None:
+    """`CombatBlow.defender_took_damage` must agree with the actual HP delta
+    between consecutive blows. Catches a bug where the field is set
+    independently of the HP update.
+    """
+    b = _make(UnitKind.BATTLESHIP, p1)
+    s = _make(UnitKind.SUBMARINE, p2)
+    initial_att, initial_def = b.hits, s.hits
+    result = CombatResolver().resolve(b, s, random.Random(0))
+
+    prev_att, prev_def = initial_att, initial_def
+    for blow in result.blows:
+        if blow.defender_took_damage:
+            assert blow.defender_hp_after == prev_def - 1
+            assert blow.attacker_hp_after == prev_att
+        else:
+            assert blow.attacker_hp_after == prev_att - 1
+            assert blow.defender_hp_after == prev_def
+        prev_att, prev_def = blow.attacker_hp_after, blow.defender_hp_after
+
+
 def test_damaged_battleship_still_likely_beats_full_sub(p1: Player, p2: Player) -> None:
     """A heavily damaged battleship (hits=2) vs a full-hp sub (hits=2). Same HP,
     similar effective strength → not a slam-dunk for either side."""
