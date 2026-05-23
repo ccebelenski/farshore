@@ -157,8 +157,12 @@ def test_interior_cells_are_on_board(profile: MapProfile, seed: int) -> None:
 
 
 def _ocean_set(m: Map) -> set[Coord]:
-    """Water cells in `m` reachable (8-direction) from the border."""
-    ocean: set[Coord] = set()
+    """**On-board** water cells in `m` reachable (8-direction) from the border.
+
+    Border cells are off-board and excluded from the result; they participate
+    in the BFS only as connectivity bridges.
+    """
+    visited: set[Coord] = set()
     stack: list[Coord] = []
     for x in range(m.width):
         stack.append(Coord(x, 0))
@@ -168,13 +172,13 @@ def _ocean_set(m: Map) -> set[Coord]:
         stack.append(Coord(m.width - 1, y))
     while stack:
         c = stack.pop()
-        if c in ocean or not m.in_bounds(c):
+        if c in visited or not m.in_bounds(c):
             continue
         if m.terrain_at(c) is not TerrainKind.WATER:
             continue
-        ocean.add(c)
+        visited.add(c)
         stack.extend(c.neighbors())
-    return ocean
+    return {c for c in visited if m.tile(c).on_board}
 
 
 @pytest.mark.parametrize(("profile", "seed"), PROFILE_SEED_CASES)

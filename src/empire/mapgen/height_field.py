@@ -415,13 +415,21 @@ def _compute_ocean(
     terrain_grid: list[list[TerrainKind]],
     profile: MapProfile,
 ) -> set[tuple[int, int]]:
-    """The set of water cells reachable (8-direction) from the map border.
+    """The set of **on-board** water cells connected (8-direction) to the
+    map border.
+
+    The border ring is forced water (spec §1.1), but those cells are
+    off-board — units cannot occupy them. So for game purposes, "ocean"
+    means *on-board* water reachable from the edge. A city whose only
+    water neighbors are border cells has no real naval access (its
+    transports would have nowhere on-board to step out to). The border
+    cells participate in the BFS as a connectivity bridge but are not
+    themselves in the returned set.
 
     Water bodies disconnected from the border are *inner seas* and are
-    excluded from this set. The border ring itself is always water (per
-    spec §1.1), so the BFS seed is every border cell.
+    excluded as before.
     """
-    ocean: set[tuple[int, int]] = set()
+    visited: set[tuple[int, int]] = set()
     stack: list[tuple[int, int]] = []
     for x in range(profile.width):
         stack.append((x, 0))
@@ -431,19 +439,25 @@ def _compute_ocean(
         stack.append((profile.width - 1, y))
     while stack:
         x, y = stack.pop()
-        if (x, y) in ocean:
+        if (x, y) in visited:
             continue
         if not (0 <= x < profile.width and 0 <= y < profile.height):
             continue
         if terrain_grid[y][x] is not TerrainKind.WATER:
             continue
-        ocean.add((x, y))
+        visited.add((x, y))
         for dy in (-1, 0, 1):
             for dx in (-1, 0, 1):
                 if dx == 0 and dy == 0:
                     continue
                 stack.append((x + dx, y + dy))
-    return ocean
+
+    # Filter out border cells (off-board): they served only as BFS seeds.
+    return {
+        (x, y)
+        for (x, y) in visited
+        if 1 <= x <= profile.width - 2 and 1 <= y <= profile.height - 2
+    }
 
 
 def _compute_ocean_accessible_land(
