@@ -256,6 +256,13 @@ The exact algorithm — number of smoothing passes, threshold values, spacing mi
 
 At game start, each player is assigned one city as their capital. The capitals are placed on different landmasses where possible. Difficulty level affects continent assignment: the `continent_quality` `RuleSet` knob biases which continent the AI gets (smaller landmass = harder for the AI).
 
+**Capital-eligible continents.** A continent is valid for hosting a starting capital iff:
+
+- It contains **at least 3 cities** — the capital plus ≥ 2 others. This guarantees the starting player has nearby capture targets to fuel early-game expansion without immediately needing naval transport.
+- At least one city on the continent (other than the capital itself, or at minimum at least one in addition to the capital) is **ocean-coastal** (adjacent to an on-board water cell connected to the open ocean). This lets the player build and host transports without first having to conquer an inland city.
+
+This is a *capital-selection* constraint, not a map-generation constraint. Map generation produces continents and cities under its own invariants (see `planning/05-implementation-plan.md` Phase 5 and the `HeightFieldMapGenerator` docstring); capital selection then chooses where to place starting capitals from among the continents that satisfy the above. If fewer than `num_players` continents qualify, the map is rejected and a fresh one is generated.
+
 All other cities begin neutral. They have no production; once captured, they begin producing per the new owner's settings.
 
 ### 9.3 Starting units
