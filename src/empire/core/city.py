@@ -77,6 +77,9 @@ def _empty_orders() -> dict[UnitKind, OrderKind]:
     return {}
 
 
+CITY_SCAN_RANGE = 2  # Chebyshev radius a city sees around itself (spec §6.2).
+
+
 @dataclass(slots=True)
 class City:
     """A city on the map: a production center owned by a player or neutral.
@@ -90,6 +93,11 @@ class City:
     owner: Player | None
     production: ProductionState = field(default_factory=ProductionState)
     default_orders: dict[UnitKind, OrderKind] = field(default_factory=_empty_orders)
+
+    @property
+    def scan_range(self) -> int:
+        """Chebyshev radius of vision a city grants its owner."""
+        return CITY_SCAN_RANGE
 
     def is_neutral(self) -> bool:
         return self.owner is None

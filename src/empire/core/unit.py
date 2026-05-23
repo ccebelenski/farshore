@@ -61,6 +61,7 @@ class Unit(ABC):
     build_time: ClassVar[int]
     legal_terrain: ClassVar[frozenset[TerrainKind]]
     symbol: ClassVar[str]
+    scan_range: ClassVar[int]  # Chebyshev radius of vision per spec §6.2
 
     def __init__(self, id_: UnitId, owner: Player, coord: Coord) -> None:
         self.id: UnitId = id_
@@ -129,6 +130,7 @@ class Army(Unit):
     build_time = 5
     legal_terrain = _LAND_OR_CITY
     symbol = "A"
+    scan_range = 2
 
     def attack_preferences(self) -> str:
         return "ATFPDCSB"
@@ -144,6 +146,7 @@ class Fighter(Unit):
     build_time = 10
     legal_terrain = _ANY_TERRAIN
     symbol = "F"
+    scan_range = 5
 
     def attack_preferences(self) -> str:
         return "FATCDSPB"
@@ -159,6 +162,7 @@ class Patrol(Unit):
     build_time = 15
     legal_terrain = _WATER_OR_CITY
     symbol = "P"
+    scan_range = 3
 
     def attack_preferences(self) -> str:
         return "PTDSCBAF"
@@ -174,6 +178,7 @@ class Destroyer(Unit):
     build_time = 20
     legal_terrain = _WATER_OR_CITY
     symbol = "D"
+    scan_range = 3
 
     def attack_preferences(self) -> str:
         return "DSPTCBAF"
@@ -189,6 +194,7 @@ class Submarine(Unit):
     build_time = 25
     legal_terrain = _WATER_OR_CITY
     symbol = "S"
+    scan_range = 1
 
     def attack_preferences(self) -> str:
         return "TCBPDSAF"
@@ -204,6 +210,7 @@ class Transport(Unit):
     build_time = 30
     legal_terrain = _WATER_OR_CITY
     symbol = "T"
+    scan_range = 2
 
     def attack_preferences(self) -> str:
         return ""  # Transports do not initiate combat
@@ -219,6 +226,7 @@ class Carrier(Unit):
     build_time = 40
     legal_terrain = _WATER_OR_CITY
     symbol = "C"
+    scan_range = 4
 
     def attack_preferences(self) -> str:
         return "CTPDSBAF"
@@ -234,6 +242,7 @@ class Battleship(Unit):
     build_time = 50
     legal_terrain = _WATER_OR_CITY
     symbol = "B"
+    scan_range = 3
 
     def attack_preferences(self) -> str:
         return "BCSDPTAF"
@@ -249,6 +258,7 @@ class Satellite(Unit):
     build_time = 50
     legal_terrain = _ANY_TERRAIN  # orbits over anything
     symbol = "*"
+    scan_range = 10
 
     def attack_preferences(self) -> str:
         return ""  # Satellites cannot attack (or be attacked)

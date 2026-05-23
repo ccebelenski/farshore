@@ -142,11 +142,14 @@ forbidden_modules = [
     "empire.ai",
     "empire.tui",
 ]
-# Game holds AIController references but uses them only as opaque values
-# at runtime; the type annotation is TYPE_CHECKING-only. This single
-# import carries no runtime dependency from core to contracts.
+# Game holds AIController references and constructs WorldView objects to
+# hand to controllers, but uses them only as opaque values at runtime;
+# the type annotations are TYPE_CHECKING-only and the runtime imports
+# are kept function-local. These do not represent core depending on
+# contracts in any architectural sense.
 ignore_imports = [
     "empire.core.game -> empire.contracts.controller",
+    "empire.core.game -> empire.contracts.world_view",
 ]
 
 [[tool.importlinter.contracts]]

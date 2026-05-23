@@ -79,13 +79,46 @@ class ViewMap:
         real_map: Map,
         turn: int,
     ) -> None:
-        """Phase 8 replaces with real scan logic that commits stale snapshots
-        to `remembered` and updates `visible`.
+        """Replace the visible set with `scanned`, committing any cells that
+        were previously visible but no longer are into `remembered`.
+
+        Cells that newly become visible are removed from `remembered` (the
+        live state supersedes any stale snapshot).
         """
-        del scanned, real_map, turn  # stubbed
+        new_visible: set[Coord] = {c for c in scanned if real_map.in_bounds(c)}
+
+        # Cells leaving visibility: snapshot to remembered.
+        for c in self.visible - new_visible:
+            tile = real_map.tile(c)
+            unit_snapshots: list[UnitSnapshot] = [
+                UnitSnapshot(
+                    unit_id=u.id,
+                    kind=u.kind,
+                    owner_id=u.owner.id,
+                    coord=u.coord,
+                    hits=u.hits,
+                )
+                for u in real_map.units_at(c)
+            ]
+            last_city_owner: PlayerId | None = None
+            if tile.city is not None and tile.city.owner is not None:
+                last_city_owner = tile.city.owner.id
+            self.remembered[c] = RememberedTile(
+                coord=c,
+                terrain=tile.terrain,
+                remembered_at=turn,
+                last_units=unit_snapshots,
+                last_city_owner=last_city_owner,
+            )
+
+        # Cells newly visible: drop any remembered snapshot (live state wins).
+        for c in new_visible - self.visible:
+            self.remembered.pop(c, None)
+
+        self.visible = new_visible
 
     def render_char(self, c: Coord) -> str:
-        """Phase 8 ships the proper render with fog states."""
+        """Phase 8: minimal renderer. Phase 17 will produce the full TUI glyphs."""
         del c
         return " "
 
