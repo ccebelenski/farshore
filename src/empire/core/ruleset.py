@@ -23,21 +23,25 @@ class MapProfile:
     min_city_distance: int      # Chebyshev spacing between city sites
 
 
-# Shipped profile presets.
+# Shipped profile presets. Values chosen so HeightFieldMapGenerator can
+# pack the requested city count reliably; tuned by playtesting in later
+# phases. The packing constraint is roughly num_cities * (2*d+1)^2 < land
+# cells available; greedy random placement runs at ~60% efficiency vs
+# perfect packing, so we stay well clear of the ceiling.
 SMALL = MapProfile(
     width=50, height=30,
-    water_ratio=70, smooth_iterations=5,
-    num_cities=25, min_city_distance=6,
+    water_ratio=50, smooth_iterations=5,
+    num_cities=10, min_city_distance=3,
 )
 STANDARD_PROFILE = MapProfile(
     width=100, height=60,
-    water_ratio=70, smooth_iterations=5,
-    num_cities=70, min_city_distance=8,
+    water_ratio=55, smooth_iterations=5,
+    num_cities=25, min_city_distance=4,
 )
 LARGE = MapProfile(
     width=150, height=90,
-    water_ratio=70, smooth_iterations=5,
-    num_cities=140, min_city_distance=10,
+    water_ratio=60, smooth_iterations=5,
+    num_cities=50, min_city_distance=5,
 )
 
 
