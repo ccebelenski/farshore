@@ -133,6 +133,12 @@ forbidden_modules = [
     "empire.ai",
     "empire.tui",
 ]
+# Game holds AIController references but uses them only as opaque values
+# at runtime; the type annotation is TYPE_CHECKING-only. This single
+# import carries no runtime dependency from core to contracts.
+ignore_imports = [
+    "empire.core.game -> empire.contracts.controller",
+]
 
 [[tool.importlinter.contracts]]
 name = "contracts depends only on core"
