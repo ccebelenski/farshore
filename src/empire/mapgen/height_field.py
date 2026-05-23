@@ -5,30 +5,32 @@ Algorithm (designed for this project; see
 `planning/04-class-hierarchy.md` §5):
 
 1. Each interior cell gets a uniform random height in `[0, 1)`.
-2. Smooth the field over `smooth_iterations` passes (3x3 box blur,
-   in-bounds-only averaging so edges naturally trend toward their
-   neighbors' values).
+2. Smooth the field over `smooth_iterations` passes (3x3 box blur).
 3. Choose a threshold from the sorted interior heights so that, combined
    with the always-water border ring, the total water fraction matches
-   `water_ratio`. Cells at-or-above the threshold are LAND; below are
-   WATER.
-4. The outermost-ring cells are unconditionally off-board water (spec
-   §1.1) regardless of the height field.
-5. Place cities greedily by shuffling interior LAND cells and accepting
-   each one whose Chebyshev distance to every already-placed city is
-   `>= min_city_distance`. Stop when `num_cities` placed or the
-   shuffled candidates are exhausted.
-6. Touch up landlocked continents: if any connected land component
-   contains cities but none are coastal, relocate one of that
-   component's cities to a coastal cell within the same component
-   (subject to the same min-distance constraint against other cities).
-   This is surgical — only the offending city moves; the rest of the
-   map and other cities are preserved.
-7. As a safety net, verify every continent with cities has a coastal
-   city. If touch-up couldn't satisfy this (rare: tiny continent with
-   no coastal cell, or all candidates blocked by neighbor distances),
-   regenerate the height field and try again, up to
-   `max_regen_attempts`. Failure raises `MapGenerationError`.
+   `water_ratio`.
+4. The outermost-ring cells are unconditionally off-board water
+   (spec §1.1).
+5. Compute the **ocean** — water connected (8-direction) to the border.
+   Water bodies not connected to the border are *inner seas* (lakes,
+   landlocked basins). Cities adjacent only to inner seas can neither
+   host transports (no path to the open sea) nor be invaded by sea, so
+   they're game-breaking.
+6. Filter city placement candidates to land cells in continents that
+   touch the ocean. Inner-island continents (landmasses inside inner
+   seas) get no cities at all.
+7. Place cities greedily by shuffling the filtered candidates and
+   accepting each one whose Chebyshev distance to every already-placed
+   city is `>= min_city_distance`.
+8. Touch up landlocked-within-continent cases: if a continent has cities
+   but none are ocean-coastal, relocate one of its cities to an
+   ocean-coastal cell within the same continent (which exists by step
+   6's filter). Subject to the same min-distance constraint against
+   other cities. Surgical — only the offending city moves.
+9. As a safety net, verify every continent with cities has at least one
+   ocean-coastal city. If touch-up couldn't fix everything (rare:
+   coastal candidates blocked by neighbor distances), regenerate the
+   height field and try again, up to `max_regen_attempts`.
 """
 
 from __future__ import annotations
@@ -96,8 +98,10 @@ class HeightFieldMapGenerator(MapGenerator):
             heights = self._smooth(heights, profile.width, profile.height)
         threshold = self._compute_threshold(heights, profile)
         terrain_grid = self._build_terrain_grid(heights, threshold, profile)
-        city_coords = self._place_cities(terrain_grid, profile, rng)
-        city_coords = self._touch_up_landlocked(terrain_grid, city_coords, profile)
+        ocean = _compute_ocean(terrain_grid, profile)
+        ocean_accessible_land = _compute_ocean_accessible_land(terrain_grid, ocean, profile)
+        city_coords = self._place_cities(terrain_grid, profile, rng, ocean_accessible_land)
+        city_coords = self._touch_up_landlocked(terrain_grid, city_coords, profile, ocean)
         return terrain_grid, city_coords
 
     # ---- height-field operations ------------------------------------------
@@ -166,21 +170,20 @@ class HeightFieldMapGenerator(MapGenerator):
         terrain_grid: list[list[TerrainKind]],
         profile: MapProfile,
         rng: random.Random,
+        ocean_accessible_land: set[tuple[int, int]],
     ) -> list[Coord]:
-        """Greedy random placement. Shuffle interior LAND cells; accept each
-        one whose Chebyshev distance to every already-placed city is `>=
-        min_city_distance`.
+        """Greedy random placement restricted to ocean-accessible continents.
 
-        No coastal bias is applied here — that would push too many cities
-        to coasts and make maps feel artificial. Instead,
-        `_touch_up_landlocked` is the surgical fix for the rare case where
-        random placement leaves a continent with only inland cities.
+        Inner-island land (continents touching only inner seas, with no
+        connection to the open ocean) is filtered out — cities placed
+        there couldn't host transports or be reached by sea.
         """
         candidates: list[Coord] = [
             Coord(x, y)
             for y in range(1, profile.height - 1)
             for x in range(1, profile.width - 1)
             if terrain_grid[y][x] is TerrainKind.LAND
+            and (x, y) in ocean_accessible_land
         ]
         rng.shuffle(candidates)
 
@@ -193,26 +196,6 @@ class HeightFieldMapGenerator(MapGenerator):
                 placed.append(c)
         return placed
 
-    @staticmethod
-    def _is_coastal_land(
-        terrain_grid: list[list[TerrainKind]],
-        coord: Coord,
-        profile: MapProfile,
-    ) -> bool:
-        """True if `coord` is a land cell with at least one water neighbor."""
-        for dy in (-1, 0, 1):
-            for dx in (-1, 0, 1):
-                if dx == 0 and dy == 0:
-                    continue
-                nx, ny = coord.x + dx, coord.y + dy
-                if (
-                    0 <= nx < profile.width
-                    and 0 <= ny < profile.height
-                    and terrain_grid[ny][nx] is TerrainKind.WATER
-                ):
-                    return True
-        return False
-
     # ---- touch-up: relocate landlocked cities to coastal cells -----------
 
     def _touch_up_landlocked(
@@ -220,28 +203,32 @@ class HeightFieldMapGenerator(MapGenerator):
         terrain_grid: list[list[TerrainKind]],
         city_coords: list[Coord],
         profile: MapProfile,
+        ocean: set[tuple[int, int]],
     ) -> list[Coord]:
-        """If any connected land component has cities but none are coastal,
-        relocate one of that component's cities to a coastal cell on the
-        same component.
+        """If any connected land component has cities but none are
+        ocean-coastal, relocate one of that component's cities to an
+        ocean-coastal cell on the same component.
 
-        Constraints on the replacement coastal cell:
+        "Ocean-coastal" means adjacent to a water cell that's part of the
+        ocean — water connected to the map border. Cities adjacent only
+        to inner seas don't count; those continents have no naval access.
+
+        Constraints on the replacement cell:
         - Must be in the same connected land component as the city being
-          relocated (so the move stays "local" — same continent).
+          relocated.
+        - Must have an ocean neighbor (8-direction).
         - Must be at least `min_city_distance` from every OTHER placed
           city (excluding the city being moved).
         - Must not coincide with an already-placed city.
 
-        If no valid relocation exists for some component (rare: tiny
-        islands with no coastal cells, or all coastal candidates blocked
-        by neighbor distances), the city list is returned with that
-        component still landlocked. `_all_continents_have_coastal_cities`
-        will then return False and the engine regenerates as the final
-        fallback.
+        If no valid relocation exists for some component, the city list
+        is returned with that component still landlocked.
+        `_all_continents_have_coastal_cities` will then catch it and
+        trigger regen.
 
-        Determinism: components and candidate coastal cells are processed
-        in a deterministic order (sorted by coord), so the same input
-        produces the same output. No additional RNG draws are made.
+        Determinism: components and candidates are processed in sorted
+        order, so the same input produces the same output. No additional
+        RNG draws are made.
         """
         if not city_coords:
             return list(city_coords)
@@ -281,23 +268,23 @@ class HeightFieldMapGenerator(MapGenerator):
             components_done.update(comp)
 
             cities_in_comp = [c for c in result if (c.x, c.y) in comp]
-            # If any city in this component is coastal, nothing to fix.
-            if any(self._is_coastal_land(terrain_grid, c, profile) for c in cities_in_comp):
+            # If any city in this component is ocean-coastal, nothing to fix.
+            if any(_is_ocean_coastal(c, ocean) for c in cities_in_comp):
                 continue
 
-            # Find candidate coastal cells in this component (excluding
-            # cells already occupied by a city).
+            # Find candidate ocean-coastal cells in this component
+            # (excluding cells already occupied by a city).
             coastal_candidates = sorted(
                 (
                     Coord(x, y)
                     for (x, y) in comp
                     if Coord(x, y) not in placed_set
-                    and self._is_coastal_land(terrain_grid, Coord(x, y), profile)
+                    and _is_ocean_coastal(Coord(x, y), ocean)
                 ),
                 key=lambda c: (c.x, c.y),
             )
             if not coastal_candidates:
-                continue  # this component has no usable coastal cell
+                continue  # no ocean-coastal cell available in this component
 
             # Try each city in this component as the candidate to relocate,
             # in a deterministic order. For each, find the first coastal
@@ -329,20 +316,17 @@ class HeightFieldMapGenerator(MapGenerator):
         profile: MapProfile,
     ) -> bool:
         """Every connected land component containing at least one city must
-        have at least one city adjacent (8-direction) to a water tile.
+        have at least one **ocean-coastal** city — a city with a neighbor
+        in water that's connected to the map border.
 
-        Reasons this matters:
-        - Per spec §3.2, sea units may only occupy a CITY tile when it is
-          "adjacent to water (treated as a port)." A continent with only
-          inland cities literally cannot build or host transports — anyone
-          starting there is stranded.
-        - Symmetrically, an enemy cannot invade such a continent by sea,
-          making its cities unconquerable and the game uninteresting.
+        Inner-sea adjacency doesn't count: a city on an inland lake can't
+        host transports that reach the open sea.
         """
         if not city_coords:
             return True
 
         width, height = profile.width, profile.height
+        ocean = _compute_ocean(terrain_grid, profile)
 
         def in_bounds(x: int, y: int) -> bool:
             return 0 <= x < width and 0 <= y < height
@@ -355,9 +339,6 @@ class HeightFieldMapGenerator(MapGenerator):
                 x, y = stack.pop()
                 if (x, y) in comp or not in_bounds(x, y):
                     continue
-                # At this stage city locations are tracked in city_coords;
-                # terrain_grid still has LAND/WATER only (CITY is baked in
-                # during _build_tiles).
                 if terrain_grid[y][x] is not TerrainKind.LAND:
                     continue
                 comp.add((x, y))
@@ -376,26 +357,8 @@ class HeightFieldMapGenerator(MapGenerator):
             comp = component_of(city_coord.x, city_coord.y)
             visited.update(comp)
 
-            # Cities in this component.
             cities_in_comp = [c for c in city_coords if (c.x, c.y) in comp]
-
-            # At least one must be coastal.
-            has_coastal = False
-            for city in cities_in_comp:
-                for dy in (-1, 0, 1):
-                    for dx in (-1, 0, 1):
-                        if dx == 0 and dy == 0:
-                            continue
-                        nx, ny = city.x + dx, city.y + dy
-                        if in_bounds(nx, ny) and terrain_grid[ny][nx] is TerrainKind.WATER:
-                            has_coastal = True
-                            break
-                    if has_coastal:
-                        break
-                if has_coastal:
-                    break
-
-            if not has_coastal:
+            if not any(_is_ocean_coastal(c, ocean) for c in cities_in_comp):
                 return False
 
         return True
@@ -441,3 +404,98 @@ class HeightFieldMapGenerator(MapGenerator):
                         city=None, on_board=on_board,
                     )
         return tiles
+
+
+# -----------------------------------------------------------------------------
+# Ocean topology helpers (module-level so they're easy to test/reuse).
+# -----------------------------------------------------------------------------
+
+
+def _compute_ocean(
+    terrain_grid: list[list[TerrainKind]],
+    profile: MapProfile,
+) -> set[tuple[int, int]]:
+    """The set of water cells reachable (8-direction) from the map border.
+
+    Water bodies disconnected from the border are *inner seas* and are
+    excluded from this set. The border ring itself is always water (per
+    spec §1.1), so the BFS seed is every border cell.
+    """
+    ocean: set[tuple[int, int]] = set()
+    stack: list[tuple[int, int]] = []
+    for x in range(profile.width):
+        stack.append((x, 0))
+        stack.append((x, profile.height - 1))
+    for y in range(profile.height):
+        stack.append((0, y))
+        stack.append((profile.width - 1, y))
+    while stack:
+        x, y = stack.pop()
+        if (x, y) in ocean:
+            continue
+        if not (0 <= x < profile.width and 0 <= y < profile.height):
+            continue
+        if terrain_grid[y][x] is not TerrainKind.WATER:
+            continue
+        ocean.add((x, y))
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                stack.append((x + dx, y + dy))
+    return ocean
+
+
+def _compute_ocean_accessible_land(
+    terrain_grid: list[list[TerrainKind]],
+    ocean: set[tuple[int, int]],
+    profile: MapProfile,
+) -> set[tuple[int, int]]:
+    """Set of land cells in continents that touch the ocean.
+
+    A continent (connected LAND component) is ocean-accessible iff at
+    least one of its cells has an ocean neighbor. Inner-island
+    continents — landmasses sitting inside inner seas, with no
+    border-connected water adjacency — are excluded.
+    """
+    accessible: set[tuple[int, int]] = set()
+    visited: set[tuple[int, int]] = set()
+    for sy in range(profile.height):
+        for sx in range(profile.width):
+            if (sx, sy) in visited or terrain_grid[sy][sx] is not TerrainKind.LAND:
+                continue
+            comp: set[tuple[int, int]] = set()
+            stack: list[tuple[int, int]] = [(sx, sy)]
+            has_ocean_neighbor = False
+            while stack:
+                x, y = stack.pop()
+                if (x, y) in comp:
+                    continue
+                if not (0 <= x < profile.width and 0 <= y < profile.height):
+                    continue
+                if terrain_grid[y][x] is not TerrainKind.LAND:
+                    continue
+                comp.add((x, y))
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        if dx == 0 and dy == 0:
+                            continue
+                        nx, ny = x + dx, y + dy
+                        if (nx, ny) in ocean:
+                            has_ocean_neighbor = True
+                        stack.append((nx, ny))
+            visited.update(comp)
+            if has_ocean_neighbor:
+                accessible.update(comp)
+    return accessible
+
+
+def _is_ocean_coastal(coord: Coord, ocean: set[tuple[int, int]]) -> bool:
+    """True if `coord` has at least one ocean neighbor (8-direction)."""
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                continue
+            if (coord.x + dx, coord.y + dy) in ocean:
+                return True
+    return False

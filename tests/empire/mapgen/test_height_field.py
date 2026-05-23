@@ -156,17 +156,42 @@ def test_interior_cells_are_on_board(profile: MapProfile, seed: int) -> None:
         assert m.tile(Coord(x, y)).on_board is True
 
 
+def _ocean_set(m: Map) -> set[Coord]:
+    """Water cells in `m` reachable (8-direction) from the border."""
+    ocean: set[Coord] = set()
+    stack: list[Coord] = []
+    for x in range(m.width):
+        stack.append(Coord(x, 0))
+        stack.append(Coord(x, m.height - 1))
+    for y in range(m.height):
+        stack.append(Coord(0, y))
+        stack.append(Coord(m.width - 1, y))
+    while stack:
+        c = stack.pop()
+        if c in ocean or not m.in_bounds(c):
+            continue
+        if m.terrain_at(c) is not TerrainKind.WATER:
+            continue
+        ocean.add(c)
+        stack.extend(c.neighbors())
+    return ocean
+
+
 @pytest.mark.parametrize(("profile", "seed"), PROFILE_SEED_CASES)
-def test_every_continent_with_cities_has_a_coastal_city(
+def test_every_continent_with_cities_has_an_ocean_coastal_city(
     profile: MapProfile, seed: int,
 ) -> None:
-    """A landlocked continent's cities can't host transports (spec §3.2)
-    and can't be invaded by sea — anyone starting there is stranded and
-    anyone trying to attack can't reach. The generator must regenerate
-    until every land component with cities has at least one coastal city.
+    """A continent with cities must have at least one **ocean-coastal**
+    city — adjacent to water that's connected to the map border.
+
+    Adjacency to inner seas alone is insufficient: a city on an inland
+    lake can't host transports that reach the open sea (no naval path
+    out), and an enemy can't invade by sea (no path in). Either way the
+    continent is a strategic dead-end.
     """
     gen = HeightFieldMapGenerator()
     m, cities = gen.generate(profile, random.Random(seed))
+    ocean = _ocean_set(m)
 
     # Walk every connected LAND+CITY component that contains a city.
     visited: set[Coord] = set()
@@ -185,18 +210,18 @@ def test_every_continent_with_cities_has_a_coastal_city(
             stack.extend(c.neighbors())
         visited.update(component)
 
-        # Cities in this component.
+        # At least one city in this component must have an ocean neighbor.
         cities_in_comp = [c for c in cities if c.coord in component]
-        # At least one must have a water neighbor.
-        has_coastal = any(
-            m.in_bounds(n) and m.terrain_at(n) is TerrainKind.WATER
+        has_ocean_coastal = any(
+            n in ocean
             for city in cities_in_comp
             for n in city.coord.neighbors()
         )
-        assert has_coastal, (
-            f"Landlocked continent: cities at "
+        assert has_ocean_coastal, (
+            f"Stranded continent: cities at "
             f"{[(c.coord.x, c.coord.y) for c in cities_in_comp]} have no "
-            f"water neighbors. (Continent size: {len(component)} cells.)"
+            f"ocean neighbors (continent size: {len(component)} cells; "
+            f"may touch only inner seas)."
         )
 
 
