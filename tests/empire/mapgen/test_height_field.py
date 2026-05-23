@@ -181,6 +181,108 @@ def _ocean_set(m: Map) -> set[Coord]:
     return {c for c in visited if m.tile(c).on_board}
 
 
+def _on_board_water_components(m: Map) -> list[set[Coord]]:
+    """Connected components of on-board water cells (8-direction, no border
+    bridging). Each component is a separately-navigable sea."""
+    components: list[set[Coord]] = []
+    visited: set[Coord] = set()
+    for y in range(1, m.height - 1):
+        for x in range(1, m.width - 1):
+            c = Coord(x, y)
+            if c in visited or m.terrain_at(c) is not TerrainKind.WATER:
+                continue
+            comp: set[Coord] = set()
+            stack: list[Coord] = [c]
+            while stack:
+                cur = stack.pop()
+                if cur in comp:
+                    continue
+                if not (1 <= cur.x <= m.width - 2 and 1 <= cur.y <= m.height - 2):
+                    continue
+                if m.terrain_at(cur) is not TerrainKind.WATER:
+                    continue
+                comp.add(cur)
+                stack.extend(cur.neighbors())
+            visited.update(comp)
+            components.append(comp)
+    return components
+
+
+@pytest.mark.parametrize(("profile", "seed"), PROFILE_SEED_CASES)
+def test_all_city_bearing_continents_are_naval_reachable(
+    profile: MapProfile, seed: int,
+) -> None:
+    """No city-bearing continent may be naval-isolated from the others.
+
+    Per the playability constraint: every continent with cities must be
+    able to reach at least one other city-bearing continent via the sea
+    (possibly multi-hop, via intermediate continents). The naval-
+    reachability graph (continents as nodes, edges for shared on-board
+    water components) must have all city-bearing continents in a single
+    connected component.
+    """
+    gen = HeightFieldMapGenerator()
+    m, cities = gen.generate(profile, random.Random(seed))
+
+    # Find city-bearing continents.
+    visited: set[Coord] = set()
+    city_continents: list[set[Coord]] = []
+    for city in cities:
+        if city.coord in visited:
+            continue
+        comp: set[Coord] = set()
+        stack: list[Coord] = [city.coord]
+        while stack:
+            c = stack.pop()
+            if c in comp or not m.in_bounds(c):
+                continue
+            if m.terrain_at(c) not in {TerrainKind.LAND, TerrainKind.CITY}:
+                continue
+            comp.add(c)
+            stack.extend(c.neighbors())
+        visited.update(comp)
+        city_continents.append(comp)
+
+    if len(city_continents) <= 1:
+        return  # vacuous
+
+    water_components = _on_board_water_components(m)
+
+    def adjacent_water_comps(cont: set[Coord]) -> set[int]:
+        adj: set[int] = set()
+        for cell in cont:
+            for n in cell.neighbors():
+                for wi, wc in enumerate(water_components):
+                    if n in wc:
+                        adj.add(wi)
+                        break
+        return adj
+
+    cont_waters = [adjacent_water_comps(c) for c in city_continents]
+    n = len(city_continents)
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if cont_waters[i] & cont_waters[j]:
+                pa, pb = find(i), find(j)
+                if pa != pb:
+                    parent[pa] = pb
+
+    roots = {find(i) for i in range(n)}
+    assert len(roots) == 1, (
+        f"Naval-isolated continents: {len(roots)} disconnected groups in the "
+        f"reachability graph; some continents with cities cannot be reached "
+        f"from others by sea."
+    )
+
+
 @pytest.mark.parametrize(("profile", "seed"), PROFILE_SEED_CASES)
 def test_every_continent_with_cities_has_an_ocean_coastal_city(
     profile: MapProfile, seed: int,
