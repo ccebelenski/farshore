@@ -228,29 +228,68 @@ class HeightFieldMapGenerator(MapGenerator):
         rng: random.Random,
         naval_eligible_land: set[tuple[int, int]],
     ) -> list[Coord]:
-        """Greedy random placement restricted to continents in the largest
-        naval-reachability component.
+        """Stratified placement: spread cities across a 4x4 spatial grid
+        before falling back to greedy fill.
 
-        Continents that can't reach others by sea (isolated landmasses,
-        inner islands) are filtered out — cities placed there would be
-        unreachable to opponents and unable to send transports anywhere.
+        Restricted to land cells in the largest naval-reachability component
+        (continents that can't reach others by sea get no cities).
+
+        Two passes:
+        1. Round-robin one city per grid cell (in shuffled cell order, so
+           the spatial distribution is randomized but balanced). This
+           prevents clusters where random placement happens to favor one
+           area of the map and leaves another sparse.
+        2. Fill remaining cities greedily from remaining candidates across
+           all cells. Still respects min_city_distance.
         """
-        candidates: list[Coord] = [
-            Coord(x, y)
-            for y in range(1, profile.height - 1)
-            for x in range(1, profile.width - 1)
-            if terrain_grid[y][x] is TerrainKind.LAND
-            and (x, y) in naval_eligible_land
-        ]
-        rng.shuffle(candidates)
+        width, height = profile.width, profile.height
+        d = profile.min_city_distance
+        grid_w, grid_h = 4, 4
+        cell_w = max(1, width // grid_w)
+        cell_h = max(1, height // grid_h)
+
+        # Bucket eligible candidates by their grid cell.
+        grid_candidates: dict[tuple[int, int], list[Coord]] = {}
+        for y in range(1, height - 1):
+            for x in range(1, width - 1):
+                if terrain_grid[y][x] is TerrainKind.LAND and (x, y) in naval_eligible_land:
+                    cx = min(x // cell_w, grid_w - 1)
+                    cy = min(y // cell_h, grid_h - 1)
+                    grid_candidates.setdefault((cx, cy), []).append(Coord(x, y))
+
+        # Shuffle each cell's candidates independently for randomized
+        # placement within cells.
+        for cands in grid_candidates.values():
+            rng.shuffle(cands)
 
         placed: list[Coord] = []
-        d = profile.min_city_distance
-        for c in candidates:
+
+        # Pass 1: round-robin across cells.
+        cell_keys = list(grid_candidates.keys())
+        rng.shuffle(cell_keys)
+        for cell_key in cell_keys:
             if len(placed) >= profile.num_cities:
                 break
-            if all(c.chebyshev_to(p) >= d for p in placed):
-                placed.append(c)
+            for cand in grid_candidates[cell_key]:
+                if all(cand.chebyshev_to(p) >= d for p in placed):
+                    placed.append(cand)
+                    break
+
+        # Pass 2: greedy fill from remaining candidates.
+        placed_set = set(placed)
+        remaining = [
+            c
+            for cands in grid_candidates.values()
+            for c in cands
+            if c not in placed_set
+        ]
+        rng.shuffle(remaining)
+        for cand in remaining:
+            if len(placed) >= profile.num_cities:
+                break
+            if all(cand.chebyshev_to(p) >= d for p in placed):
+                placed.append(cand)
+
         return placed
 
     # ---- touch-up: relocate landlocked cities to coastal cells -----------
