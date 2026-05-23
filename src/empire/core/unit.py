@@ -131,7 +131,7 @@ class Army(Unit):
     symbol = "A"
 
     def attack_preferences(self) -> str:
-        return "AOTPDSCBF"  # placeholder; tuned during Phase 6
+        return "ATFPDCSB"
 
 
 class Fighter(Unit):
@@ -146,7 +146,7 @@ class Fighter(Unit):
     symbol = "F"
 
     def attack_preferences(self) -> str:
-        return "FACTPDSBO"
+        return "FATCDSPB"
 
 
 class Patrol(Unit):
@@ -161,7 +161,7 @@ class Patrol(Unit):
     symbol = "P"
 
     def attack_preferences(self) -> str:
-        return "POTDSCBAF"
+        return "PTDSCBAF"
 
 
 class Destroyer(Unit):
@@ -176,7 +176,7 @@ class Destroyer(Unit):
     symbol = "D"
 
     def attack_preferences(self) -> str:
-        return "SDPOTCBAF"
+        return "DSPTCBAF"
 
 
 class Submarine(Unit):
@@ -191,7 +191,7 @@ class Submarine(Unit):
     symbol = "S"
 
     def attack_preferences(self) -> str:
-        return "TOCBPDSAF"
+        return "TCBPDSAF"
 
 
 class Transport(Unit):
@@ -221,7 +221,7 @@ class Carrier(Unit):
     symbol = "C"
 
     def attack_preferences(self) -> str:
-        return "TPDSCOBAF"
+        return "CTPDSBAF"
 
 
 class Battleship(Unit):
@@ -236,7 +236,7 @@ class Battleship(Unit):
     symbol = "B"
 
     def attack_preferences(self) -> str:
-        return "BCSDPTOAF"
+        return "BCSDPTAF"
 
 
 class Satellite(Unit):

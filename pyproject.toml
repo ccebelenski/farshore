@@ -87,6 +87,15 @@ reportUnknownMemberType = "none"
 reportUnknownVariableType = "none"
 reportUnknownArgumentType = "none"
 
+# Tests use pytest features (approx, monkeypatch, etc.) whose type stubs
+# leave many parameters as Unknown. Relax those specific warnings here;
+# we still want full strict typing on the production code in src/.
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+reportUnknownMemberType = "none"
+reportUnknownVariableType = "none"
+reportUnknownArgumentType = "none"
+
 # -----------------------------------------------------------------------------
 # Pytest
 # -----------------------------------------------------------------------------
