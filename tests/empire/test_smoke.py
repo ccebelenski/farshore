@@ -31,4 +31,6 @@ def test_package_importable(pkg: str) -> None:
 def test_entrypoint_runs() -> None:
     from empire.__main__ import main
 
-    assert main() == 0
+    # Pass empty argv so argparse doesn't read pytest's argv when running
+    # under the test suite. Without args, the CLI prints help and returns 0.
+    assert main([]) == 0

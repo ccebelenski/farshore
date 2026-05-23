@@ -1,10 +1,6 @@
-"""Entry point for `python -m empire` / `empire`. Phase 0: stub."""
+"""Entry point for `python -m empire`. Dispatches to `empire.cli`."""
 
-
-def main() -> int:
-    print("empire: not yet implemented (Phase 0 skeleton)")
-    return 0
-
+from empire.cli import main
 
 if __name__ == "__main__":
     raise SystemExit(main())
