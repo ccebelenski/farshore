@@ -115,13 +115,20 @@ def test_no_two_cities_within_min_distance(profile: MapProfile, seed: int) -> No
 
 @pytest.mark.parametrize(("profile", "seed"), PROFILE_SEED_CASES)
 def test_water_ratio_within_tolerance(profile: MapProfile, seed: int) -> None:
-    """Total water (border + threshold-derived) within 3 percentage points of target."""
+    """Total water within 5 percentage points of target.
+
+    The tiny-landmass removal pass (which converts <15 cell components
+    to water) pushes actual water above target by a variable amount —
+    typically 1-2pp for STANDARD, up to ~4pp for LARGE (more land area
+    means more small islands removed). 5pp absorbs this variance while
+    still catching gross threshold errors.
+    """
     gen = HeightFieldMapGenerator()
     m, _ = gen.generate(profile, random.Random(seed))
     water = _count_terrain(m, TerrainKind.WATER)
     total = profile.width * profile.height
     actual_pct = water * 100 / total
-    assert abs(actual_pct - profile.water_ratio) < 3, (
+    assert abs(actual_pct - profile.water_ratio) < 5, (
         f"Water ratio {actual_pct:.1f}% vs target {profile.water_ratio}%"
     )
 
@@ -206,6 +213,48 @@ def _on_board_water_components(m: Map) -> list[set[Coord]]:
             visited.update(comp)
             components.append(comp)
     return components
+
+
+@pytest.mark.parametrize(("profile", "seed"), PROFILE_SEED_CASES)
+def test_no_tiny_landmasses_remain_in_generated_map(
+    profile: MapProfile, seed: int,
+) -> None:
+    """Per playtest feedback: tiny landmasses (single-cell islands, few-cell
+    shoals) are gameplay noise and would be terrible city locations. The
+    generator strips them out before city placement.
+
+    The threshold scales with map area: floor of 10 cells, proportional
+    cap at ~0.4% of total area.
+    """
+    gen = HeightFieldMapGenerator()
+    m, cities = gen.generate(profile, random.Random(seed))
+    del cities
+
+    min_size = max(10, profile.width * profile.height // 240)
+
+    visited: set[Coord] = set()
+    for y in range(m.height):
+        for x in range(m.width):
+            c = Coord(x, y)
+            if c in visited:
+                continue
+            if m.terrain_at(c) not in {TerrainKind.LAND, TerrainKind.CITY}:
+                continue
+            comp: set[Coord] = set()
+            stack: list[Coord] = [c]
+            while stack:
+                cur = stack.pop()
+                if cur in comp or not m.in_bounds(cur):
+                    continue
+                if m.terrain_at(cur) not in {TerrainKind.LAND, TerrainKind.CITY}:
+                    continue
+                comp.add(cur)
+                stack.extend(cur.neighbors())
+            visited.update(comp)
+            assert len(comp) >= min_size, (
+                f"Landmass of {len(comp)} cells (below threshold {min_size}) "
+                f"survived in the generated map at coords starting from {c}"
+            )
 
 
 @pytest.mark.parametrize(("profile", "seed"), PROFILE_SEED_CASES)

@@ -13,6 +13,10 @@ Algorithm (designed for this project; see
    (spec §1.1). They participate in the BFS as connectivity bridges but
    are not themselves part of any navigable water body — units cannot
    occupy them.
+4a. Drop tiny landmasses (< per-profile minimum, scaling with map area).
+    Single-cell islands and few-cell shoals aren't gameplay-meaningful
+    and would be terrible city locations. Convert them to water before
+    proceeding.
 5. Compute **on-board water components** (8-direction, on-board only,
    NO border bridging). Each component is a separate navigable sea.
 6. Compute land continents (8-direction LAND+CITY connectivity).
@@ -107,10 +111,13 @@ class HeightFieldMapGenerator(MapGenerator):
         threshold = self._compute_threshold(heights, profile)
         terrain_grid = self._build_terrain_grid(heights, threshold, profile)
 
-        # Topology analysis. The naval-reachability check supersedes the
-        # earlier "ocean-accessible" filter — a continent in the largest
-        # naval CC necessarily touches water, but additionally is part of
-        # a network that lets ships sail between continents.
+        # Drop tiny landmasses: a single-cell or near-single-cell island is
+        # gameplay noise and a bad city location (no land neighbors for
+        # the army to step out onto, no room for naval bases). Convert
+        # anything below the per-profile minimum size to water.
+        self._remove_tiny_landmasses(terrain_grid, profile)
+
+        # Topology analysis (on the cleaned terrain).
         water_components = _compute_water_components(terrain_grid, profile)
         continents = _compute_land_continents(terrain_grid, profile)
         largest_cc = _largest_naval_cc(continents, water_components)
@@ -122,6 +129,36 @@ class HeightFieldMapGenerator(MapGenerator):
         city_coords = self._place_cities(terrain_grid, profile, rng, naval_eligible_land)
         city_coords = self._touch_up_landlocked(terrain_grid, city_coords, profile, ocean)
         return terrain_grid, city_coords
+
+    def _remove_tiny_landmasses(
+        self, terrain_grid: list[list[TerrainKind]], profile: MapProfile,
+    ) -> None:
+        """Convert any LAND component smaller than the per-profile minimum
+        size to WATER in place.
+
+        Tiny landmasses (1-cell islands, few-cell shoals) aren't meaningful
+        gameplay terrain — they can't host meaningful city play and just
+        clutter the map. Per playtest feedback, we strip them at the
+        terrain stage so city placement and naval analysis only see real
+        landmasses.
+        """
+        min_size = self._min_continent_size(profile)
+        for cont in _compute_land_continents(terrain_grid, profile):
+            if len(cont) < min_size:
+                for (x, y) in cont:
+                    terrain_grid[y][x] = TerrainKind.WATER
+
+    @staticmethod
+    def _min_continent_size(profile: MapProfile) -> int:
+        """Minimum cells for a landmass to be retained. Scales with map area.
+
+        Floor of 15 cells (catches seed 64's 10-cell-island problem and
+        anything below) with a proportional cap at ~0.4% of total area
+        for larger maps. Removing landmasses pushes the actual water
+        ratio above target; the water_ratio test tolerance accommodates
+        the resulting variance.
+        """
+        return max(15, profile.width * profile.height // 240)
 
     # ---- height-field operations ------------------------------------------
 
