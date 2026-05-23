@@ -18,11 +18,15 @@ Algorithm (designed for this project; see
    each one whose Chebyshev distance to every already-placed city is
    `>= min_city_distance`. Stop when `num_cities` placed or the
    shuffled candidates are exhausted.
-6. Verify every connected land component that contains cities has at
-   least one coastal city (a city adjacent to a water tile). A
-   landlocked continent's cities are unconquerable by sea, which
-   trivializes the game — fail this attempt if any violation found.
-7. If we couldn't place enough cities or any continent is landlocked,
+6. Touch up landlocked continents: if any connected land component
+   contains cities but none are coastal, relocate one of that
+   component's cities to a coastal cell within the same component
+   (subject to the same min-distance constraint against other cities).
+   This is surgical — only the offending city moves; the rest of the
+   map and other cities are preserved.
+7. As a safety net, verify every continent with cities has a coastal
+   city. If touch-up couldn't satisfy this (rare: tiny continent with
+   no coastal cell, or all candidates blocked by neighbor distances),
    regenerate the height field and try again, up to
    `max_regen_attempts`. Failure raises `MapGenerationError`.
 """
@@ -93,6 +97,7 @@ class HeightFieldMapGenerator(MapGenerator):
         threshold = self._compute_threshold(heights, profile)
         terrain_grid = self._build_terrain_grid(heights, threshold, profile)
         city_coords = self._place_cities(terrain_grid, profile, rng)
+        city_coords = self._touch_up_landlocked(terrain_grid, city_coords, profile)
         return terrain_grid, city_coords
 
     # ---- height-field operations ------------------------------------------
@@ -162,17 +167,14 @@ class HeightFieldMapGenerator(MapGenerator):
         profile: MapProfile,
         rng: random.Random,
     ) -> list[Coord]:
-        """Greedy placement biased toward coastal cells.
+        """Greedy random placement. Shuffle interior LAND cells; accept each
+        one whose Chebyshev distance to every already-placed city is `>=
+        min_city_distance`.
 
-        Candidates are shuffled then stable-sorted with coastal cells first.
-        This naturally satisfies the "every continent with cities has at
-        least one coastal city" invariant — by the time we run out of
-        coastal candidates and start placing inland, any continent that
-        was going to get cities has already gotten its coastal one.
-
-        Inland cities are still placed for the remaining slots (after
-        all coastal candidates have been consumed or are too close to
-        existing cities).
+        No coastal bias is applied here — that would push too many cities
+        to coasts and make maps feel artificial. Instead,
+        `_touch_up_landlocked` is the surgical fix for the rare case where
+        random placement leaves a continent with only inland cities.
         """
         candidates: list[Coord] = [
             Coord(x, y)
@@ -181,11 +183,6 @@ class HeightFieldMapGenerator(MapGenerator):
             if terrain_grid[y][x] is TerrainKind.LAND
         ]
         rng.shuffle(candidates)
-        # Stable sort: coastal first, inland second. Within each group the
-        # random order from shuffle is preserved.
-        candidates.sort(
-            key=lambda c: 0 if self._is_coastal_land(terrain_grid, c, profile) else 1
-        )
 
         placed: list[Coord] = []
         d = profile.min_city_distance
@@ -215,6 +212,113 @@ class HeightFieldMapGenerator(MapGenerator):
                 ):
                     return True
         return False
+
+    # ---- touch-up: relocate landlocked cities to coastal cells -----------
+
+    def _touch_up_landlocked(
+        self,
+        terrain_grid: list[list[TerrainKind]],
+        city_coords: list[Coord],
+        profile: MapProfile,
+    ) -> list[Coord]:
+        """If any connected land component has cities but none are coastal,
+        relocate one of that component's cities to a coastal cell on the
+        same component.
+
+        Constraints on the replacement coastal cell:
+        - Must be in the same connected land component as the city being
+          relocated (so the move stays "local" — same continent).
+        - Must be at least `min_city_distance` from every OTHER placed
+          city (excluding the city being moved).
+        - Must not coincide with an already-placed city.
+
+        If no valid relocation exists for some component (rare: tiny
+        islands with no coastal cells, or all coastal candidates blocked
+        by neighbor distances), the city list is returned with that
+        component still landlocked. `_all_continents_have_coastal_cities`
+        will then return False and the engine regenerates as the final
+        fallback.
+
+        Determinism: components and candidate coastal cells are processed
+        in a deterministic order (sorted by coord), so the same input
+        produces the same output. No additional RNG draws are made.
+        """
+        if not city_coords:
+            return list(city_coords)
+
+        width, height = profile.width, profile.height
+        d = profile.min_city_distance
+
+        def in_bounds(x: int, y: int) -> bool:
+            return 0 <= x < width and 0 <= y < height
+
+        def component_of(start_x: int, start_y: int) -> set[tuple[int, int]]:
+            comp: set[tuple[int, int]] = set()
+            stack = [(start_x, start_y)]
+            while stack:
+                x, y = stack.pop()
+                if (x, y) in comp or not in_bounds(x, y):
+                    continue
+                if terrain_grid[y][x] is not TerrainKind.LAND:
+                    continue
+                comp.add((x, y))
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        if dx == 0 and dy == 0:
+                            continue
+                        stack.append((x + dx, y + dy))
+            return comp
+
+        result: list[Coord] = list(city_coords)
+        placed_set: set[Coord] = set(result)
+        components_done: set[tuple[int, int]] = set()
+
+        for seed_city in city_coords:
+            key = (seed_city.x, seed_city.y)
+            if key in components_done:
+                continue
+            comp = component_of(seed_city.x, seed_city.y)
+            components_done.update(comp)
+
+            cities_in_comp = [c for c in result if (c.x, c.y) in comp]
+            # If any city in this component is coastal, nothing to fix.
+            if any(self._is_coastal_land(terrain_grid, c, profile) for c in cities_in_comp):
+                continue
+
+            # Find candidate coastal cells in this component (excluding
+            # cells already occupied by a city).
+            coastal_candidates = sorted(
+                (
+                    Coord(x, y)
+                    for (x, y) in comp
+                    if Coord(x, y) not in placed_set
+                    and self._is_coastal_land(terrain_grid, Coord(x, y), profile)
+                ),
+                key=lambda c: (c.x, c.y),
+            )
+            if not coastal_candidates:
+                continue  # this component has no usable coastal cell
+
+            # Try each city in this component as the candidate to relocate,
+            # in a deterministic order. For each, find the first coastal
+            # candidate that respects min_distance against all OTHER cities.
+            cities_in_comp_sorted = sorted(cities_in_comp, key=lambda c: (c.x, c.y))
+            relocated = False
+            for city_to_move in cities_in_comp_sorted:
+                other_cities = [c for c in result if c is not city_to_move]
+                for coastal in coastal_candidates:
+                    if all(coastal.chebyshev_to(o) >= d for o in other_cities):
+                        result.remove(city_to_move)
+                        placed_set.discard(city_to_move)
+                        result.append(coastal)
+                        placed_set.add(coastal)
+                        relocated = True
+                        break
+                if relocated:
+                    break
+            # If no relocation possible, leave as-is; the safety net catches it.
+
+        return result
 
     # ---- continent / coastal validation ----------------------------------
 
