@@ -209,24 +209,30 @@ def _on_board_water_components(m: Map) -> list[set[Coord]]:
 
 
 @pytest.mark.parametrize(("profile", "seed"), PROFILE_SEED_CASES)
-def test_all_city_bearing_continents_are_naval_reachable(
+def test_every_city_continent_has_a_paired_city(
     profile: MapProfile, seed: int,
 ) -> None:
-    """No city-bearing continent may be naval-isolated from the others.
+    """Every city-bearing continent must contain at least one city that is
+    naval-paired with a city on a different continent.
 
-    Per the playability constraint: every continent with cities must be
-    able to reach at least one other city-bearing continent via the sea
-    (possibly multi-hop, via intermediate continents). The naval-
-    reachability graph (continents as nodes, edges for shared on-board
-    water components) must have all city-bearing continents in a single
-    connected component.
+    A "naval pair" requires two cities (on different continents) both
+    adjacent to the same on-board water component. Continent-level water
+    sharing isn't sufficient: ships need to disembark at a destination
+    *city* (for direct naval invasion) rather than on an unsettled beach,
+    so the pairing must be city-to-city, not just continent-to-continent.
     """
     gen = HeightFieldMapGenerator()
     m, cities = gen.generate(profile, random.Random(seed))
 
-    # Find city-bearing continents.
+    if len(cities) <= 1:
+        return
+
+    water_components = _on_board_water_components(m)
+
+    # Map each city's coord to its continent index.
     visited: set[Coord] = set()
-    city_continents: list[set[Coord]] = []
+    continent_of: dict[Coord, int] = {}
+    next_idx = 0
     for city in cities:
         if city.coord in visited:
             continue
@@ -241,45 +247,31 @@ def test_all_city_bearing_continents_are_naval_reachable(
             comp.add(c)
             stack.extend(c.neighbors())
         visited.update(comp)
-        city_continents.append(comp)
+        for cell in comp:
+            continent_of[cell] = next_idx
+        next_idx += 1
 
-    if len(city_continents) <= 1:
-        return  # vacuous
+    # For each water component, which continents have cities adjacent?
+    comp_continents: dict[int, set[int]] = {}
+    for city in cities:
+        for n in city.coord.neighbors():
+            for wi, wc in enumerate(water_components):
+                if n in wc:
+                    comp_continents.setdefault(wi, set()).add(continent_of[city.coord])
+                    break
 
-    water_components = _on_board_water_components(m)
+    useful = {wi for wi, cs in comp_continents.items() if len(cs) >= 2}
+    paired: set[int] = set()
+    for wi in useful:
+        paired.update(comp_continents[wi])
 
-    def adjacent_water_comps(cont: set[Coord]) -> set[int]:
-        adj: set[int] = set()
-        for cell in cont:
-            for n in cell.neighbors():
-                for wi, wc in enumerate(water_components):
-                    if n in wc:
-                        adj.add(wi)
-                        break
-        return adj
-
-    cont_waters = [adjacent_water_comps(c) for c in city_continents]
-    n = len(city_continents)
-    parent = list(range(n))
-
-    def find(x: int) -> int:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    for i in range(n):
-        for j in range(i + 1, n):
-            if cont_waters[i] & cont_waters[j]:
-                pa, pb = find(i), find(j)
-                if pa != pb:
-                    parent[pa] = pb
-
-    roots = {find(i) for i in range(n)}
-    assert len(roots) == 1, (
-        f"Naval-isolated continents: {len(roots)} disconnected groups in the "
-        f"reachability graph; some continents with cities cannot be reached "
-        f"from others by sea."
+    all_city_continents = {continent_of[c.coord] for c in cities}
+    unpaired = all_city_continents - paired
+    assert not unpaired, (
+        f"City-bearing continents without a city pair: {sorted(unpaired)} "
+        f"(out of {sorted(all_city_continents)}). Each such continent has "
+        f"cities but none of them sit on a water component that also has "
+        f"a city from another continent."
     )
 
 

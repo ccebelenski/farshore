@@ -82,7 +82,7 @@ class HeightFieldMapGenerator(MapGenerator):
             if (
                 len(city_coords) >= profile.num_cities
                 and self._all_continents_have_coastal_cities(terrain_grid, chosen, profile)
-                and self._city_continents_naval_reachable(terrain_grid, chosen, profile)
+                and self._every_city_continent_has_paired_city(terrain_grid, chosen, profile)
             ):
                 return self._assemble(terrain_grid, chosen, profile)
             self._last_regen_count = attempt + 1
@@ -92,8 +92,8 @@ class HeightFieldMapGenerator(MapGenerator):
             f"min_distance={profile.min_city_distance} num_cities={profile.num_cities} "
             f"after {self._max_regen_attempts} attempts. Either packing failed, "
             f"some continent ended up without a coastal city, or some city-bearing "
-            f"continent ended up isolated from the others by sea. Relax water_ratio, "
-            f"num_cities, or min_city_distance."
+            f"continent had no city on a water component shared with another "
+            f"continent's city. Relax water_ratio, num_cities, or min_city_distance."
         )
 
     # ---- one attempt ------------------------------------------------------
@@ -385,31 +385,37 @@ class HeightFieldMapGenerator(MapGenerator):
 
     # ---- naval reachability validation -----------------------------------
 
-    def _city_continents_naval_reachable(
+    def _every_city_continent_has_paired_city(
         self,
         terrain_grid: list[list[TerrainKind]],
         city_coords: list[Coord],
         profile: MapProfile,
     ) -> bool:
-        """All continents containing cities must be in the same connected
-        component of the naval-reachability graph.
+        """Every city-bearing continent must contain at least one city that
+        is naval-paired with a city on a different continent.
 
-        Edges in that graph are "two continents share an on-board water
-        component." Transitive reachability via intermediate continents is
-        captured by graph connectivity — a transport from A could sail to
-        intermediate continent B, then disembark, march overland on B,
-        re-embark from B's other coast, and sail to C.
+        A "naval pair" is two cities (on different continents) both adjacent
+        to the same on-board water component. This guarantees a transport
+        from one can disembark armies directly at the other's location
+        (not just on a beach), so naval invasion is bidirectional.
 
-        If only one (or zero) continents have cities, the constraint is
-        vacuously satisfied.
+        Continent-level water-component sharing is necessary but not
+        sufficient: continents X and Y may share comp W (X has a coastal
+        cell on W, Y has a coastal cell on W), but if neither X nor Y has
+        a CITY adjacent to W, ships there can only land on beaches and
+        march overland. This stronger check requires the cities themselves
+        to be paired.
         """
-        if not city_coords:
+        if len(city_coords) <= 1:
             return True
 
-        # BFS each city-bearing continent.
         width, height = profile.width, profile.height
+        water_components = _compute_water_components(terrain_grid, profile)
+
+        # Map each city's coord to its continent index.
         visited: set[tuple[int, int]] = set()
-        city_continents: list[set[tuple[int, int]]] = []
+        continent_of: dict[tuple[int, int], int] = {}
+        next_idx = 0
         for city in city_coords:
             key = (city.x, city.y)
             if key in visited:
@@ -431,37 +437,33 @@ class HeightFieldMapGenerator(MapGenerator):
                             continue
                         stack.append((x + dx, y + dy))
             visited.update(comp)
-            city_continents.append(comp)
+            for cell in comp:
+                continent_of[cell] = next_idx
+            next_idx += 1
 
-        if len(city_continents) <= 1:
-            return True
+        # For each water component, gather continents that have CITIES
+        # adjacent to it.
+        comp_to_city_continents: dict[int, set[int]] = {}
+        for city in city_coords:
+            for n in city.neighbors():
+                for wi, wc in enumerate(water_components):
+                    if (n.x, n.y) in wc:
+                        comp_to_city_continents.setdefault(wi, set()).add(
+                            continent_of[(city.x, city.y)]
+                        )
+                        break
 
-        water_components = _compute_water_components(terrain_grid, profile)
-        cont_waters = [
-            _continent_water_adjacency(c, water_components) for c in city_continents
-        ]
+        # Useful water comps: those with cities from ≥2 distinct continents.
+        useful_comps = {wi for wi, conts in comp_to_city_continents.items() if len(conts) >= 2}
 
-        n = len(city_continents)
-        parent = list(range(n))
+        # Every city-bearing continent must contain ≥1 city adjacent to a
+        # useful water comp.
+        city_bearing_continents = {continent_of[(c.x, c.y)] for c in city_coords}
+        paired_continents: set[int] = set()
+        for wi in useful_comps:
+            paired_continents.update(comp_to_city_continents[wi])
 
-        def find(x: int) -> int:
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
-
-        def union(a: int, b: int) -> None:
-            pa, pb = find(a), find(b)
-            if pa != pb:
-                parent[pa] = pb
-
-        for i in range(n):
-            for j in range(i + 1, n):
-                if cont_waters[i] & cont_waters[j]:
-                    union(i, j)
-
-        roots = {find(i) for i in range(n)}
-        return len(roots) == 1
+        return city_bearing_continents == paired_continents
 
     # ---- assembly ---------------------------------------------------------
 
