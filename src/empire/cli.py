@@ -290,6 +290,29 @@ def _build_parser() -> argparse.ArgumentParser:
         help="AI controller for both players (default: null)",
     )
 
+    validate = subs.add_parser(
+        "validate",
+        help="Phase 10 gate: N seeded BaselineAI vs BaselineAI games + save/load check",
+    )
+    validate.add_argument(
+        "--profile",
+        choices=list(_PROFILES.keys()),
+        default="SMALL",
+        help="Map profile (default: SMALL — fast enough for 50+ games)",
+    )
+    validate.add_argument(
+        "--games", type=int, default=50,
+        help="Number of games to run (default: 50)",
+    )
+    validate.add_argument(
+        "--turn-cap", type=int, default=500,
+        help="Hard turn cap per game (default: 500)",
+    )
+    validate.add_argument(
+        "--base-seed", type=int, default=0,
+        help="First seed; later games use base_seed+i (default: 0)",
+    )
+
     return parser
 
 
@@ -311,6 +334,18 @@ def main(argv: list[str] | None = None) -> int:
             args.turns,
             show_final_map=not args.no_map,
             controller=args.controller,
+        ))
+        return 0
+
+    if args.command == "validate":
+        from empire._validation import run_validation
+
+        profile = _PROFILES[args.profile]
+        print(run_validation(
+            profile=profile,
+            num_games=args.games,
+            turn_cap=args.turn_cap,
+            base_seed=args.base_seed,
         ))
         return 0
 
