@@ -194,7 +194,10 @@ _LEGAL_PAIRS: list[tuple[UnitKind, UnitKind]] = [
 
 @pytest.mark.parametrize(("att_kind", "def_kind"), _LEGAL_PAIRS)
 def test_empirical_win_rate_matches_analytical(
-    att_kind: UnitKind, def_kind: UnitKind, p1: Player, p2: Player,
+    att_kind: UnitKind,
+    def_kind: UnitKind,
+    p1: Player,
+    p2: Player,
 ) -> None:
     """For every legal pair: run N seeded duels and compare the empirical
     attacker-win rate against the analytical `win_probability`.
@@ -241,7 +244,10 @@ _HP_CROSSCHECK_PAIRS = [
 
 @pytest.mark.parametrize(("att_kind", "def_kind"), _HP_CROSSCHECK_PAIRS)
 def test_evaluator_expected_hp_matches_empirical_mean(
-    att_kind: UnitKind, def_kind: UnitKind, p1: Player, p2: Player,
+    att_kind: UnitKind,
+    def_kind: UnitKind,
+    p1: Player,
+    p2: Player,
 ) -> None:
     """`CombatEvaluator.expected_outcome` returns predicted E[attacker HP] and
     E[defender HP]. These should match the empirical means from many seeded

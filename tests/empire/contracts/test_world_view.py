@@ -74,7 +74,9 @@ def test_remembered_tiles_exposes_only_remembered_set(
 ) -> None:
     m, p1, _ = two_player_setup
     p1.view.remembered[Coord(2, 2)] = RememberedTile(
-        coord=Coord(2, 2), terrain=TerrainKind.LAND, remembered_at=3,
+        coord=Coord(2, 2),
+        terrain=TerrainKind.LAND,
+        remembered_at=3,
     )
     wv = WorldView(real_map=m, player=p1, turn=5, rules=STANDARD)
     remembered = wv.remembered_tiles()
@@ -126,7 +128,9 @@ def test_known_enemy_cities_requires_visibility_or_memory() -> None:
     # Move it to remembered — it still appears (stale-but-known).
     p1.view.visible.remove(Coord(6, 6))
     p1.view.remembered[Coord(6, 6)] = RememberedTile(
-        coord=Coord(6, 6), terrain=TerrainKind.CITY, remembered_at=0,
+        coord=Coord(6, 6),
+        terrain=TerrainKind.CITY,
+        remembered_at=0,
     )
     assert [c.id for c in wv.known_enemy_cities] == [CityId(5)]
 
@@ -175,7 +179,10 @@ def test_known_enemy_units_from_remembered(
         hits=2,
     )
     p1.view.remembered[Coord(3, 3)] = RememberedTile(
-        coord=Coord(3, 3), terrain=TerrainKind.WATER, remembered_at=2, last_units=[snap],
+        coord=Coord(3, 3),
+        terrain=TerrainKind.WATER,
+        remembered_at=2,
+        last_units=[snap],
     )
     wv = WorldView(real_map=m, player=p1, turn=6, rules=STANDARD)
     known = wv.known_enemy_units

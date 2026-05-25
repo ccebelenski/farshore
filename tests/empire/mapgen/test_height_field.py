@@ -24,8 +24,7 @@ from empire.mapgen.height_field import HeightFieldMapGenerator
 
 def _count_terrain(m: Map, kind: TerrainKind) -> int:
     return sum(
-        1 for x in range(m.width) for y in range(m.height)
-        if m.terrain_at(Coord(x, y)) is kind
+        1 for x in range(m.width) for y in range(m.height) if m.terrain_at(Coord(x, y)) is kind
     )
 
 
@@ -106,7 +105,7 @@ def test_no_two_cities_within_min_distance(profile: MapProfile, seed: int) -> No
     _, cities = gen.generate(profile, random.Random(seed))
     coords = [c.coord for c in cities]
     for i, a in enumerate(coords):
-        for b in coords[i + 1:]:
+        for b in coords[i + 1 :]:
             assert a.chebyshev_to(b) >= profile.min_city_distance, (
                 f"Cities at {a} and {b} are only {a.chebyshev_to(b)} apart; "
                 f"need >= {profile.min_city_distance}"
@@ -217,7 +216,8 @@ def _on_board_water_components(m: Map) -> list[set[Coord]]:
 
 @pytest.mark.parametrize(("profile", "seed"), PROFILE_SEED_CASES)
 def test_no_tiny_landmasses_remain_in_generated_map(
-    profile: MapProfile, seed: int,
+    profile: MapProfile,
+    seed: int,
 ) -> None:
     """Per playtest feedback: tiny landmasses (single-cell islands, few-cell
     shoals) are gameplay noise and would be terrible city locations. The
@@ -259,7 +259,8 @@ def test_no_tiny_landmasses_remain_in_generated_map(
 
 @pytest.mark.parametrize(("profile", "seed"), PROFILE_SEED_CASES)
 def test_every_city_continent_has_a_paired_city(
-    profile: MapProfile, seed: int,
+    profile: MapProfile,
+    seed: int,
 ) -> None:
     """Every city-bearing continent must contain at least one city that is
     naval-paired with a city on a different continent.
@@ -326,7 +327,8 @@ def test_every_city_continent_has_a_paired_city(
 
 @pytest.mark.parametrize(("profile", "seed"), PROFILE_SEED_CASES)
 def test_every_continent_with_cities_has_an_ocean_coastal_city(
-    profile: MapProfile, seed: int,
+    profile: MapProfile,
+    seed: int,
 ) -> None:
     """A continent with cities must have at least one **ocean-coastal**
     city — adjacent to water that's connected to the map border.
@@ -360,9 +362,7 @@ def test_every_continent_with_cities_has_an_ocean_coastal_city(
         # At least one city in this component must have an ocean neighbor.
         cities_in_comp = [c for c in cities if c.coord in component]
         has_ocean_coastal = any(
-            n in ocean
-            for city in cities_in_comp
-            for n in city.coord.neighbors()
+            n in ocean for city in cities_in_comp for n in city.coord.neighbors()
         )
         assert has_ocean_coastal, (
             f"Stranded continent: cities at "
@@ -374,7 +374,8 @@ def test_every_continent_with_cities_has_an_ocean_coastal_city(
 
 @pytest.mark.parametrize(("profile", "seed"), PROFILE_SEED_CASES)
 def test_at_least_one_meaningful_connected_landmass(
-    profile: MapProfile, seed: int,
+    profile: MapProfile,
+    seed: int,
 ) -> None:
     """Per `planning/01-game-rules-spec.md` §9.1 and `planning/05-implementation-plan.md`
     Phase-5 exit gate: the generated map must have at least one connected
@@ -389,7 +390,8 @@ def test_at_least_one_meaningful_connected_landmass(
     m, _ = gen.generate(profile, random.Random(seed))
     land_or_city_coords = [
         Coord(x, y)
-        for y in range(profile.height) for x in range(profile.width)
+        for y in range(profile.height)
+        for x in range(profile.width)
         if m.terrain_at(Coord(x, y)) in {TerrainKind.LAND, TerrainKind.CITY}
     ]
     if not land_or_city_coords:
@@ -407,9 +409,7 @@ def test_at_least_one_meaningful_connected_landmass(
     # A meaningful landmass: at least 50 connected cells, well above
     # pepper-noise scale. Continent-scale connectivity is a quality target
     # for later algorithm work.
-    assert largest >= 50, (
-        f"Largest connected region has only {largest} cells; expected ≥ 50"
-    )
+    assert largest >= 50, f"Largest connected region has only {largest} cells; expected ≥ 50"
 
 
 # --- determinism -------------------------------------------------------------
@@ -434,7 +434,9 @@ def test_different_seeds_produce_different_maps() -> None:
     m2, _ = gen.generate(STANDARD_PROFILE, random.Random(2))
     # Many cells should differ between two unrelated seeds.
     differing = sum(
-        1 for x in range(STANDARD_PROFILE.width) for y in range(STANDARD_PROFILE.height)
+        1
+        for x in range(STANDARD_PROFILE.width)
+        for y in range(STANDARD_PROFILE.height)
         if m1.terrain_at(Coord(x, y)) is not m2.terrain_at(Coord(x, y))
     )
     # Even smoothing produces some cells that match by coincidence, but at least
@@ -459,9 +461,12 @@ def test_impossible_profile_raises_after_max_attempts() -> None:
     no possible packing.
     """
     impossible = MapProfile(
-        width=10, height=10,
-        water_ratio=99, smooth_iterations=2,
-        num_cities=50, min_city_distance=3,
+        width=10,
+        height=10,
+        water_ratio=99,
+        smooth_iterations=2,
+        num_cities=50,
+        min_city_distance=3,
     )
     gen = HeightFieldMapGenerator(max_regen_attempts=3)
     with pytest.raises(MapGenerationError, match="Could not produce valid map"):

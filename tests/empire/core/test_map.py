@@ -262,7 +262,9 @@ def test_view_map_seen_includes_remembered_coords() -> None:
 
     v = ViewMap()
     v.remembered[Coord(5, 5)] = RememberedTile(
-        coord=Coord(5, 5), terrain=TerrainKind.LAND, remembered_at=2,
+        coord=Coord(5, 5),
+        terrain=TerrainKind.LAND,
+        remembered_at=2,
     )
     assert v.seen(Coord(5, 5)) is True
     assert v.seen(Coord(0, 0)) is False

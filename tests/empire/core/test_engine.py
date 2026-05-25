@@ -206,8 +206,12 @@ def test_army_attacks_adjacent_enemy(p1: Player, p2: Player) -> None:
     resolver = CombatResolver()
     rng = random.Random(0)
     outcome = execute_unit_path(
-        unit=a, path=((1, 0),), real_map=m,
-        rules=STANDARD, combat_resolver=resolver, rng=rng,
+        unit=a,
+        path=((1, 0),),
+        real_map=m,
+        rules=STANDARD,
+        combat_resolver=resolver,
+        rng=rng,
     )
     # Combat resolves; one of the two armies dies.
     assert len(outcome.units_destroyed) == 1
@@ -224,11 +228,16 @@ def test_army_captures_neutral_city_with_deterministic_rules(p1: Player) -> None
     m.place_unit(army, Coord(0, 0))
 
     from dataclasses import replace
+
     rules = replace(STANDARD, army_capture_city_deterministic=True)
 
     outcome = execute_unit_path(
-        unit=army, path=((1, 0),), real_map=m,
-        rules=rules, combat_resolver=CombatResolver(), rng=random.Random(0),
+        unit=army,
+        path=((1, 0),),
+        real_map=m,
+        rules=rules,
+        combat_resolver=CombatResolver(),
+        rng=random.Random(0),
     )
     assert outcome.steps_taken == 1
     assert outcome.cities_captured == (CityId(1),)
@@ -254,8 +263,11 @@ def test_capture_failure_destroys_army_when_nondeterministic(p1: Player) -> None
     assert failing_seed is not None
 
     outcome = execute_unit_path(
-        unit=army, path=((1, 0),), real_map=m,
-        rules=STANDARD, combat_resolver=CombatResolver(),
+        unit=army,
+        path=((1, 0),),
+        real_map=m,
+        rules=STANDARD,
+        combat_resolver=CombatResolver(),
         rng=random.Random(failing_seed),
     )
     assert outcome.steps_taken == 0
@@ -356,9 +368,7 @@ def test_production_orders_change_target(p1: Player) -> None:
         def plan_turn(self, view: object) -> TurnPlan:
             del view
             return TurnPlan(
-                production_orders=(
-                    ProductionOrder(city_id=CityId(1), target=UnitKind.FIGHTER),
-                ),
+                production_orders=(ProductionOrder(city_id=CityId(1), target=UnitKind.FIGHTER),),
             )
 
         def revise_move(self, unit_id: UnitId, surprise: object, view: object) -> UnitMove:

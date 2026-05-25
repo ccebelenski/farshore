@@ -34,7 +34,9 @@ def _build_tiny_game() -> Game:
     p2 = Player(id=PlayerId(2), name="Bob", is_ai=True, view=ViewMap(), color="blue")
 
     city1 = City(
-        id=CityId(1), coord=Coord(0, 0), owner=p1,
+        id=CityId(1),
+        coord=Coord(0, 0),
+        owner=p1,
         production=ProductionState(building=UnitKind.ARMY, work=2),
     )
     city1.default_orders[UnitKind.ARMY] = OrderKind.ATTACK_NEAREST_ENEMY
@@ -52,7 +54,10 @@ def _build_tiny_game() -> Game:
     for city in (city1, city2, neutral):
         tile = tiles[city.coord]
         tiles[city.coord] = Tile(
-            coord=tile.coord, terrain=TerrainKind.CITY, city=city, on_board=tile.on_board,
+            coord=tile.coord,
+            terrain=TerrainKind.CITY,
+            city=city,
+            on_board=tile.on_board,
         )
     real_map = Map(width=4, height=4, tiles=tiles)
 
@@ -67,11 +72,16 @@ def _build_tiny_game() -> Game:
     p1.view.visible.add(Coord(0, 0))
     p1.view.visible.add(Coord(1, 0))
     p1.view.remembered[Coord(3, 3)] = RememberedTile(
-        coord=Coord(3, 3), terrain=TerrainKind.CITY, remembered_at=4,
+        coord=Coord(3, 3),
+        terrain=TerrainKind.CITY,
+        remembered_at=4,
         last_units=[
             UnitSnapshot(
-                unit_id=UnitId(99), kind=UnitKind.DESTROYER, owner_id=PlayerId(2),
-                coord=Coord(3, 3), hits=2,
+                unit_id=UnitId(99),
+                kind=UnitKind.DESTROYER,
+                owner_id=PlayerId(2),
+                coord=Coord(3, 3),
+                hits=2,
             ),
         ],
         last_city_owner=PlayerId(2),
@@ -275,8 +285,9 @@ def test_load_rejects_unknown_intermediate_version_with_no_migration(
 
 def test_round_trip_with_custom_ruleset() -> None:
     """A non-STANDARD ruleset (toggles flipped) round-trips correctly."""
-    profile = MapProfile(width=4, height=4, water_ratio=50, smooth_iterations=2,
-                        num_cities=2, min_city_distance=2)
+    profile = MapProfile(
+        width=4, height=4, water_ratio=50, smooth_iterations=2, num_cities=2, min_city_distance=2
+    )
     custom = RuleSet(
         name="STACKED",
         map_profile=profile,
@@ -286,7 +297,8 @@ def test_round_trip_with_custom_ruleset() -> None:
     )
     tiles = {
         Coord(x, y): Tile(coord=Coord(x, y), terrain=TerrainKind.LAND)
-        for x in range(4) for y in range(4)
+        for x in range(4)
+        for y in range(4)
     }
     g = Game(
         rules=custom,

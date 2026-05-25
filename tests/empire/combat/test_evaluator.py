@@ -91,7 +91,8 @@ def test_zero_one_outcomes_for_transport_have_certain_hp(p1: Player, p2: Player)
 
 
 def test_expected_outcome_marginals_are_within_valid_bounds(
-    p1: Player, p2: Player,
+    p1: Player,
+    p2: Player,
 ) -> None:
     """Output bounds sanity: win prob in [0,1]; expected HPs in [0, max_hp]."""
     b = _make(UnitKind.BATTLESHIP, p1)
@@ -123,10 +124,10 @@ def test_full_probability_distribution_sums_to_one(p1: Player, p2: Player) -> No
     total = 0.0
     # Attacker wins: end at (k, 0) for k in 1..att_hp.
     for k in range(1, att_hp + 1):
-        total += math.comb(att_hp + def_hp - k - 1, def_hp - 1) * (p ** def_hp) * (q ** (att_hp - k))
+        total += math.comb(att_hp + def_hp - k - 1, def_hp - 1) * (p**def_hp) * (q ** (att_hp - k))
     # Defender wins: end at (0, k) for k in 1..def_hp.
     for k in range(1, def_hp + 1):
-        total += math.comb(att_hp + def_hp - k - 1, att_hp - 1) * (q ** att_hp) * (p ** (def_hp - k))
+        total += math.comb(att_hp + def_hp - k - 1, att_hp - 1) * (q**att_hp) * (p ** (def_hp - k))
 
     assert total == pytest.approx(1.0, abs=1e-9)
 

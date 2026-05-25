@@ -42,13 +42,15 @@ def test_astar_same_cost_as_bfs_on_open_map() -> None:
 
 
 def test_astar_same_cost_with_water_obstacle() -> None:
-    m = _build_map([
-        "LLWLL",
-        "LLWLL",
-        "LLWLL",
-        "LLWLL",
-        "LLLLL",
-    ])
+    m = _build_map(
+        [
+            "LLWLL",
+            "LLWLL",
+            "LLWLL",
+            "LLWLL",
+            "LLLLL",
+        ]
+    )
     a = AStarPathfinder().find_path(Coord(0, 0), Coord(4, 0), m, ARMY)
     b = BFSPathfinder().find_path(Coord(0, 0), Coord(4, 0), m, ARMY)
     assert a is not None and b is not None
@@ -56,13 +58,15 @@ def test_astar_same_cost_with_water_obstacle() -> None:
 
 
 def test_astar_returns_none_for_unreachable() -> None:
-    m = _build_map([
-        "LLWLL",
-        "LLWLL",
-        "LLWLL",
-        "LLWLL",
-        "LLWLL",
-    ])
+    m = _build_map(
+        [
+            "LLWLL",
+            "LLWLL",
+            "LLWLL",
+            "LLWLL",
+            "LLWLL",
+        ]
+    )
     p = AStarPathfinder().find_path(Coord(0, 0), Coord(4, 0), m, ARMY)
     assert p is None
 
@@ -80,15 +84,20 @@ def test_danger_weight_avoids_threatened_cell() -> None:
         return 10.0 if c == Coord(2, 2) else 0.0
 
     profile = PathCostProfile(
-        land_cost=1, water_cost=None, city_cost=1, danger_weight=5.0,
+        land_cost=1,
+        water_cost=None,
+        city_cost=1,
+        danger_weight=5.0,
     )
     p = AStarPathfinder().find_path(
-        Coord(0, 0), Coord(4, 4), m, profile, threat_at=threat,
+        Coord(0, 0),
+        Coord(4, 4),
+        m,
+        profile,
+        threat_at=threat,
     )
     assert p is not None
-    assert Coord(2, 2) not in p.cells, (
-        f"Path went through dangerous cell (2,2): {p.cells}"
-    )
+    assert Coord(2, 2) not in p.cells, f"Path went through dangerous cell (2,2): {p.cells}"
 
 
 def test_danger_weight_zero_does_not_avoid_threat() -> None:
@@ -99,10 +108,17 @@ def test_danger_weight_zero_does_not_avoid_threat() -> None:
         return 100.0  # high threat everywhere
 
     profile = PathCostProfile(
-        land_cost=1, water_cost=None, city_cost=1, danger_weight=0.0,
+        land_cost=1,
+        water_cost=None,
+        city_cost=1,
+        danger_weight=0.0,
     )
     p = AStarPathfinder().find_path(
-        Coord(0, 0), Coord(4, 4), m, profile, threat_at=threat,
+        Coord(0, 0),
+        Coord(4, 4),
+        m,
+        profile,
+        threat_at=threat,
     )
     assert p is not None
     assert p.total_cost == 4  # direct diagonal, unaffected by threat
@@ -121,12 +137,14 @@ def test_path_starts_and_ends_at_correct_cells() -> None:
 
 def test_consecutive_cells_in_path_are_8_neighbors() -> None:
     """Each consecutive pair of cells in the path is a valid 8-direction step."""
-    m = _build_map([
-        "LLLLLLLL",
-        "LLLLLLLL",
-        "LLLLLLLL",
-        "LLLLLLLL",
-    ])
+    m = _build_map(
+        [
+            "LLLLLLLL",
+            "LLLLLLLL",
+            "LLLLLLLL",
+            "LLLLLLLL",
+        ]
+    )
     p = AStarPathfinder().find_path(Coord(0, 0), Coord(7, 3), m, ARMY)
     assert p is not None
     for a, b in zip(p.cells[:-1], p.cells[1:], strict=True):
@@ -142,10 +160,17 @@ def test_view_map_blocks_path_through_unknown() -> None:
     for x in range(5):
         view.visible.add(Coord(x, 0))
     profile = PathCostProfile(
-        land_cost=1, water_cost=None, city_cost=1, unknown_cost=None,
+        land_cost=1,
+        water_cost=None,
+        city_cost=1,
+        unknown_cost=None,
     )
     p = AStarPathfinder().find_path(
-        Coord(0, 0), Coord(4, 4), m, profile, view=view,
+        Coord(0, 0),
+        Coord(4, 4),
+        m,
+        profile,
+        view=view,
     )
     # Can only stay on row 0; can't reach row 4. Unreachable.
     assert p is None

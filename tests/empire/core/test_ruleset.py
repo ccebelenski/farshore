@@ -68,8 +68,11 @@ def test_can_construct_custom_ruleset_overriding_defaults() -> None:
 
 def test_map_profile_is_constructible() -> None:
     p = MapProfile(
-        width=10, height=10,
-        water_ratio=50, smooth_iterations=3,
-        num_cities=4, min_city_distance=3,
+        width=10,
+        height=10,
+        water_ratio=50,
+        smooth_iterations=3,
+        num_cities=4,
+        min_city_distance=3,
     )
     assert p.width == 10

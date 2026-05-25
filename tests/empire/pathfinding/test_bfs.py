@@ -51,13 +51,15 @@ def test_finds_diagonal_shortcut_on_open_land() -> None:
 
 def test_routes_around_water_for_army() -> None:
     """Water column at x=2 forces army to route via row 4 (the only land row crossing)."""
-    m = _build_map([
-        "LLWLL",
-        "LLWLL",
-        "LLWLL",
-        "LLWLL",
-        "LLLLL",
-    ])
+    m = _build_map(
+        [
+            "LLWLL",
+            "LLWLL",
+            "LLWLL",
+            "LLWLL",
+            "LLLLL",
+        ]
+    )
     p = BFSPathfinder().find_path(Coord(0, 0), Coord(4, 0), m, ARMY)
     assert p is not None
     # 4 down + 4 right + 4 up = 12 if pure orthogonal, but with diagonals it's
@@ -71,26 +73,30 @@ def test_routes_around_water_for_army() -> None:
 
 def test_unreachable_returns_none() -> None:
     """Water column completely separates left from right; army can't cross."""
-    m = _build_map([
-        "LLWLL",
-        "LLWLL",
-        "LLWLL",
-        "LLWLL",
-        "LLWLL",
-    ])
+    m = _build_map(
+        [
+            "LLWLL",
+            "LLWLL",
+            "LLWLL",
+            "LLWLL",
+            "LLWLL",
+        ]
+    )
     p = BFSPathfinder().find_path(Coord(0, 0), Coord(4, 0), m, ARMY)
     assert p is None
 
 
 def test_sea_unit_uses_water_path() -> None:
     """Sea profile: navigable water, impassable land."""
-    m = _build_map([
-        "LLWWW",
-        "LLWWW",
-        "LLWWW",
-        "WWWWW",
-        "WWWWW",
-    ])
+    m = _build_map(
+        [
+            "LLWWW",
+            "LLWWW",
+            "LLWWW",
+            "WWWWW",
+            "WWWWW",
+        ]
+    )
     # Start at water (4, 0), goal at water (4, 4).
     p = BFSPathfinder().find_path(Coord(4, 0), Coord(4, 4), m, SEA)
     assert p is not None
@@ -106,7 +112,10 @@ def test_unknown_cells_use_unknown_cost() -> None:
         view.visible.add(Coord(x, 0))
 
     profile = PathCostProfile(
-        land_cost=1, water_cost=None, city_cost=1, unknown_cost=10,
+        land_cost=1,
+        water_cost=None,
+        city_cost=1,
+        unknown_cost=10,
     )
     p = BFSPathfinder().find_path(Coord(0, 0), Coord(4, 2), m, profile, view=view)
     assert p is not None
@@ -125,7 +134,10 @@ def test_unknown_impassable_with_no_unknown_cost() -> None:
         view.visible.add(Coord(x, 0))
 
     profile = PathCostProfile(
-        land_cost=1, water_cost=None, city_cost=1, unknown_cost=None,
+        land_cost=1,
+        water_cost=None,
+        city_cost=1,
+        unknown_cost=None,
     )
     # Goal at (4, 2) is in unknown territory and surrounded by unknown.
     # Should be unreachable since we can't enter unknown cells.
