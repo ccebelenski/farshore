@@ -117,6 +117,8 @@ A simple per-unit greedy AI. For each owned unit, evaluate nearby objectives (ca
 - BFS perimeter expansion lives in `BaselineBFS` or reuses `BFSPathfinder` from `empire.pathfinding` (Phase 7).
 - Target size: a few hundred lines of clean Python. If it's growing past ~800 lines, something is wrong (over-clever weight tuning or strategic layer leakage).
 
+**No swarming.** `BaselineAI` cannot concentrate force: each army independently picks the highest-scoring objective and walks there alone. Against a defended city (50% capture roll, attacker dies on failure) lone armies grind without finishing — the Phase 9 self-play (Apr 2026) showed this clearly: 9-1 territorial leads that never close out the final holdout. Force concentration ("assemble N armies near target, then assault") is a `TaskForce` responsibility in `StrategicAI` (§3.3); it is intentionally out of scope for the baseline. If `BaselineAI` self-play needs to terminate within Phase 10's turn cap, the engine-level fix is a per-side rout/concession rule, not a smarter baseline.
+
 ---
 
 ## 3. `StrategicAI` — the new default

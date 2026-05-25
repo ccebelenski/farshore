@@ -86,6 +86,47 @@ class WorldView:
         """True if `c` is currently in the player's visible set."""
         return c in self._player.view.visible
 
+    def in_bounds(self, c: Coord) -> bool:
+        """True if `c` is an on-board cell (excludes the border ring)."""
+        return self._map.in_bounds(c)
+
+    def terrain_at(self, c: Coord) -> Tile | None:
+        """Return the tile at `c` from the player's perspective.
+
+        Visible coords return the live tile. Remembered coords return a
+        synthesized tile from the last-seen `RememberedTile`. Coords the
+        player has never seen return `None`.
+        """
+        if c in self._player.view.visible:
+            return self._map.tile(c)
+        remembered = self._player.view.remembered.get(c)
+        if remembered is None:
+            return None
+        # Synthesize a Tile-shaped view from RememberedTile. RememberedTile
+        # carries terrain + on_board flags but no city/unit refs, so we
+        # build a fresh Tile with no occupants.
+        # Remembered tiles are always on-board (the border ring is never
+        # visible, so it never enters the remembered set).
+        return Tile(coord=c, terrain=remembered.terrain, on_board=True)
+
+    # ---- raw map access (for AI planners that need pathfinding) ------------
+    #
+    # Pathfinding needs the real `Map` to query terrain on cells the unit may
+    # have never seen but that we model as "unknown_cost". Exposing the Map
+    # here doesn't grant write access — `Map` mutators are package-private
+    # via `_set_coord` on Unit — but AI authors should still treat this as
+    # a tool for planning, not for state inspection (use the typed
+    # accessors above for that).
+
+    def real_map(self) -> Map:
+        """The authoritative `Map`. Reserved for pathfinding helpers that
+        must query terrain on cells the player has not directly observed.
+
+        Most AI code should use `visible_tiles`, `remembered_tiles`, and
+        `terrain_at` instead.
+        """
+        return self._map
+
     # ---- own assets --------------------------------------------------------
 
     @property

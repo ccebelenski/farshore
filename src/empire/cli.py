@@ -86,13 +86,16 @@ def play_game(
     turns: int,
     *,
     show_final_map: bool = True,
+    controller: str = "null",
 ) -> str:
     """Run a game for `turns` rounds with NullControllers, then summarize.
 
     Returns a multi-line string with the per-turn event count, final
     city ownership, and (optionally) the rendered map.
     """
-    from empire.contracts.controller import NullController
+    from empire.ai.baseline import BaselineAI
+    from empire.combat.resolver import CombatResolver
+    from empire.contracts.controller import AIController, NullController
     from empire.core.events import (
         CityCapturedEvent,
         TurnAdvancedEvent,
@@ -192,9 +195,22 @@ def play_game(
     bus.subscribe(UnitRemovedEvent, lambda _e: events.__setitem__("unit_removed", events["unit_removed"] + 1))
     bus.subscribe(CityCapturedEvent, lambda _e: events.__setitem__("city_captured", events["city_captured"] + 1))
 
-    g = Game(rules=STANDARD, real_map=real_map, players=players, seed=seed, event_bus=bus)
+    g = Game(
+        rules=STANDARD,
+        real_map=real_map,
+        players=players,
+        seed=seed,
+        event_bus=bus,
+        combat_resolver=CombatResolver(),
+    )
+
+    def _make_controller() -> AIController:
+        if controller == "baseline":
+            return BaselineAI()
+        return NullController()
+
     for p in players:
-        g.attach_controller(p.id, NullController())
+        g.attach_controller(p.id, _make_controller())
 
     for _ in range(turns):
         g.run_turn()
@@ -267,6 +283,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip rendering the final map",
     )
+    play.add_argument(
+        "--controller",
+        choices=("null", "baseline"),
+        default="null",
+        help="AI controller for both players (default: null)",
+    )
 
     return parser
 
@@ -284,7 +306,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "play":
         print(play_game(
-            args.profile, args.seed, args.turns, show_final_map=not args.no_map,
+            args.profile,
+            args.seed,
+            args.turns,
+            show_final_map=not args.no_map,
+            controller=args.controller,
         ))
         return 0
 
