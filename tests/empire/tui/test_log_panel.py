@@ -1,0 +1,223 @@
+"""`LogPanel` fog-of-war filter tests.
+
+The widget subscribes to `EventBus` and writes filtered lines into its
+embedded `RichLog`. Filter rules:
+  - Turn ticks and GameEnded always show (game-wide events).
+  - Own-unit events (production / movement) always show.
+  - Enemy production / movement show only if the relevant coord is
+    visible or remembered by the viewer.
+  - Unit destruction shows only if the coord is seen.
+  - City capture shows if the city is now own, or its coord is seen.
+
+These tests mount the widget in a minimal Textual app so its `query_one`
+plumbing works, publish events on a bus, then introspect the
+underlying `RichLog.lines` deque to verify which lines were emitted.
+"""
+
+from __future__ import annotations
+
+from textual.app import App, ComposeResult
+from textual.widgets import RichLog
+
+from empire.core.city import City
+from empire.core.coord import Coord
+from empire.core.events import (
+    CityCapturedEvent,
+    GameEndedEvent,
+    TurnAdvancedEvent,
+    UnitMovedEvent,
+    UnitPlacedEvent,
+    UnitRemovedEvent,
+)
+from empire.core.identity import CityId, PlayerId, UnitId
+from empire.core.map import Map, ViewMap
+from empire.core.player import Player
+from empire.core.tile import TerrainKind, Tile
+from empire.core.unit import Army
+from empire.events.bus import EventBus
+from empire.tui.widgets import LogPanel
+
+
+def _land_map(w: int, h: int, cities: dict[Coord, City] | None = None) -> Map:
+    cities = cities or {}
+    tiles: dict[Coord, Tile] = {}
+    for x in range(w):
+        for y in range(h):
+            c = Coord(x, y)
+            if c in cities:
+                tiles[c] = Tile(coord=c, terrain=TerrainKind.CITY, city=cities[c])
+            else:
+                tiles[c] = Tile(coord=c, terrain=TerrainKind.LAND)
+    return Map(width=w, height=h, tiles=tiles)
+
+
+class _LogHost(App[None]):
+    """Minimal app that mounts a single LogPanel for testing."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.panel = LogPanel()
+
+    def compose(self) -> ComposeResult:
+        yield self.panel
+
+
+def _lines(panel: LogPanel) -> list[str]:
+    """Plain-text content of every line in the panel's RichLog."""
+    log = panel.query_one(RichLog)
+    # RichLog.lines is a deque of Strip; each Strip's `.text` is the joined
+    # rendered text (markup tags consumed).
+    return [strip.text for strip in log.lines]
+
+
+async def test_turn_tick_always_logs() -> None:
+    """Game-wide events fire regardless of fog state."""
+    p = Player(id=PlayerId(1), name="P", is_ai=False, view=ViewMap())
+    real_map = _land_map(4, 4)
+    bus = EventBus()
+    host = _LogHost()
+    async with host.run_test():
+        host.panel.attach_to(bus, real_map, p)
+        bus.publish(TurnAdvancedEvent(turn=5))
+        await host.workers.wait_for_complete()
+        assert any("turn 5" in line for line in _lines(host.panel))
+
+
+async def test_own_unit_production_always_logs() -> None:
+    """Own production fires even when the cell isn't 'visible' — the
+    player owns the unit, so fog doesn't apply."""
+    p = Player(id=PlayerId(1), name="P", is_ai=False, view=ViewMap())
+    real_map = _land_map(4, 4)
+    army = Army(UnitId(1), p, Coord(2, 2))
+    real_map.place_unit(army, Coord(2, 2))
+    bus = EventBus()
+    host = _LogHost()
+    async with host.run_test():
+        host.panel.attach_to(bus, real_map, p)
+        # Note: viewer's visible set is empty, but the unit is OURS.
+        bus.publish(UnitPlacedEvent(unit_id=UnitId(1), at=Coord(2, 2)))
+        await host.workers.wait_for_complete()
+        assert any("unit#1" in line for line in _lines(host.panel))
+
+
+async def test_enemy_production_at_unseen_cell_does_not_log() -> None:
+    """The headline fog leak we just fixed: enemy production at an unseen
+    cell must not appear in the log. (Was the "2 armies on turn 5" bug.)"""
+    me = Player(id=PlayerId(1), name="Me", is_ai=False, view=ViewMap())
+    enemy = Player(id=PlayerId(2), name="Enemy", is_ai=True, view=ViewMap())
+    real_map = _land_map(4, 4)
+    # Place an enemy unit somewhere the viewer can't see.
+    enemy_army = Army(UnitId(99), enemy, Coord(3, 3))
+    real_map.place_unit(enemy_army, Coord(3, 3))
+    bus = EventBus()
+    host = _LogHost()
+    async with host.run_test():
+        host.panel.attach_to(bus, real_map, me)
+        bus.publish(UnitPlacedEvent(unit_id=UnitId(99), at=Coord(3, 3)))
+        await host.workers.wait_for_complete()
+        assert not any("unit#99" in line for line in _lines(host.panel))
+
+
+async def test_enemy_production_at_visible_cell_logs() -> None:
+    """Once the viewer can see the cell, enemy events at that cell appear."""
+    me = Player(id=PlayerId(1), name="Me", is_ai=False, view=ViewMap())
+    enemy = Player(id=PlayerId(2), name="Enemy", is_ai=True, view=ViewMap())
+    real_map = _land_map(4, 4)
+    enemy_army = Army(UnitId(99), enemy, Coord(3, 3))
+    real_map.place_unit(enemy_army, Coord(3, 3))
+    me.view.visible.add(Coord(3, 3))
+    bus = EventBus()
+    host = _LogHost()
+    async with host.run_test():
+        host.panel.attach_to(bus, real_map, me)
+        bus.publish(UnitPlacedEvent(unit_id=UnitId(99), at=Coord(3, 3)))
+        await host.workers.wait_for_complete()
+        assert any("unit#99" in line for line in _lines(host.panel))
+
+
+async def test_enemy_movement_at_unseen_cells_does_not_log() -> None:
+    me = Player(id=PlayerId(1), name="Me", is_ai=False, view=ViewMap())
+    enemy = Player(id=PlayerId(2), name="Enemy", is_ai=True, view=ViewMap())
+    real_map = _land_map(4, 4)
+    enemy_army = Army(UnitId(99), enemy, Coord(3, 3))
+    real_map.place_unit(enemy_army, Coord(3, 3))
+    bus = EventBus()
+    host = _LogHost()
+    async with host.run_test():
+        host.panel.attach_to(bus, real_map, me)
+        bus.publish(
+            UnitMovedEvent(unit_id=UnitId(99), from_=Coord(3, 3), to=Coord(2, 3)),
+        )
+        await host.workers.wait_for_complete()
+        assert not any("unit#99" in line for line in _lines(host.panel))
+
+
+async def test_capture_of_own_city_always_logs() -> None:
+    """If the captured city is now ours, log it (great news). Coord
+    visibility doesn't matter — we owned it before *or* we just captured."""
+    me = Player(id=PlayerId(1), name="Me", is_ai=False, view=ViewMap())
+    city = City(id=CityId(1), coord=Coord(3, 3), owner=me)
+    real_map = _land_map(4, 4, cities={Coord(3, 3): city})
+    bus = EventBus()
+    host = _LogHost()
+    async with host.run_test():
+        host.panel.attach_to(bus, real_map, me)
+        bus.publish(
+            CityCapturedEvent(
+                city_id=CityId(1),
+                new_owner_id=me.id,
+                previous_owner_id=None,
+            ),
+        )
+        await host.workers.wait_for_complete()
+        assert any("city#1" in line for line in _lines(host.panel))
+
+
+async def test_capture_of_unseen_enemy_city_does_not_log() -> None:
+    """Enemy-on-enemy or enemy-on-neutral capture in fog: stays hidden."""
+    me = Player(id=PlayerId(1), name="Me", is_ai=False, view=ViewMap())
+    enemy = Player(id=PlayerId(2), name="Enemy", is_ai=True, view=ViewMap())
+    city = City(id=CityId(1), coord=Coord(3, 3), owner=enemy)
+    real_map = _land_map(4, 4, cities={Coord(3, 3): city})
+    bus = EventBus()
+    host = _LogHost()
+    async with host.run_test():
+        host.panel.attach_to(bus, real_map, me)
+        bus.publish(
+            CityCapturedEvent(
+                city_id=CityId(1),
+                new_owner_id=enemy.id,
+                previous_owner_id=None,
+            ),
+        )
+        await host.workers.wait_for_complete()
+        assert not any("city#1" in line for line in _lines(host.panel))
+
+
+async def test_unit_destruction_at_unseen_cell_does_not_log() -> None:
+    """Destruction is treated as a conflict event — only emitted if the
+    coord is visible/remembered. (Can't look up ownership, the unit is
+    already gone.)"""
+    me = Player(id=PlayerId(1), name="Me", is_ai=False, view=ViewMap())
+    real_map = _land_map(4, 4)
+    bus = EventBus()
+    host = _LogHost()
+    async with host.run_test():
+        host.panel.attach_to(bus, real_map, me)
+        bus.publish(
+            UnitRemovedEvent(unit_id=UnitId(99), last_coord=Coord(3, 3)),
+        )
+        await host.workers.wait_for_complete()
+        assert not any("destroyed" in line for line in _lines(host.panel))
+
+
+async def test_game_ended_always_logs() -> None:
+    me = Player(id=PlayerId(1), name="Me", is_ai=False, view=ViewMap())
+    real_map = _land_map(4, 4)
+    bus = EventBus()
+    host = _LogHost()
+    async with host.run_test():
+        host.panel.attach_to(bus, real_map, me)
+        bus.publish(GameEndedEvent(winner_id=me.id, final_turn=42))
+        await host.workers.wait_for_complete()
+        assert any("game over" in line for line in _lines(host.panel))
