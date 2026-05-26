@@ -31,8 +31,17 @@ class LogPanel(VerticalScroll):
     }
     """
 
+    # The log is read-only context for the player; it must not steal focus
+    # from the screen, or screen-level letter bindings stop firing.
+    can_focus = False
+
     def compose(self):  # type: ignore[no-untyped-def]
-        yield RichLog(id="log", wrap=False, highlight=False, markup=False)
+        # `can_focus=False` is critical: RichLog defaults to focusable, and
+        # if it grabs focus from the screen, single-letter keypresses (e,
+        # u, p, etc.) hit the log instead of the PlayScreen bindings.
+        log = RichLog(id="log", wrap=False, highlight=False, markup=False)
+        log.can_focus = False
+        yield log
 
     def attach_to(self, bus: EventBus) -> None:
         """Wire bus subscriptions that append to the log."""

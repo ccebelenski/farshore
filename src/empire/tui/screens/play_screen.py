@@ -21,6 +21,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import Screen
+from textual.widgets import Footer
 
 from empire.contracts.turn_plan import ProductionOrder, TurnPlan, UnitMove
 from empire.core.city import City
@@ -118,6 +119,7 @@ class PlayScreen(Screen[None]):
             yield MapWidget(provider=self._map_view, id="map")
             yield StatusBar(provider=self._status_state, id="status")
             yield LogPanel(id="log")
+            yield Footer()
 
     def on_mount(self) -> None:
         log = self.query_one(LogPanel)
