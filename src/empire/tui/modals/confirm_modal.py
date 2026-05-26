@@ -24,11 +24,14 @@ class ConfirmModal(ModalScreen[bool]):
         align: center middle;
     }
     ConfirmModal > Container {
-        width: auto;
+        width: 60;
         height: auto;
         padding: 1 2;
         background: $surface;
         border: thick $accent;
+    }
+    ConfirmModal Static {
+        width: 100%;
     }
     """
 
