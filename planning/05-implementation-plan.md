@@ -301,7 +301,10 @@ Follow-on from 10.5 hands-on play. Two of classic Empire's most-used commands ne
 
 - **Set direction (Army).** Player gives an Army a fixed cardinal/diagonal heading. The Army walks that way one cell per turn automatically, with no further input, until interrupted by: (a) reaching the coast (Army can't enter water), (b) an enemy unit becoming visible nearby, (c) a city or own unit blocking the cell, (d) the player explicitly waking the unit. Lets the player set a long-range march and stop micromanaging it.
 - **Set patrol path (naval).** Player draws a sequence of cells (one or more turns of travel). Unit walks the path; on reaching the last cell, either stops (one-shot) or reverses (true patrol — design choice TBD).
-- **Persistent sentry (any).** Already conceptually in `OrderKind.SENTRY`; needs to actually be enforced by the engine: a sentried unit doesn't accept auto-cycle and stays put each turn until awakened by an enemy sighting or user wake.
+- **Persistent sentry (any).** Already conceptually in `OrderKind.SENTRY`; needs to actually be enforced by the engine: a sentried unit doesn't accept auto-cycle and stays put each turn until awakened.
+  - **Wake triggers (auto):** an enemy unit enters this unit's scan range; an own unit's combat happens adjacent to it; a previously-unseen city becomes visible nearby. All cause the unit to *un-sentry* and re-enter the next turn's auto-cycle so the player notices.
+  - **Wake trigger (manual):** the player selects the unit and gives any non-sentry order.
+  - **Anti-rule:** a surprise NEVER causes a unit to enter sentry. Half-finished paths just stop for the rest of the current turn; the unit is still free to move next turn under planner control. Auto-sentry-on-surprise would be exactly backwards from the desired behavior — the player would lose visibility on the very units they most need to react with.
 
 **Engine work:**
 - Add `Unit.standing_order: StandingOrder | None`. `StandingOrder` is a value-type union: `Heading(direction)`, `PatrolPath(cells, reverse_on_end)`, `Sentry()`.

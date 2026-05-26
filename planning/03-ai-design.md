@@ -75,7 +75,9 @@ class AIController(ABC):
     def revise_move(self, unit_id: UnitId, surprise: Surprise, view: WorldView) -> UnitMove: ...
 ```
 
-`revise_move` is the only mid-turn entry point. It's scoped to a single unit's next step — strategic state (goals, task forces) is not re-evaluated until the next turn. Most personalities delegate to the unit's `Behavior.revise()`. If no behavior is registered for the situation, the default is a **no-op** (sentry) — undefined behaviors never crash, they just stand still and wait for the next turn's planner to sort things out.
+`revise_move` is the only mid-turn entry point. It's scoped to a single unit's next step — strategic state (goals, task forces) is not re-evaluated until the next turn. Most personalities delegate to the unit's `Behavior.revise()`. If no behavior is registered for the situation, the default is a **stop-this-turn** no-op — undefined behaviors never crash, they just stand still until the next turn's planner picks them up.
+
+**Important distinction.** "Stop this turn" is NOT the same as putting the unit on persistent sentry. Surprises must *never* push a unit into sentry; the correct interaction with sentry is the opposite — a sentried unit that experiences a surprise (enemy enters scan range) auto-wakes. See Phase 10.6 in the implementation plan for the sentry / wake state machine.
 
 ### `Surprise`
 Tagged union describing the event that invalidated a planned move. Lives in `contracts/surprise.py`. Frozen dataclasses:

@@ -6,9 +6,13 @@ The engine drives the round normally; when it asks the human's controller
 for `plan_turn()`, the controller returns the pre-loaded plan and clears
 its slot.
 
-Mid-turn revision is a no-op for now — surprises during the human's plan
-execution become sentry/skip events. A future iteration could pause the
-engine and pop up a "your path was blocked, where to?" prompt.
+Mid-turn revision returns an empty `UnitMove` (no further movement *this
+turn*). This is **not** the same as putting the unit on persistent
+sentry — surprise must never cause a unit to enter sentry. If anything,
+a sentried unit hit by a surprise should auto-*wake* so the player can
+react. Persistent-sentry mechanics land in Phase 10.6; until then,
+revise_move just halts the current path and the next turn's planner
+picks up.
 """
 
 from __future__ import annotations
@@ -45,6 +49,9 @@ class HumanController:
         view: WorldView,
     ) -> UnitMove:
         del surprise, view
-        # Skip the rest of this unit's path. The next turn boundary will let
-        # the human re-plan against the new state.
+        # Stop the rest of this turn's path for *this turn only*. Empty path
+        # = "no more moves this turn". The unit is NOT put into persistent
+        # sentry — auto-sentry on surprise would be exactly backwards from
+        # the desired behavior (surprises should *wake* sentried units, not
+        # silence active ones).
         return UnitMove(unit_id=unit_id)
