@@ -154,14 +154,9 @@ def test_higher_hp_favors_that_side_at_equal_p() -> None:
     assert prob > 0.5
 
 
-def test_expected_winner_hp_for_one_sided_fight() -> None:
-    """When p ≈ 1.0 (defender hopeless), expected attacker HP ≈ full HP."""
-    p1 = Player(id=PlayerId(1), name="P1", is_ai=False, view=ViewMap())
-    p2 = Player(id=PlayerId(2), name="P2", is_ai=True, view=ViewMap())
-    a = _make(UnitKind.ARMY, p1)
-    t = _make(UnitKind.TRANSPORT, p2)
-    o = CombatEvaluator.expected_outcome(a, t)
-    assert o.expected_attacker_hp == pytest.approx(float(a.hits))
+# `test_expected_winner_hp_for_one_sided_fight` lived here; it duplicated
+# `test_zero_one_outcomes_for_transport_have_certain_hp` (same Army-vs-
+# Transport hopeless-defender case, strict subset of assertions).
 
 
 # --- validation parity with resolver -----------------------------------------

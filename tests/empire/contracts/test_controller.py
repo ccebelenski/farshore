@@ -30,10 +30,14 @@ def test_null_controller_satisfies_protocol() -> None:
     assert isinstance(c, AIController)
 
 
-def test_null_controller_satisfies_protocol_via_fixture(
+def test_null_controller_fixture_is_protocol_instance(
     null_controller: AIController,
 ) -> None:
-    """The conftest fixture is typed as AIController; this is the static check."""
+    """The conftest fixture (typed as AIController) satisfies the protocol at
+    runtime. Static-type acceptance is enforced by pyright; here we
+    confirm the runtime `isinstance` check passes too — the previous
+    name promised this but only checked `name()`."""
+    assert isinstance(null_controller, AIController)
     assert null_controller.name() == "Null"
 
 

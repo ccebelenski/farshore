@@ -482,19 +482,16 @@ def test_max_regen_attempts_must_be_positive() -> None:
 # --- spatial index hookup ----------------------------------------------------
 
 
-def test_generated_map_supports_unit_placement() -> None:
-    """A generated Map is a fully-functional Map: units can be placed on its
-    land tiles via the standard Map.place_unit API.
+def test_generator_returns_well_typed_map_and_cities() -> None:
+    """Hook-up sanity: the generator returns a proper Map + City list. The
+    detailed `Map.place_unit` / `units_at` behavior is owned by
+    `tests/empire/core/test_map.py`; this test only confirms the wiring
+    so a mapgen change doesn't silently start returning the wrong type.
     """
-    from empire.core.identity import PlayerId, UnitId
-    from empire.core.map import ViewMap
-    from empire.core.player import Player
-    from empire.core.unit import Army
+    from empire.core.city import City
+    from empire.core.map import Map
 
     gen = HeightFieldMapGenerator()
     m, cities = gen.generate(SMALL, random.Random(0))
-    p = Player(id=PlayerId(1), name="P", is_ai=False, view=ViewMap())
-    # Place an army at the first city's coord (a CITY tile is land-walkable for Army).
-    a = Army(UnitId(1), p, Coord(0, 0))
-    m.place_unit(a, cities[0].coord)
-    assert m.units_at(cities[0].coord) == (a,)
+    assert isinstance(m, Map)
+    assert cities and all(isinstance(c, City) for c in cities)

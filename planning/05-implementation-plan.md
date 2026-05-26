@@ -242,7 +242,10 @@ This is the first phase where the game *plays* anything. Lands movement validati
 
 **Canary tests:**
 - **Self-play stability:** 20 seeded `BaselineAI` vs `BaselineAI` games (seeds 0-19) run to completion without crashing. Game length and final-score distribution are recorded as a golden — sudden shifts are reviewed.
-- **Decision spot-checks:** ~5 canned `WorldView` situations with intuitively-correct decisions (army adjacent to undefended neutral city → moves into city; damaged unit far from any friendly city → routes toward repair; fighter low on fuel → returns to nearest friendly carrier or city). Our `BaselineAI` produces the expected decision.
+- **Decision spot-checks:** canned `WorldView` situations with intuitively-correct decisions. The spec's full list (army adjacent to undefended neutral city → moves into city; damaged unit far from any friendly city → routes toward repair; fighter low on fuel → returns to nearest friendly carrier or city) only partially applies in the Phase-9 *ARMY-only* shipped slice:
+  - "Army adjacent to neutral city → captures" ✔ covered.
+  - "Damaged unit returns to repair" — Army has `max_hits=1`, so it's binary alive/dead with no damaged state to route from. This scenario re-enters scope when Destroyer/Battleship/Carrier decisions are wired (those units don't currently produce under BaselineAI's ARMY-only default build).
+  - "Fighter low on fuel returns to carrier" — Fighter doesn't currently produce or get a decision method. Re-enters scope when Fighter is wired.
 - **Interface adapter:** `BaselineAI.revise_move()` returns a sensible step (re-runs per-unit decision); does not crash on any `Surprise` variant.
 
 **Parallelism:** Significant. Each unit kind gets its own decision method (`army_decide`, `fighter_decide`, `transport_decide`, etc.) — these become methods on `BaselineTactical`, one per kind. After the dispatch skeleton + initial weight tables + objective-scoring helpers are written single-threaded:

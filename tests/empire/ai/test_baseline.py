@@ -93,8 +93,13 @@ def test_revise_move_returns_a_unitmove_for_known_unit() -> None:
         assert out.unit_id == army.id  # No crash; returned a UnitMove.
 
 
-def test_no_objectives_means_sentry() -> None:
-    """With no visible cities/enemies/frontier, the army emits no move."""
+def test_no_objectives_means_no_move() -> None:
+    """With no visible cities/enemies/frontier, the army emits no move.
+
+    (Earlier called "_means_sentry"; renamed because the body asserts no
+    UnitMove was produced — it does not assert a UnitSentry order. The
+    BaselineAI today doesn't emit explicit sentry orders.)
+    """
     p1 = _player(1, "P1")
     real_map = _all_land_map(8, 8)
     army = Army(UnitId(9), p1, Coord(3, 3))

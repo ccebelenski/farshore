@@ -279,9 +279,14 @@ def test_capture_failure_destroys_army_when_nondeterministic(p1: Player) -> None
 # --- end-to-end turn loop with controllers ----------------------------------
 
 
-def test_twenty_turn_hotseat_with_null_controllers(p1: Player, p2: Player) -> None:
-    """Run 20 rounds with both players using NullController. No crashes; the
-    game is essentially idle but the engine runs all phases cleanly.
+def test_twenty_idle_turns_dont_crash(p1: Player, p2: Player) -> None:
+    """Twenty rounds of NullController-vs-NullController on an empty map.
+
+    No units, no cities, so this isn't a 'hotseat' in any meaningful
+    sense — it's an idle-loop check that the turn manager cycles through
+    all three phases (production/movement/scan) for 20 rounds without
+    blowing up on the absence of anything to do. The integration scenario
+    with real units lives in `test_integration_production_movement_combat`.
     """
     m = _build_map(["L" * 8 for _ in range(8)])
     g = Game(rules=STANDARD, real_map=m, players=[p1, p2], seed=0)

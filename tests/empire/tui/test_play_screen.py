@@ -35,12 +35,14 @@ def _build_app(seed: int = 0) -> tuple[EmpireApp, HumanController, EventBus]:
 
 
 async def test_app_boots_and_renders() -> None:
+    """Mount + initial render path. Asserts the app reached a running state
+    with a screen attached — exercising the full PlayScreen.on_mount path
+    (scan, log wire-up, auto-cycle). The context manager handles teardown."""
     app, _, _ = _build_app()
     async with app.run_test(size=(60, 40)) as pilot:
-        # Just sit for a tick to make sure mount + initial render don't crash.
         await pilot.pause()
-        await pilot.press("q")
-    assert True  # crash-free reaching here = pass
+        assert app.is_running
+        assert app.screen is not None
 
 
 async def test_end_turn_advances_engine() -> None:
@@ -51,7 +53,6 @@ async def test_end_turn_advances_engine() -> None:
         await pilot.press("e")
         await pilot.pause()
         after = app.game.turn
-        await pilot.press("q")
     assert after == before + 1, f"turn did not advance: {before} -> {after}"
 
 
@@ -61,7 +62,6 @@ async def test_help_modal_opens_and_dismisses() -> None:
         await pilot.pause()
         await pilot.press("question_mark")
         await pilot.pause()
-        # Some key dismisses the modal.
+        # Any key dismisses HelpModal.
         await pilot.press("space")
         await pilot.pause()
-        await pilot.press("q")

@@ -28,9 +28,6 @@ def test_package_importable(pkg: str) -> None:
     importlib.import_module(pkg)
 
 
-def test_entrypoint_runs() -> None:
-    from empire.__main__ import main
-
-    # Pass empty argv so argparse doesn't read pytest's argv when running
-    # under the test suite. Without args, the CLI prints help and returns 0.
-    assert main([]) == 0
+# `test_entrypoint_runs` lived here; it duplicated
+# `test_cli.py::test_main_with_empty_argv_prints_help_and_returns_zero` which
+# also asserts the captured output. Dropped.
