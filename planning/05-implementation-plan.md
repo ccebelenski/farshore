@@ -295,6 +295,28 @@ Inserted out of plan order because Phase 10's gate run made it clear we'd benefi
 
 ---
 
+## Phase 10.6 — Persistent unit orders (1-2 sessions)
+
+Follow-on from 10.5 hands-on play. Two of classic Empire's most-used commands need cross-turn state on `Unit` that we haven't modeled yet:
+
+- **Set direction (Army).** Player gives an Army a fixed cardinal/diagonal heading. The Army walks that way one cell per turn automatically, with no further input, until interrupted by: (a) reaching the coast (Army can't enter water), (b) an enemy unit becoming visible nearby, (c) a city or own unit blocking the cell, (d) the player explicitly waking the unit. Lets the player set a long-range march and stop micromanaging it.
+- **Set patrol path (naval).** Player draws a sequence of cells (one or more turns of travel). Unit walks the path; on reaching the last cell, either stops (one-shot) or reverses (true patrol — design choice TBD).
+- **Persistent sentry (any).** Already conceptually in `OrderKind.SENTRY`; needs to actually be enforced by the engine: a sentried unit doesn't accept auto-cycle and stays put each turn until awakened by an enemy sighting or user wake.
+
+**Engine work:**
+- Add `Unit.standing_order: StandingOrder | None`. `StandingOrder` is a value-type union: `Heading(direction)`, `PatrolPath(cells, reverse_on_end)`, `Sentry()`.
+- New `TurnManager` step (between production and the controller's plan): for each owned unit with a standing order, apply one step (via the same `execute_unit_path` machinery), then check the interruption rule. Interrupted units have their order cleared and are flagged for the next player turn's auto-cycle.
+- `TurnPlan` gets `set_orders: tuple[SetOrder, ...]` so the controller can set/clear standing orders declaratively.
+
+**TUI work:**
+- New command (`d` for "direction"): with a unit selected, the next direction key sets a heading and immediately marks the unit handled. Persists across turns.
+- New command (`g` for "go to"): cursor designates a target; engine builds a BFS path; unit walks it over multiple turns.
+- Standing order shown in the StatusBar when a unit is selected ("heading: NE" / "patrol: 5 cells" / "sentry").
+
+**Exit gate:** Gates green. A human can set an Army's heading, end-turn several times, and watch it march autonomously; the unit stops on coast/enemy/city/own-unit collision and re-enters auto-cycle.
+
+---
+
 ## Phase 11 — IntelService (2 sessions)
 
 **Deliverable:** `IntelService` produces `IntelReport` with `Threats`, `Opportunities`, `ChokePoints`, `Theaters` from a `WorldView`.

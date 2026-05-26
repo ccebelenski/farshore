@@ -26,11 +26,12 @@ Unit / city:
   Shift+N          previous unit (un-handles it for revision)
   p                set production for own city at cursor
   .                sentry selected unit (skip this turn, go to next)
-  r                reset queued path for selected unit
-  Esc              deselect
+  Esc              deselect (cursor mode)
 
-Each turn, the next unit needing orders is auto-selected.
-Queuing a full move budget auto-advances to the next unit.
+Moves are immediate: with a unit selected, each direction key applies
+one step (combat + city capture resolve live). When the unit's move
+budget is spent, the next unit auto-selects. End the turn with `e`
+to let the AI play.
 
 Turn flow:
   e                end turn (run AI, advance)

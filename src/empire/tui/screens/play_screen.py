@@ -23,9 +23,11 @@ from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import Footer
 
-from empire.contracts.turn_plan import ProductionOrder, TurnPlan, UnitMove
+from empire.contracts.turn_plan import ProductionOrder, TurnPlan
 from empire.core.city import City
 from empire.core.coord import Coord, Direction
+from empire.core.engine import execute_unit_path, scan_set_for_player
+from empire.core.events import CityCapturedEvent, UnitMovedEvent, UnitRemovedEvent
 from empire.core.game import Game
 from empire.core.identity import CityId, UnitId
 from empire.core.player import Player
@@ -111,10 +113,13 @@ class PlayScreen(Screen[None]):
 
         # Selection + plan state.
         self._selected_unit_id: UnitId | None = None
-        self._pending_paths: dict[UnitId, list[Coord]] = {}
+        # Moves the human has spent on each unit this turn. Reset on
+        # end-turn. Used to enforce per-unit move budget across multiple
+        # direction-key presses (each press = one immediate step).
+        self._moves_used: dict[UnitId, int] = {}
         self._pending_production: dict[CityId, UnitKind | None] = {}
-        # Set of unit IDs already given orders (sentried or path-queued) so
-        # the auto-cycle skips them this turn.
+        # Set of unit IDs already given orders this turn (sentried, dead,
+        # or out of moves) so the auto-cycle skips them.
         self._handled: set[UnitId] = set()
         self._hint: str = "press ? for help"
 
@@ -129,7 +134,7 @@ class PlayScreen(Screen[None]):
 
     def on_mount(self) -> None:
         log = self.query_one(LogPanel)
-        log.attach_to(self._bus)
+        log.attach_to(self._bus, self._game.map, self._human)
         # Run an initial scan for the human (prior to first turn) so the
         # capital and its surroundings are visible. The engine does this
         # at end-of-round, but the very first render is before any round.
@@ -169,49 +174,105 @@ class PlayScreen(Screen[None]):
         if d is None:
             return
         if self._selected_unit_id is None:
-            # Move cursor.
+            # No selection: direction keys move the cursor freely.
             new = self._cursor.step(d)
             if self._game.map.in_bounds(new):
                 self._cursor = new
+            self._refresh_view()
+            return
+
+        unit = self._selected_unit()
+        if unit is None:
+            self._selected_unit_id = None
+            self._refresh_view()
+            return
+
+        used = self._moves_used.get(unit.id, 0)
+        budget = unit.moves_this_turn()
+        if used >= budget:
+            self._hint = "unit out of moves this turn"
+            self._handled.add(unit.id)
+            self._advance_to_next_unit()
+            self._refresh_view()
+            return
+
+        target = unit.coord.step(d)
+        if not self._game.map.in_bounds(target):
+            self._hint = "off the map"
+            self._refresh_view()
+            return
+
+        start = unit.coord
+        outcome = execute_unit_path(
+            unit=unit,
+            path=((target.x, target.y),),
+            real_map=self._game.map,
+            rules=self._game.rules,
+            combat_resolver=self._game.combat_resolver,
+            rng=self._game.rng,
+        )
+
+        # Publish the engine's outcome events on the bus so the log picks
+        # them up (engine.execute_unit_path doesn't publish; TurnManager
+        # is what normally does, and we're bypassing it for immediate moves).
+        unit_died = self._game.map.unit_by_id(unit.id) is None
+        if outcome.steps_taken > 0 and not unit_died:
+            self._bus.publish(
+                UnitMovedEvent(unit_id=unit.id, from_=start, to=unit.coord),
+            )
+        for uid in outcome.units_destroyed:
+            self._bus.publish(UnitRemovedEvent(unit_id=uid, last_coord=start))
+        for cid in outcome.cities_captured:
+            self._bus.publish(
+                CityCapturedEvent(
+                    city_id=cid,
+                    new_owner_id=self._human.id,
+                    previous_owner_id=None,
+                ),
+            )
+
+        # Update fog: a step may have revealed (or hidden) tiles.
+        scanned = scan_set_for_player(self._human, self._game.map)
+        self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)
+
+        if unit_died:
+            self._selected_unit_id = None
+            self._handled.add(unit.id)
+            self._hint = f"unit destroyed at ({start.x},{start.y})"
+            self._advance_to_next_unit()
+            self._refresh_view()
+            return
+
+        if outcome.steps_taken > 0:
+            self._moves_used[unit.id] = used + outcome.steps_taken
+            self._cursor = unit.coord
+
+        # Done if out of moves now.
+        if self._moves_used.get(unit.id, 0) >= budget:
+            self._handled.add(unit.id)
+            self._advance_to_next_unit()
         else:
-            # Extend queued path for selected unit by one step.
-            unit = self._selected_unit()
-            if unit is None:
-                self._selected_unit_id = None
-                self._refresh_view()
-                return
-            path = self._pending_paths.setdefault(unit.id, [])
-            head = path[-1] if path else unit.coord
-            new = head.step(d)
-            if self._game.map.in_bounds(new):
-                path.append(new)
-                self._cursor = new
-                # When the queued path fills the unit's move budget, mark
-                # the unit done and auto-advance to the next one.
-                if len(path) >= unit.moves_this_turn():
-                    self._handled.add(unit.id)
-                    self._advance_to_next_unit()
-                else:
-                    self._hint = (
-                        f"queued {len(path)}/{unit.moves_this_turn()} steps; "
-                        f"'n' next, 'r' reset, 'e' end turn"
-                    )
+            remaining = budget - self._moves_used.get(unit.id, 0)
+            self._hint = f"{remaining} move(s) left for this unit"
         self._refresh_view()
 
     def action_select_unit(self) -> None:
-        """Manual free-select: pick the own unit under the cursor, even if
-        it was already given orders this turn. Re-selecting un-handles
-        the unit so direction keys re-queue its path from scratch. The
-        cursor stays where it is — manual selection is for *out-of-order*
-        play, not for centering."""
+        """Manual free-select: take the own unit under the cursor.
+
+        Reuses any remaining moves the unit hasn't spent this turn — we
+        don't refund moves the user already burned (that would defeat the
+        budget). Resuming after auto-cycle skipped it is fine; the unit
+        just continues from where it stopped."""
         for u in self._game.map.units_at(self._cursor):
             if u.owner is self._human:
                 self._selected_unit_id = u.id
+                # Un-handle so direction keys apply moves again (if any
+                # budget remains).
                 self._handled.discard(u.id)
-                self._pending_paths.pop(u.id, None)
+                remaining = u.moves_this_turn() - self._moves_used.get(u.id, 0)
                 self._hint = (
-                    "free-select: direction keys queue path; "
-                    "'n' next, '.' sentry, Esc back to cursor"
+                    f"free-select: {remaining} move(s) left; "
+                    f"direction keys walk, '.' sentry, Esc → cursor"
                 )
                 self._refresh_view()
                 return
@@ -250,19 +311,21 @@ class PlayScreen(Screen[None]):
         self._refresh_view()
 
     def action_sentry(self) -> None:
+        """Skip the rest of this unit's turn — moves left are forfeit."""
         if self._selected_unit_id is None:
             return
-        self._pending_paths.pop(self._selected_unit_id, None)
         self._handled.add(self._selected_unit_id)
         self._advance_to_next_unit()
         self._refresh_view()
 
     def action_reset_path(self) -> None:
+        """Legacy no-op kept for the `r` binding. Immediate moves can't be
+        rolled back once applied (combat may have resolved). Press `r` is
+        now a hint reminder; we leave the binding in place so muscle
+        memory from path-queueing days doesn't crash."""
         if self._selected_unit_id is None:
             return
-        self._pending_paths.pop(self._selected_unit_id, None)
-        self._handled.discard(self._selected_unit_id)
-        self._hint = "path cleared"
+        self._hint = "moves are immediate now — no path to reset"
         self._refresh_view()
 
     def action_production(self) -> None:
@@ -286,8 +349,8 @@ class PlayScreen(Screen[None]):
         self._human_ctrl.set_plan(plan)
         # Reset per-turn state. Production stays committed in the city via
         # the engine; we just clear our scratch dicts.
-        self._pending_paths.clear()
         self._pending_production.clear()
+        self._moves_used.clear()
         self._selected_unit_id = None
         self._handled.clear()
         self._game.run_turn()
@@ -399,21 +462,16 @@ class PlayScreen(Screen[None]):
         self._cursor = unit.coord
 
     def _build_plan(self) -> TurnPlan:
-        moves: list[UnitMove] = []
-        for uid, cells in self._pending_paths.items():
-            if not cells:
-                continue
-            moves.append(
-                UnitMove(unit_id=uid, path=tuple((c.x, c.y) for c in cells)),
-            )
+        """Build the human's TurnPlan for end-of-turn.
 
+        Moves are already applied immediately on key press, so this only
+        carries production orders. Any own city without a build target
+        gets ARMY by default so captured cities don't sit silent.
+        """
         production_orders: list[ProductionOrder] = []
         for cid, kind in self._pending_production.items():
             production_orders.append(ProductionOrder(city_id=cid, target=kind))
 
-        # Also: any own city idle (no building) gets ARMY by default. This
-        # keeps captured cities productive without forcing the player to
-        # micromanage every cell.
         for city in self._game.map.cities():
             if city.owner is not self._human:
                 continue
@@ -424,10 +482,7 @@ class PlayScreen(Screen[None]):
                     ProductionOrder(city_id=city.id, target=UnitKind.ARMY),
                 )
 
-        return TurnPlan(
-            production_orders=tuple(production_orders),
-            moves=tuple(moves),
-        )
+        return TurnPlan(production_orders=tuple(production_orders))
 
     def _refresh_view(self) -> None:
         map_widget = self.query_one("#map", MapWidget)
