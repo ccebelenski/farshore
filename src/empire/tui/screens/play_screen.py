@@ -35,8 +35,15 @@ from empire.core.unit import Unit, UnitKind
 from empire.events.bus import EventBus
 from empire.persistence.save_manager import SaveManager
 from empire.tui.human_controller import HumanController
-from empire.tui.modals import HelpModal, ProductionModal
-from empire.tui.widgets import LogPanel, MapView, MapWidget, StatusBar, StatusState
+from empire.tui.modals import ConfirmModal, HelpModal, ProductionModal
+from empire.tui.widgets import (
+    CursorMode,
+    LogPanel,
+    MapView,
+    MapWidget,
+    StatusBar,
+    StatusState,
+)
 
 # Map keyboard keys to Direction. Numpad first (the design choice in the
 # minimal-TUI plan), then vi-keys as a fallback.
@@ -399,7 +406,17 @@ class PlayScreen(Screen[None]):
         self._refresh_view()
 
     def action_quit(self) -> None:
-        self.app.exit()
+        def _on_answer(confirmed: bool | None) -> None:
+            if confirmed:
+                self.app.exit()
+            else:
+                self._hint = "quit cancelled"
+                self._refresh_view()
+
+        self.app.push_screen(
+            ConfirmModal("Quit Empire? Unsaved progress will be lost."),
+            _on_answer,
+        )
 
     # ---- helpers ----------------------------------------------------------
 
@@ -487,5 +504,20 @@ class PlayScreen(Screen[None]):
     def _refresh_view(self) -> None:
         map_widget = self.query_one("#map", MapWidget)
         map_widget.cursor = self._cursor
+        map_widget.cursor_mode = self._cursor_mode()
         map_widget.refresh()
         self.query_one("#status", StatusBar).refresh_text()
+
+    def _cursor_mode(self) -> CursorMode:
+        """Tri-state cursor color hint:
+          FREE   — no unit selected (cursor wanders the map)
+          ACTIVE — unit selected with unspent moves (direction = walk)
+          IDLE   — unit selected but out of moves (cosmetic — looking)
+        """
+        if self._selected_unit_id is None:
+            return CursorMode.FREE
+        unit = self._selected_unit()
+        if unit is None:
+            return CursorMode.FREE
+        remaining = unit.moves_this_turn() - self._moves_used.get(unit.id, 0)
+        return CursorMode.ACTIVE if remaining > 0 else CursorMode.IDLE

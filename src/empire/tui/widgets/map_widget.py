@@ -3,8 +3,15 @@
 Renders the map cell-by-cell from a `ViewMap`-filtered perspective.
 Visible cells show live terrain + units in bright color; remembered cells
 show last-seen terrain in dim color (no units); unseen cells render as
-blank space. A cursor coordinate, set by the parent screen, draws a
-brackets overlay so the player knows where their selection is.
+blank space. A cursor coordinate, set by the parent screen, draws an
+inverted-color overlay so the player knows where their selection is.
+
+The cursor color encodes the input mode:
+  - `FREE`:    yellow — direction keys move the cursor over the map.
+  - `ACTIVE`:  cyan   — a unit is selected with moves remaining; direction
+                        keys command the unit.
+  - `IDLE`:    grey   — a unit is selected but has no moves left;
+                        direction keys do nothing useful (cosmetic only).
 
 The widget reads `Game` state via a `provider` callback rather than
 holding a reference, so live mutations on the engine side update on
@@ -14,6 +21,7 @@ holding a reference, so live mutations on the engine side update on
 from __future__ import annotations
 
 from collections.abc import Callable
+from enum import Enum
 
 from rich.segment import Segment
 from rich.style import Style
@@ -24,6 +32,14 @@ from empire.core.coord import Coord
 from empire.core.map import Map
 from empire.core.player import Player
 from empire.core.tile import TerrainKind
+
+
+class CursorMode(Enum):
+    """What pressing a direction key would do, used to tint the cursor."""
+
+    FREE = "free"      # no unit selected; cursor moves
+    ACTIVE = "active"  # unit selected with moves left; unit walks
+    IDLE = "idle"      # unit selected but out of moves; cosmetic only
 
 # Symbols. Match the dump-map CLI for consistency.
 _LAND = "."
@@ -45,7 +61,16 @@ _STYLE_CITY_REMEMBERED = Style(color="bright_black", bold=True)
 _STYLE_BORDER = Style(color="bright_black")
 _STYLE_OWN_UNIT = Style(color="cyan", bold=True)
 _STYLE_ENEMY_UNIT = Style(color="red", bold=True)
-_STYLE_CURSOR = Style(color="yellow", bold=True, reverse=True)
+
+# Cursor tint by mode. Reverse-video so the underlying char stays readable.
+_STYLE_CURSOR_FREE = Style(color="yellow", bold=True, reverse=True)
+_STYLE_CURSOR_ACTIVE = Style(color="cyan", bold=True, reverse=True)
+_STYLE_CURSOR_IDLE = Style(color="bright_black", bold=True, reverse=True)
+_CURSOR_STYLES: dict[CursorMode, Style] = {
+    CursorMode.FREE: _STYLE_CURSOR_FREE,
+    CursorMode.ACTIVE: _STYLE_CURSOR_ACTIVE,
+    CursorMode.IDLE: _STYLE_CURSOR_IDLE,
+}
 
 
 class MapWidget(Static):
@@ -66,6 +91,7 @@ class MapWidget(Static):
         super().__init__("", id=id)
         self._provider = provider
         self.cursor: Coord | None = None
+        self.cursor_mode: CursorMode = CursorMode.FREE
 
     # Textual hooks. We override render_line so each line streams without
     # building a giant string each frame.
@@ -93,7 +119,7 @@ class MapWidget(Static):
     def _cell_segment(self, mv: MapView, c: Coord) -> Segment:
         char, style = self._cell_char_and_style(mv, c)
         if self.cursor is not None and c == self.cursor:
-            return Segment(char, _STYLE_CURSOR)
+            return Segment(char, _CURSOR_STYLES[self.cursor_mode])
         return Segment(char, style)
 
     def _cell_char_and_style(self, mv: MapView, c: Coord) -> tuple[str, Style]:
