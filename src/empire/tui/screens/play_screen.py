@@ -70,6 +70,9 @@ class PlayScreen(Screen[None]):
         Binding("question_mark", "help", "help"),
         Binding("e", "end_turn", "end turn"),
         Binding("u", "select_unit", "select unit"),
+        Binding("n", "next_unit", "next unit"),
+        Binding("shift+n", "prev_unit", "prev unit"),
+        Binding("tab", "next_unit", "next unit"),
         Binding("p", "production", "production"),
         Binding("period", "sentry", "sentry"),
         Binding("r", "reset_path", "reset path"),
@@ -110,6 +113,9 @@ class PlayScreen(Screen[None]):
         self._selected_unit_id: UnitId | None = None
         self._pending_paths: dict[UnitId, list[Coord]] = {}
         self._pending_production: dict[CityId, UnitKind | None] = {}
+        # Set of unit IDs already given orders (sentried or path-queued) so
+        # the auto-cycle skips them this turn.
+        self._handled: set[UnitId] = set()
         self._hint: str = "press ? for help"
 
     # ---- composition ------------------------------------------------------
@@ -124,7 +130,6 @@ class PlayScreen(Screen[None]):
     def on_mount(self) -> None:
         log = self.query_one(LogPanel)
         log.attach_to(self._bus)
-        self._refresh_view()
         # Run an initial scan for the human (prior to first turn) so the
         # capital and its surroundings are visible. The engine does this
         # at end-of-round, but the very first render is before any round.
@@ -132,6 +137,10 @@ class PlayScreen(Screen[None]):
 
         scanned = scan_set_for_player(self._human, self._game.map)
         self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)
+        # Auto-select the first unit (if any) so the player doesn't have to
+        # hunt for it. On turn 0 there are no units yet (capital is still
+        # producing), so this is a no-op — the player presses `e` to advance.
+        self._advance_to_next_unit(initial=True)
         self._refresh_view()
 
     # ---- provider callbacks for widgets -----------------------------------
@@ -169,6 +178,7 @@ class PlayScreen(Screen[None]):
             unit = self._selected_unit()
             if unit is None:
                 self._selected_unit_id = None
+                self._refresh_view()
                 return
             path = self._pending_paths.setdefault(unit.id, [])
             head = path[-1] if path else unit.coord
@@ -176,35 +186,72 @@ class PlayScreen(Screen[None]):
             if self._game.map.in_bounds(new):
                 path.append(new)
                 self._cursor = new
-                self._hint = f"queued {len(path)} step(s); 'r' to reset, 'e' to end turn"
+                # When the queued path fills the unit's move budget, mark
+                # the unit done and auto-advance to the next one.
+                if len(path) >= unit.moves_this_turn():
+                    self._handled.add(unit.id)
+                    self._advance_to_next_unit()
+                else:
+                    self._hint = (
+                        f"queued {len(path)}/{unit.moves_this_turn()} steps; "
+                        f"'n' next, 'r' reset, 'e' end turn"
+                    )
         self._refresh_view()
 
     def action_select_unit(self) -> None:
         for u in self._game.map.units_at(self._cursor):
             if u.owner is self._human:
                 self._selected_unit_id = u.id
-                self._hint = "direction keys queue a path; 'e' end turn"
+                self._hint = "direction keys queue path; 'n' next, '.' sentry, 'e' end turn"
                 self._refresh_view()
                 return
         self._hint = "no own unit here"
         self._refresh_view()
 
+    def action_next_unit(self) -> None:
+        # Mark the current unit handled (if any) and move on.
+        if self._selected_unit_id is not None:
+            self._handled.add(self._selected_unit_id)
+        self._advance_to_next_unit()
+        self._refresh_view()
+
+    def action_prev_unit(self) -> None:
+        # Step back to the previously-handled unit; let the user revise.
+        candidates = self._units_needing_orders(include_handled=True)
+        if not candidates:
+            return
+        current = self._selected_unit_id
+        if current is None:
+            target = candidates[-1]
+        else:
+            idx = next(
+                (i for i, u in enumerate(candidates) if u.id == current),
+                0,
+            )
+            target = candidates[(idx - 1) % len(candidates)]
+        self._select_and_center(target)
+        # The user is revisiting; un-mark "handled" so any new orders count.
+        self._handled.discard(target.id)
+        self._refresh_view()
+
     def action_deselect(self) -> None:
         self._selected_unit_id = None
-        self._hint = "deselected"
+        self._hint = "deselected — direction keys move the cursor"
         self._refresh_view()
 
     def action_sentry(self) -> None:
         if self._selected_unit_id is None:
             return
         self._pending_paths.pop(self._selected_unit_id, None)
-        self._hint = "sentry (no orders)"
+        self._handled.add(self._selected_unit_id)
+        self._advance_to_next_unit()
         self._refresh_view()
 
     def action_reset_path(self) -> None:
         if self._selected_unit_id is None:
             return
         self._pending_paths.pop(self._selected_unit_id, None)
+        self._handled.discard(self._selected_unit_id)
         self._hint = "path cleared"
         self._refresh_view()
 
@@ -232,15 +279,17 @@ class PlayScreen(Screen[None]):
         self._pending_paths.clear()
         self._pending_production.clear()
         self._selected_unit_id = None
+        self._handled.clear()
         self._game.run_turn()
-        self._hint = f"turn {self._game.turn}"
-        self._refresh_view()
         if self._game.is_over():
             winner = self._game.winner()
             self._hint = (
                 f"game over — winner: {winner.name if winner else 'draw'}"
             )
-            self._refresh_view()
+        else:
+            # Set up the next turn: pick the first unit that needs orders.
+            self._advance_to_next_unit(initial=True)
+        self._refresh_view()
 
     def action_save(self) -> None:
         path = Path("empire-save.json")
@@ -289,6 +338,55 @@ class PlayScreen(Screen[None]):
     def _city_at_cursor(self) -> City | None:
         tile = self._game.map.tile(self._cursor)
         return tile.city
+
+    def _units_needing_orders(self, *, include_handled: bool = False) -> list[Unit]:
+        """Own units with moves remaining; by default skips already-handled."""
+        result: list[Unit] = []
+        for unit in self._game.map.all_units():
+            if unit.owner is not self._human:
+                continue
+            if unit.moves_this_turn() <= 0:
+                continue
+            if not include_handled and unit.id in self._handled:
+                continue
+            result.append(unit)
+        # Stable order: by id, so cycling is predictable.
+        result.sort(key=lambda u: int(u.id))
+        return result
+
+    def _advance_to_next_unit(self, *, initial: bool = False) -> None:
+        """Select the next unit that needs orders. If none, hint end-turn."""
+        candidates = self._units_needing_orders()
+        if not candidates:
+            self._selected_unit_id = None
+            self._hint = (
+                "all units handled — press 'e' to end turn"
+                if not initial
+                else f"turn {self._game.turn}: no units to order yet — 'e' to advance"
+            )
+            return
+        # Pick the lowest-id unit (or the next one after the current selection).
+        current = self._selected_unit_id
+        if current is None:
+            target = candidates[0]
+        else:
+            try:
+                idx = next(
+                    i for i, u in enumerate(candidates) if int(u.id) > int(current)
+                )
+                target = candidates[idx]
+            except StopIteration:
+                target = candidates[0]
+        self._select_and_center(target)
+        remaining = len(candidates)
+        self._hint = (
+            f"{remaining} unit(s) need orders; direction keys queue path, "
+            f"'n' skip, '.' sentry"
+        )
+
+    def _select_and_center(self, unit: Unit) -> None:
+        self._selected_unit_id = unit.id
+        self._cursor = unit.coord
 
     def _build_plan(self) -> TurnPlan:
         moves: list[UnitMove] = []

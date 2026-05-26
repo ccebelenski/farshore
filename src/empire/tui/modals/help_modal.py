@@ -22,10 +22,15 @@ Cursor / movement (no unit selected: moves cursor):
 
 Unit / city:
   u                select own unit at cursor
+  n / Tab          next unit needing orders
+  Shift+N          previous unit (un-handles it for revision)
   p                set production for own city at cursor
-  .                sentry selected unit (clear queued path)
+  .                sentry selected unit (skip this turn, go to next)
   r                reset queued path for selected unit
   Esc              deselect
+
+Each turn, the next unit needing orders is auto-selected.
+Queuing a full move budget auto-advances to the next unit.
 
 Turn flow:
   e                end turn (run AI, advance)
