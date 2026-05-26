@@ -14,25 +14,18 @@ Outputs:
 from __future__ import annotations
 
 import json
-import random
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from empire.ai.baseline import BaselineAI
-from empire.combat.resolver import CombatResolver
 from empire.contracts.controller import AIController
-from empire.core.coord import Coord
 from empire.core.game import Game
-from empire.core.identity import PlayerId
-from empire.core.map import ViewMap
 from empire.core.player import Player
-from empire.core.ruleset import STANDARD, MapProfile
-from empire.core.tile import TerrainKind
-from empire.core.unit import UnitKind
-from empire.mapgen.height_field import HeightFieldMapGenerator
+from empire.core.ruleset import MapProfile
 from empire.persistence.save_manager import SaveManager
 from empire.persistence.schema_v1 import V1Serializer
+from empire.setup import build_game
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,86 +41,18 @@ class GameOutcome:
     neutral_cities: int
 
 
-def _build_game(profile: MapProfile, seed: int) -> tuple[Game, list[Player]]:
-    """Build a fresh Game ready for self-play: map, capitals, controllers wired."""
-    gen = HeightFieldMapGenerator()
-    real_map, cities = gen.generate(profile, random.Random(seed))
-
-    players = [
-        Player(id=PlayerId(1), name="P1", is_ai=True, view=ViewMap(), color="red"),
-        Player(id=PlayerId(2), name="P2", is_ai=True, view=ViewMap(), color="blue"),
-    ]
-
-    # Capital assignment: largest two land continents, each gets one city.
-    # (Same stand-in used by play_game; full capital-selection in 01 §9.2
-    # lands with game setup.)
-    visited: set[tuple[int, int]] = set()
-    continents: list[tuple[int, set[tuple[int, int]]]] = []
-    for y in range(real_map.height):
-        for x in range(real_map.width):
-            if (x, y) in visited:
-                continue
-            tile = real_map.tile(Coord(x, y))
-            if tile.terrain not in {TerrainKind.LAND, TerrainKind.CITY}:
-                continue
-            comp: set[tuple[int, int]] = set()
-            stack: list[tuple[int, int]] = [(x, y)]
-            while stack:
-                cx, cy = stack.pop()
-                if (cx, cy) in comp or not real_map.in_bounds(Coord(cx, cy)):
-                    continue
-                t = real_map.terrain_at(Coord(cx, cy))
-                if t not in {TerrainKind.LAND, TerrainKind.CITY}:
-                    continue
-                comp.add((cx, cy))
-                for dy in (-1, 0, 1):
-                    for dx in (-1, 0, 1):
-                        if dx == 0 and dy == 0:
-                            continue
-                        stack.append((cx + dx, cy + dy))
-            visited.update(comp)
-            continents.append((len(comp), comp))
-    continents.sort(reverse=True)
-
-    assigned = [False] * len(players)
-    for _, comp in continents:
-        cities_on = [c for c in cities if (c.coord.x, c.coord.y) in comp]
-        if not cities_on:
-            continue
-        for i, player in enumerate(players):
-            if assigned[i]:
-                continue
-            already_taken = any(
-                (other.coord.x, other.coord.y) in comp
-                for other in cities
-                if other.owner is not None and other.owner is not player
-            )
-            if already_taken:
-                continue
-            cities_on[0].owner = player
-            cities_on[0].production.building = UnitKind.ARMY
-            cities_on[0].production.work = 0
-            assigned[i] = True
-            break
-        if all(assigned):
-            break
-
-    g = Game(
-        rules=STANDARD,
-        real_map=real_map,
-        players=players,
-        seed=seed,
-        combat_resolver=CombatResolver(),
-    )
+def _build_self_play(profile: MapProfile, seed: int) -> tuple[Game, list[Player]]:
+    """Build a Game with BaselineAI attached to both sides."""
+    game, players = build_game(profile, seed, p1_is_ai=True, p2_is_ai=True)
     controller: AIController
     for p in players:
         controller = BaselineAI()
-        g.attach_controller(p.id, controller)
-    return g, players
+        game.attach_controller(p.id, controller)
+    return game, players
 
 
 def _run_one_game(profile: MapProfile, seed: int, turn_cap: int) -> GameOutcome:
-    g, players = _build_game(profile, seed)
+    g, players = _build_self_play(profile, seed)
     real_map = g.map
     for _ in range(turn_cap):
         g.run_turn()
@@ -167,7 +92,7 @@ def _save_load_identity(profile: MapProfile, seed: int, snapshot_turn: int) -> b
     JSON. This is the same equality used in the persistence test suite, scaled
     up to a real BaselineAI mid-game state.
     """
-    g, _ = _build_game(profile, seed)
+    g, _ = _build_self_play(profile, seed)
     for _ in range(snapshot_turn):
         g.run_turn()
         if g.is_over():

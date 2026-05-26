@@ -27,6 +27,7 @@ llm-local = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-asyncio>=0.24",
     "pytest-cov>=5.0",
     "ruff>=0.7",
     "pyright>=1.1.380",
@@ -103,6 +104,7 @@ reportUnknownArgumentType = "none"
 minversion = "8.0"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+asyncio_mode = "auto"
 markers = [
     "slow: marks tests as slow (deselect with -m 'not slow')",
 ]
@@ -234,12 +236,15 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "tui depends on core, contracts, ai, events only"
+name = "tui depends on core, contracts, ai, events, persistence only"
 type = "forbidden"
 source_modules = ["empire.tui"]
 forbidden_modules = [
     "empire.combat",
     "empire.mapgen",
-    "empire.pathfinding",
-    "empire.persistence",
 ]
+# TUI legitimately reaches pathfinding *transitively* via AI (BaselineAI
+# uses BFS internally); the import-linter follows the chain, so we can't
+# forbid pathfinding here without forbidding AI as well. Persistence is
+# allowed directly so the TUI can offer Save/Load hotkeys without a
+# callback-indirection layer (that abstraction lands with Phase 17).

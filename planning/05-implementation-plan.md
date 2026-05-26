@@ -270,6 +270,31 @@ No new code — a validation gate. Confirms that Phases 1-9 produced a sound eng
 
 ---
 
+## Phase 10.5 — Minimal playable TUI (2-3 sessions)
+
+Inserted out of plan order because Phase 10's gate run made it clear we'd benefit from *actually playing* well before Phase 17. Goal: human-vs-`BaselineAI` end-to-end in a Textual app, plus an AI-vs-AI viewer for watching self-play (which would have helped diagnose the stalemate question this very phase produced).
+
+**Deliverable:**
+- `empire.tui` package: `EmpireApp`, `TitleScreen` → `PlayScreen` → `GameOverScreen`. Three regions on `PlayScreen`: `MapWidget` (character grid, live in-place updates), `StatusBar` (turn + selected unit + production), `LogPanel` (scrolling event stream).
+- `HumanController` satisfies `AIController` by replaying a `TurnPlan` the TUI assembles before each `run_turn()`.
+- `empire setup` shared helper: capital assignment + `Game` construction, used by both TUI and validation harness.
+- CLI: `empire play-tui` (human vs `BaselineAI`) and `empire viewer` (AI vs AI on a tick).
+
+**Input model.** Default = numpad 1-9 for 8-directional movement (5 = stay); vi-keys (`hjkl`+`yubn`) as a toggle. Letter commands from classic Empire (`m`=move, `s`=sentry, `p`=production, `n`/`N`=next/prev unit, `c`=center). `?` opens a help overlay. `F2`=save, `F3`=load (existing `SaveManager`). No hotseat — see [feedback-no-hotseat-network-mp]; MP arrives as networking later.
+
+**Fog of war.** Map renders from the human's `ViewMap`: visible = bright terrain + live units; remembered = dim terrain (no live units); unseen = blank. Status/log never leak enemy state outside the view.
+
+**Cuts vs. full Phase 17.** No snapshot tests yet. No CityList/UnitList side panels (info goes in StatusBar). One trivial `ProductionModal`. No keybinding customization beyond the numpad/vi toggle.
+
+**Canary tests:**
+- **Headless smoke:** Boot app via Textual pilot, advance 5 turns with scripted input, exit cleanly. No crashes.
+- **Save/load round-trip:** Save mid-game, quit, reload, confirm state matches.
+- **Viewer determinism:** Same seed → same final map (compares against `validate` output for one seed).
+
+**Exit gate:** Gates green. A human player can start, take a turn, save, quit, reload, take another turn, and reach a win/loss screen. Viewer mode renders a 50-turn self-play without dropping frames.
+
+---
+
 ## Phase 11 — IntelService (2 sessions)
 
 **Deliverable:** `IntelService` produces `IntelReport` with `Threats`, `Opportunities`, `ChokePoints`, `Theaters` from a `WorldView`.

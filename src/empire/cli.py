@@ -237,6 +237,51 @@ def play_game(
 from empire.core.coord import Coord as _Coord  # noqa: E402
 
 
+def _launch_tui(profile_name: str, seed: int, *, auto_advance: float | None) -> None:
+    """Build a game, attach controllers, and run `EmpireApp`."""
+    from empire.ai.baseline import BaselineAI
+    from empire.core.engine import scan_set_for_player
+    from empire.events.bus import EventBus
+    from empire.setup import build_game
+    from empire.tui import EmpireApp, HumanController
+
+    profile = _PROFILES[profile_name]
+    bus = EventBus()
+    # Build the game with the event bus wired in.
+    game, players = build_game(
+        profile,
+        seed,
+        p1_is_ai=auto_advance is not None,
+        p2_is_ai=True,
+    )
+    game.event_bus = bus
+
+    human_player = players[0]
+    if auto_advance is None:
+        human_ctrl = HumanController()
+        game.attach_controller(human_player.id, human_ctrl)
+    else:
+        # Viewer mode: BaselineAI on both sides. The "human" slot still
+        # owns the rendering perspective (P1's fog of war), but the
+        # HumanController is a stub that never receives a plan.
+        human_ctrl = HumanController()
+        game.attach_controller(human_player.id, BaselineAI())
+    game.attach_controller(players[1].id, BaselineAI())
+
+    # Initial scan for the rendered player so the opening view isn't blank.
+    scanned = scan_set_for_player(human_player, game.map)
+    human_player.view.update_from_scan(scanned, game.map, game.turn)
+
+    app = EmpireApp(
+        game=game,
+        human_player=human_player,
+        human_controller=human_ctrl,
+        event_bus=bus,
+        auto_advance_seconds=auto_advance,
+    )
+    app.run()
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="empire",
@@ -288,6 +333,34 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=("null", "baseline"),
         default="null",
         help="AI controller for both players (default: null)",
+    )
+
+    play_tui = subs.add_parser(
+        "play-tui",
+        help="Launch the Textual TUI: human vs BaselineAI",
+    )
+    play_tui.add_argument(
+        "--profile",
+        choices=list(_PROFILES.keys()),
+        default="SMALL",
+        help="Map profile (default: SMALL)",
+    )
+    play_tui.add_argument("--seed", type=int, default=0, help="RNG seed (default: 0)")
+
+    viewer = subs.add_parser(
+        "viewer",
+        help="Watch BaselineAI vs BaselineAI in the TUI",
+    )
+    viewer.add_argument(
+        "--profile",
+        choices=list(_PROFILES.keys()),
+        default="SMALL",
+        help="Map profile (default: SMALL)",
+    )
+    viewer.add_argument("--seed", type=int, default=0, help="RNG seed (default: 0)")
+    viewer.add_argument(
+        "--delay", type=float, default=0.4,
+        help="Seconds between auto-advanced turns (default: 0.4)",
     )
 
     validate = subs.add_parser(
@@ -347,6 +420,14 @@ def main(argv: list[str] | None = None) -> int:
             turn_cap=args.turn_cap,
             base_seed=args.base_seed,
         ))
+        return 0
+
+    if args.command == "play-tui":
+        _launch_tui(args.profile, args.seed, auto_advance=None)
+        return 0
+
+    if args.command == "viewer":
+        _launch_tui(args.profile, args.seed, auto_advance=args.delay)
         return 0
 
     parser.print_help()
