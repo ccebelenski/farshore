@@ -199,13 +199,23 @@ class PlayScreen(Screen[None]):
         self._refresh_view()
 
     def action_select_unit(self) -> None:
+        """Manual free-select: pick the own unit under the cursor, even if
+        it was already given orders this turn. Re-selecting un-handles
+        the unit so direction keys re-queue its path from scratch. The
+        cursor stays where it is — manual selection is for *out-of-order*
+        play, not for centering."""
         for u in self._game.map.units_at(self._cursor):
             if u.owner is self._human:
                 self._selected_unit_id = u.id
-                self._hint = "direction keys queue path; 'n' next, '.' sentry, 'e' end turn"
+                self._handled.discard(u.id)
+                self._pending_paths.pop(u.id, None)
+                self._hint = (
+                    "free-select: direction keys queue path; "
+                    "'n' next, '.' sentry, Esc back to cursor"
+                )
                 self._refresh_view()
                 return
-        self._hint = "no own unit here"
+        self._hint = "no own unit here — move cursor with direction keys"
         self._refresh_view()
 
     def action_next_unit(self) -> None:
