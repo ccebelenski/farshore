@@ -22,11 +22,15 @@ Cursor / movement (no unit selected: moves cursor):
 
 Unit / city:
   u                select own unit at cursor
-  n / Tab          next unit needing orders
+  n                skip this unit (forfeit its remaining moves)
+  Tab              peek next unit (current keeps its moves)
   Shift+N          previous unit (un-handles it for revision)
   p                set production for own city at cursor
-  .                sentry selected unit (skip this turn, go to next)
-  Esc              deselect (cursor mode)
+  .                persistent sentry — wakes on enemy in scan range
+  d                set heading — next direction key walks every turn
+  g                go-to — move cursor to target, Enter to confirm
+  w                wake selected unit (clear standing order)
+  Esc              deselect / cancel pending mode
 
 Moves are immediate: with a unit selected, each direction key applies
 one step (combat + city capture resolve live). When the unit's move

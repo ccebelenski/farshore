@@ -15,12 +15,13 @@ from collections.abc import Mapping
 from typing import Any, ClassVar, cast
 
 from empire.core.city import City, OrderKind, ProductionState
-from empire.core.coord import Coord
+from empire.core.coord import Coord, Direction
 from empire.core.game import Game
 from empire.core.identity import CityId, PlayerId, UnitId
 from empire.core.map import Map, RememberedTile, UnitSnapshot, ViewMap
 from empire.core.player import Player
 from empire.core.ruleset import MapProfile, RuleSet
+from empire.core.standing_order import Heading, PatrolPath, Sentry, StandingOrder
 from empire.core.tile import TerrainKind, Tile
 from empire.core.unit import UNIT_REGISTRY, Unit, UnitKind
 
@@ -323,6 +324,7 @@ class V1Serializer:
             "y": u.coord.y,
             "hits": u.hits,
             "range": u.range,
+            "standing_order": self._standing_order_to_dict(u.standing_order),
         }
 
     def _unit_from_dict(
@@ -335,7 +337,43 @@ class V1Serializer:
         unit = cls(UnitId(int(d["id"])), owner, coord)
         unit.hits = int(d["hits"])
         unit.range = int(d["range"])
+        unit.standing_order = self._standing_order_from_dict(d.get("standing_order"))
         return unit
+
+    def _standing_order_to_dict(
+        self, order: StandingOrder | None
+    ) -> dict[str, Any] | None:
+        if order is None:
+            return None
+        if isinstance(order, Heading):
+            return {"kind": "heading", "direction": order.direction.name}
+        if isinstance(order, PatrolPath):
+            return {
+                "kind": "patrol",
+                "remaining": [[c.x, c.y] for c in order.remaining],
+                "original": [[c.x, c.y] for c in order.original],
+                "reverse_on_end": order.reverse_on_end,
+            }
+        # Sentry — the only remaining variant after Heading/PatrolPath.
+        return {"kind": "sentry"}
+
+    def _standing_order_from_dict(
+        self, d: Mapping[str, Any] | None
+    ) -> StandingOrder | None:
+        if d is None:
+            return None
+        kind = d["kind"]
+        if kind == "heading":
+            return Heading(direction=Direction[str(d["direction"])])
+        if kind == "patrol":
+            return PatrolPath(
+                remaining=tuple(Coord(int(c[0]), int(c[1])) for c in d["remaining"]),
+                original=tuple(Coord(int(c[0]), int(c[1])) for c in d["original"]),
+                reverse_on_end=bool(d.get("reverse_on_end", False)),
+            )
+        if kind == "sentry":
+            return Sentry()
+        raise ValueError(f"Unknown StandingOrder kind in save: {kind!r}")
 
 
 # -----------------------------------------------------------------------------

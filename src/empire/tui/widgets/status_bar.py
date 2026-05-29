@@ -8,6 +8,7 @@ from textual.reactive import reactive
 from textual.widgets import Static
 
 from empire.core.city import City
+from empire.core.standing_order import Heading, PatrolPath, Sentry
 from empire.core.unit import Unit
 
 
@@ -67,6 +68,13 @@ class StatusState:
                 f"{u.kind.value.upper()}#{int(u.id):<3d}"
                 f" @({u.coord.x},{u.coord.y}) hits={u.hits}/{type(u).max_hits}",
             )
+            so = u.standing_order
+            if isinstance(so, Heading):
+                parts.append(f"order: heading {so.direction.name}")
+            elif isinstance(so, PatrolPath):
+                parts.append(f"order: go-to ({len(so.remaining)} cells left)")
+            elif isinstance(so, Sentry):
+                parts.append("order: sentry")
         if self.selected_city is not None:
             c = self.selected_city
             prod = c.production

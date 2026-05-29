@@ -6,11 +6,14 @@ import pytest
 
 from empire.contracts.turn_plan import (
     ProductionOrder,
+    SetOrder,
     TurnPlan,
     UnitMove,
     UnitSentry,
 )
+from empire.core.coord import Direction
 from empire.core.identity import CityId, UnitId
+from empire.core.standing_order import Heading, Sentry
 from empire.core.unit import UnitKind
 
 
@@ -19,7 +22,21 @@ def test_empty_turn_plan() -> None:
     assert p.production_orders == ()
     assert p.moves == ()
     assert p.sentries == ()
+    assert p.set_orders == ()
     assert p.notes == {}
+
+
+def test_set_orders_carries_standing_orders() -> None:
+    p = TurnPlan(
+        set_orders=(
+            SetOrder(unit_id=UnitId(1), order=Heading(Direction.N)),
+            SetOrder(unit_id=UnitId(2), order=Sentry()),
+            SetOrder(unit_id=UnitId(3), order=None),  # clear
+        ),
+    )
+    assert len(p.set_orders) == 3
+    assert isinstance(p.set_orders[0].order, Heading)
+    assert p.set_orders[2].order is None
 
 
 def test_turn_plan_with_payload() -> None:

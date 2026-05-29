@@ -312,3 +312,39 @@ def test_round_trip_with_custom_ruleset() -> None:
     assert loaded.rules.army_capture_city_deterministic is True
     assert loaded.rules.fog_cheat is True
     assert loaded.rules.map_profile.width == 4
+
+
+def test_round_trip_preserves_standing_orders(tmp_path: Path) -> None:
+    """Heading, PatrolPath, and Sentry all survive save/load intact."""
+    from empire.core.coord import Direction
+    from empire.core.standing_order import Heading, PatrolPath, Sentry
+
+    game = _build_tiny_game()
+    units = list(game.map.all_units())
+    army = next(u for u in units if isinstance(u, Army))
+    battleship = next(u for u in units if isinstance(u, Battleship))
+    army.standing_order = Heading(direction=Direction.NE)
+    battleship.standing_order = PatrolPath(
+        remaining=(Coord(2, 0), Coord(2, 1)),
+        original=(Coord(2, 0), Coord(2, 1)),
+        reverse_on_end=True,
+    )
+    # Force a third unit onto Sentry to cover that variant. Build one on
+    # the fly via SaveManager round-trip — easier to just decorate.
+    army2 = Army(UnitId(99), army.owner, Coord(1, 0))
+    game.map.place_unit(army2, Coord(1, 0))
+    army2.standing_order = Sentry()
+
+    path = tmp_path / "save.json"
+    SaveManager().save(game, path)
+    loaded = SaveManager().load(path)
+
+    loaded_units = {int(u.id): u for u in loaded.map.all_units()}
+    army_order = loaded_units[int(army.id)].standing_order
+    assert isinstance(army_order, Heading)
+    assert army_order.direction is Direction.NE
+    bs_order = loaded_units[int(battleship.id)].standing_order
+    assert isinstance(bs_order, PatrolPath)
+    assert bs_order.remaining == (Coord(2, 0), Coord(2, 1))
+    assert bs_order.reverse_on_end is True
+    assert isinstance(loaded_units[99].standing_order, Sentry)

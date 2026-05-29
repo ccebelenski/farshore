@@ -152,6 +152,62 @@ def test_neutral_cities_alone_do_not_end_the_game(players: list[Player]) -> None
     assert g.winner() is None
 
 
+def test_set_orders_in_plan_attaches_standing_order(players: list[Player]) -> None:
+    """End-to-end: a controller emits SetOrder(Heading); next turn the
+    engine's standing-orders phase walks the unit one cell."""
+    from empire.combat.resolver import CombatResolver
+    from empire.contracts.controller import AIController
+    from empire.contracts.turn_plan import SetOrder, TurnPlan
+    from empire.contracts.world_view import WorldView
+    from empire.core.coord import Direction
+    from empire.core.identity import UnitId
+    from empire.core.standing_order import Heading
+    from empire.core.unit import Army
+
+    m = _empty_map(width=6, height=2)
+    army = Army(UnitId(99), players[0], Coord(0, 0))
+    m.place_unit(army, Coord(0, 0))
+
+    class _SetHeadingOnce:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def name(self) -> str:
+            return "test"
+
+        def plan_turn(self, view: WorldView) -> TurnPlan:
+            del view
+            self.calls += 1
+            if self.calls == 1:
+                return TurnPlan(
+                    set_orders=(SetOrder(unit_id=UnitId(99), order=Heading(Direction.E)),),
+                )
+            return TurnPlan()
+
+        def revise_move(self, unit_id, surprise, view):  # type: ignore[no-untyped-def]
+            from empire.contracts.turn_plan import UnitMove
+            del surprise, view
+            return UnitMove(unit_id=unit_id)
+
+    ctrl: AIController = _SetHeadingOnce()
+    g = Game(
+        rules=STANDARD,
+        real_map=m,
+        players=players,
+        combat_resolver=CombatResolver(),
+    )
+    g.attach_controller(players[0].id, ctrl)
+    g.attach_controller(players[1].id, NullController())
+
+    g.run_turn()  # Turn 1: set_orders applied; no standing-order step yet.
+    assert isinstance(army.standing_order, Heading)
+    assert army.coord == Coord(0, 0)
+
+    g.run_turn()  # Turn 2: standing-orders phase walks one cell east.
+    assert army.coord == Coord(1, 0)
+    assert isinstance(army.standing_order, Heading)  # still active
+
+
 def test_run_turn_publishes_game_ended_when_finished(players: list[Player]) -> None:
     bus = EventBus()
     ended: list[GameEndedEvent] = []

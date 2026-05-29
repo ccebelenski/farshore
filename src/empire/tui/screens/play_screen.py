@@ -31,8 +31,11 @@ from empire.core.events import CityCapturedEvent, UnitMovedEvent, UnitRemovedEve
 from empire.core.game import Game
 from empire.core.identity import CityId, UnitId
 from empire.core.player import Player
+from empire.core.standing_order import Heading, PatrolPath, Sentry
 from empire.core.unit import Unit, UnitKind
 from empire.events.bus import EventBus
+from empire.pathfinding.bfs import BFSPathfinder
+from empire.pathfinding.cost import AIR, ARMY, SEA
 from empire.persistence.save_manager import SaveManager
 from empire.tui.human_controller import HumanController
 from empire.tui.modals import ConfirmModal, HelpModal, ProductionModal
@@ -79,11 +82,14 @@ class PlayScreen(Screen[None]):
         Binding("question_mark", "help", "help"),
         Binding("e", "end_turn", "end turn"),
         Binding("u", "select_unit", "select unit"),
+        Binding("d", "set_heading", "set heading"),
+        Binding("g", "go_to", "go-to"),
+        Binding("w", "wake", "wake unit"),
         Binding("n", "next_unit", "next unit"),
         Binding("shift+n", "prev_unit", "prev unit"),
-        Binding("tab", "next_unit", "next unit"),
+        Binding("tab", "peek_next_unit", "peek next"),
         Binding("p", "production", "production"),
-        Binding("period", "sentry", "sentry"),
+        Binding("full_stop", "sentry", "sentry"),
         Binding("r", "reset_path", "reset path"),
         Binding("escape", "deselect", "deselect"),
         Binding("f2", "save", "save"),
@@ -99,6 +105,7 @@ class PlayScreen(Screen[None]):
         Binding("down", "step('down')", show=False),
         Binding("left", "step('left')", show=False),
         Binding("right", "step('right')", show=False),
+        Binding("enter", "confirm", show=False),
     ]
 
     def __init__(
@@ -128,6 +135,10 @@ class PlayScreen(Screen[None]):
         # Set of unit IDs already given orders this turn (sentried, dead,
         # or out of moves) so the auto-cycle skips them.
         self._handled: set[UnitId] = set()
+        # Next direction key triggers a heading-set instead of stepping.
+        self._awaiting_heading: bool = False
+        # Cursor mode is "pick a destination for go-to" while True.
+        self._awaiting_goto_target: bool = False
         self._hint: str = "press ? for help"
 
     # ---- composition ------------------------------------------------------
@@ -179,6 +190,17 @@ class PlayScreen(Screen[None]):
     def action_step(self, key: str) -> None:
         d = _DIR_KEYS.get(key)
         if d is None:
+            return
+        # Heading-set mode: next direction sets a heading instead of walking.
+        if self._awaiting_heading and self._selected_unit_id is not None:
+            self._set_heading(self._selected_unit_id, d)
+            return
+        # Go-to mode: direction keys move the cursor while picking a target.
+        if self._awaiting_goto_target:
+            new = self._cursor.step(d)
+            if self._game.map.in_bounds(new):
+                self._cursor = new
+            self._refresh_view()
             return
         if self._selected_unit_id is None:
             # No selection: direction keys move the cursor freely.
@@ -287,10 +309,44 @@ class PlayScreen(Screen[None]):
         self._refresh_view()
 
     def action_next_unit(self) -> None:
-        # Mark the current unit handled (if any) and move on.
+        """`n`: skip this unit — forfeit any remaining moves this turn."""
         if self._selected_unit_id is not None:
             self._handled.add(self._selected_unit_id)
+            # Consume the rest of the move budget so the unit is truly
+            # done this turn (peek/prev won't bring it back).
+            unit = self._selected_unit()
+            if unit is not None:
+                self._moves_used[unit.id] = unit.moves_this_turn()
         self._advance_to_next_unit()
+        self._refresh_view()
+
+    def action_peek_next_unit(self) -> None:
+        """Tab: jump to the next unit needing orders without committing
+        the current one. Its remaining moves are preserved so the player
+        can return to it later this turn."""
+        candidates = self._units_needing_orders()
+        if not candidates:
+            self._hint = "no other units need orders — staying here"
+            self._refresh_view()
+            return
+        current = self._selected_unit_id
+        if current is None:
+            target = candidates[0]
+        else:
+            # Find the next candidate with a higher id than current; wrap.
+            try:
+                idx = next(
+                    i for i, u in enumerate(candidates) if int(u.id) > int(current)
+                )
+                target = candidates[idx]
+            except StopIteration:
+                target = candidates[0]
+            if target.id == current:
+                self._hint = "this is the only unit needing orders"
+                self._refresh_view()
+                return
+        self._select_and_center(target)
+        self._hint = f"peeked — {len(candidates)} unit(s) need orders; previous unit kept its moves"
         self._refresh_view()
 
     def action_prev_unit(self) -> None:
@@ -313,15 +369,85 @@ class PlayScreen(Screen[None]):
         self._refresh_view()
 
     def action_deselect(self) -> None:
+        if self._awaiting_heading or self._awaiting_goto_target:
+            self._awaiting_heading = False
+            self._awaiting_goto_target = False
+            self._hint = "cancelled"
+            self._refresh_view()
+            return
         self._selected_unit_id = None
         self._hint = "deselected — direction keys move the cursor"
         self._refresh_view()
 
     def action_sentry(self) -> None:
-        """Skip the rest of this unit's turn — moves left are forfeit."""
+        """Put the selected unit on persistent sentry (skip this and future turns)."""
         if self._selected_unit_id is None:
             return
-        self._handled.add(self._selected_unit_id)
+        uid = self._selected_unit_id
+        self._handled.add(uid)
+        unit = self._game.map.unit_by_id(uid)
+        if unit is not None:
+            unit.standing_order = Sentry()
+        self._hint = "sentry — wakes on enemy in scan range"
+        self._advance_to_next_unit()
+        self._refresh_view()
+
+    def action_set_heading(self) -> None:
+        """Arm heading-set: the next direction key sets a Heading instead of walking."""
+        if self._selected_unit_id is None:
+            self._hint = "select a unit first ('u' or auto-cycle)"
+            self._refresh_view()
+            return
+        self._awaiting_heading = True
+        self._hint = "heading: press a direction (Esc to cancel)"
+        self._refresh_view()
+
+    def action_go_to(self) -> None:
+        """Arm go-to: cursor picks a destination; Enter confirms."""
+        if self._selected_unit_id is None:
+            self._hint = "select a unit first"
+            self._refresh_view()
+            return
+        unit = self._selected_unit()
+        if unit is None:
+            self._refresh_view()
+            return
+        self._awaiting_goto_target = True
+        self._cursor = unit.coord
+        self._hint = "go-to: direction keys move cursor; Enter to confirm, Esc to cancel"
+        self._refresh_view()
+
+    def action_wake(self) -> None:
+        """Clear any standing order on the selected unit so it re-enters auto-cycle."""
+        if self._selected_unit_id is None:
+            return
+        uid = self._selected_unit_id
+        unit = self._game.map.unit_by_id(uid)
+        if unit is not None:
+            unit.standing_order = None
+        self._handled.discard(uid)
+        self._hint = "woke unit — standing order cleared"
+        self._refresh_view()
+
+    def action_confirm(self) -> None:
+        """Enter key: confirm whatever modal-mode is active (currently go-to)."""
+        if not self._awaiting_goto_target:
+            return
+        unit = self._selected_unit()
+        if unit is None:
+            self._awaiting_goto_target = False
+            self._refresh_view()
+            return
+        path = self._build_goto_path(unit, self._cursor)
+        self._awaiting_goto_target = False
+        if path is None or len(path) == 0:
+            self._hint = "no path to that cell"
+            self._refresh_view()
+            return
+        order = PatrolPath.new(tuple(path), reverse_on_end=False)
+        unit.standing_order = order
+        self._handled.add(unit.id)
+        self._hint = f"go-to set: {len(path)} cells queued"
         self._advance_to_next_unit()
         self._refresh_view()
 
@@ -360,6 +486,8 @@ class PlayScreen(Screen[None]):
         self._moves_used.clear()
         self._selected_unit_id = None
         self._handled.clear()
+        self._awaiting_heading = False
+        self._awaiting_goto_target = False
         self._game.run_turn()
         if self._game.is_over():
             winner = self._game.winner()
@@ -430,12 +558,18 @@ class PlayScreen(Screen[None]):
         return tile.city
 
     def _units_needing_orders(self, *, include_handled: bool = False) -> list[Unit]:
-        """Own units with moves remaining; by default skips already-handled."""
+        """Own units with moves remaining; by default skips already-handled.
+
+        Units with a non-None `standing_order` are skipped: the engine
+        will drive them next turn (or has driven them this turn).
+        """
         result: list[Unit] = []
         for unit in self._game.map.all_units():
             if unit.owner is not self._human:
                 continue
             if unit.moves_this_turn() <= 0:
+                continue
+            if unit.standing_order is not None:
                 continue
             if not include_handled and unit.id in self._handled:
                 continue
@@ -500,6 +634,50 @@ class PlayScreen(Screen[None]):
                 )
 
         return TurnPlan(production_orders=tuple(production_orders))
+
+    def _set_heading(self, unit_id: UnitId, d: Direction) -> None:
+        unit = self._game.map.unit_by_id(unit_id)
+        if unit is None:
+            self._awaiting_heading = False
+            return
+        order = Heading(direction=d)
+        unit.standing_order = order
+        self._handled.add(unit_id)
+        self._awaiting_heading = False
+        self._hint = f"heading set: {d.name}"
+        self._advance_to_next_unit()
+        self._refresh_view()
+
+    def _build_goto_path(self, unit: Unit, target: Coord) -> list[Coord] | None:
+        """BFS over the human's ViewMap; returns cells AFTER start (exclusive)."""
+        from empire.core.unit import (
+            Army,
+            Battleship,
+            Carrier,
+            Destroyer,
+            Patrol,
+            Submarine,
+            Transport,
+        )
+
+        kind_cls = type(unit)
+        if kind_cls is Army:
+            profile = ARMY
+        elif kind_cls in (Patrol, Destroyer, Submarine, Transport, Carrier, Battleship):
+            profile = SEA
+        else:
+            profile = AIR
+        result = BFSPathfinder().find_path(
+            start=unit.coord,
+            goal=target,
+            real_map=self._game.map,
+            profile=profile,
+            view=self._human.view,
+        )
+        if result is None:
+            return None
+        # Drop the start cell — engine path is the cells the unit ENTERS.
+        return list(result.cells[1:])
 
     def _refresh_view(self) -> None:
         map_widget = self.query_one("#map", MapWidget)

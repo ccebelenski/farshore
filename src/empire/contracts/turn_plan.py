@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from empire.core.identity import CityId, UnitId
+from empire.core.standing_order import StandingOrder
 from empire.core.unit import UnitKind
 
 
@@ -54,6 +55,21 @@ class UnitSentry:
     wake: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class SetOrder:
+    """Declaratively set (or clear) a unit's standing order.
+
+    `order = None` clears any current standing order. Otherwise the unit's
+    `standing_order` is set to the supplied `Heading`, `PatrolPath`, or
+    `Sentry`. The set takes effect at the end of this turn's plan
+    application; the engine's standing-orders step on the *next* turn is
+    when the order actually drives movement.
+    """
+
+    unit_id: UnitId
+    order: StandingOrder | None
+
+
 def _empty_notes() -> dict[str, object]:
     return {}
 
@@ -71,6 +87,7 @@ class TurnPlan:
     production_orders: tuple[ProductionOrder, ...] = ()
     moves: tuple[UnitMove, ...] = ()
     sentries: tuple[UnitSentry, ...] = ()
+    set_orders: tuple[SetOrder, ...] = ()
     # Debug/telemetry. Free-form. Not consumed by the engine; useful for AI
     # introspection and replay tooling.
     notes: dict[str, object] = field(default_factory=_empty_notes)

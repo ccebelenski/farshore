@@ -23,6 +23,7 @@ from empire.core.tile import TerrainKind
 
 if TYPE_CHECKING:
     from empire.core.player import Player
+    from empire.core.standing_order import StandingOrder
 
 
 # A sentinel for units that have no fuel/range concept (ground, sea units).
@@ -69,6 +70,9 @@ class Unit(ABC):
         self._coord: Coord = coord
         self.hits: int = type(self).max_hits
         self.range: int = type(self).base_range
+        # Cross-turn order: Heading, PatrolPath, Sentry, or None. Engine
+        # applies one step per turn before the controller is consulted.
+        self.standing_order: StandingOrder | None = None
 
     @property
     def coord(self) -> Coord:

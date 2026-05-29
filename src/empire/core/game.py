@@ -25,9 +25,11 @@ from typing import TYPE_CHECKING
 from empire.core.coord import Coord
 from empire.core.engine import (
     CombatResolverProtocol,
+    apply_standing_orders,
     execute_unit_path,
     run_production_tick,
     scan_set_for_player,
+    wake_sentried_units,
 )
 from empire.core.event_bus import EventBusProtocol, NullEventBus
 from empire.core.identity import PlayerId, UnitId
@@ -178,9 +180,49 @@ class TurnManager:
     def run_round(self) -> None:
         for player in self.game.players:
             self._production_phase(player)
+            self._standing_orders_phase(player)
             self._movement_phase(player)
             self._scan_phase(player)
         self._end_of_round()
+
+    def _standing_orders_phase(self, player: Player) -> None:
+        """Apply each owned unit's persistent order, before the controller plans.
+
+        Order: wake sentried units who can see an enemy, then step every
+        Heading/PatrolPath. The controller's TurnPlan still runs after; the
+        TUI / AI is expected to skip units whose `standing_order` is not
+        None (engine drove them this turn).
+        """
+        from empire.core.events import UnitMovedEvent
+
+        woken = wake_sentried_units(player, self.game.map)
+        # Note: bus event for wake-up is intentionally light — log shows
+        # the unit re-entering auto-cycle. A dedicated SentryWokeEvent
+        # could land later if intel/UX needs it.
+        del woken
+
+        # Snapshot start coords so we can emit accurate movement events.
+        starts: dict[UnitId, Coord] = {
+            u.id: u.coord
+            for u in self.game.map.all_units()
+            if u.owner is player and u.standing_order is not None
+        }
+        result = apply_standing_orders(
+            player=player,
+            real_map=self.game.map,
+            rules=self.game.rules,
+            combat_resolver=self.game.combat_resolver,
+            rng=self.game.rng,
+        )
+        for uid in result.moved_unit_ids:
+            unit = self.game.map.unit_by_id(uid)
+            if unit is None:
+                continue
+            start = starts.get(uid, unit.coord)
+            if start != unit.coord:
+                self.game.event_bus.publish(
+                    UnitMovedEvent(unit_id=uid, from_=start, to=unit.coord)
+                )
 
     def _production_phase(self, player: Player) -> None:
         produced = run_production_tick(
@@ -242,6 +284,17 @@ class TurnManager:
                 city.production.set_target(
                     order.target, self.game.rules.production_change_penalty_divisor
                 )
+
+        # Standing-order set/clear declarations. Applied before moves so
+        # that a controller declaring "clear my heading" + "walk this
+        # path" sequences cleanly; the cleared order doesn't try to step
+        # post hoc. The set_orders are picked up by the NEXT turn's
+        # standing-orders phase.
+        for so in getattr(plan, "set_orders", ()):
+            unit = self.game.map.unit_by_id(so.unit_id)
+            if unit is None or unit.owner is not player:
+                continue
+            unit.standing_order = so.order
 
         # Apply each unit's planned path step-by-step.
         for move in getattr(plan, "moves", ()):

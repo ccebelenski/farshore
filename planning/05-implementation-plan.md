@@ -298,7 +298,7 @@ Inserted out of plan order because Phase 10's gate run made it clear we'd benefi
 
 ---
 
-## Phase 10.6 — Persistent unit orders (1-2 sessions)
+## Phase 10.6 — Persistent unit orders (DONE)
 
 Follow-on from 10.5 hands-on play. Two of classic Empire's most-used commands need cross-turn state on `Unit` that we haven't modeled yet:
 

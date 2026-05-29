@@ -21,6 +21,7 @@ from empire.core.coord import Coord
 from empire.core.identity import CityId, UnitId
 from empire.core.map import Map
 from empire.core.ruleset import RuleSet
+from empire.core.standing_order import Heading, Sentry
 from empire.core.tile import TerrainKind
 from empire.core.unit import UNIT_REGISTRY, Unit, UnitKind
 
@@ -276,6 +277,163 @@ def execute_unit_path(
         units_destroyed=tuple(units_destroyed),
         cities_captured=tuple(cities_captured),
     )
+
+
+# -----------------------------------------------------------------------------
+# Standing orders: per-turn application of persistent unit orders
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class StandingOrderResult:
+    """Per-unit outcome of one turn's standing-orders step."""
+
+    moved_unit_ids: tuple[UnitId, ...]
+    interrupted_unit_ids: tuple[UnitId, ...]
+    woken_sentry_ids: tuple[UnitId, ...]
+
+
+def enemy_in_scan_range(unit: Unit, real_map: Map) -> bool:
+    """True if any enemy unit sits within `unit`'s Chebyshev scan disc.
+
+    Used as the wake trigger for sentried units and as an interruption
+    trigger for autonomous Heading/PatrolPath moves.
+    """
+    radius = type(unit).scan_range
+    for other in real_map.all_units():
+        if other.owner is unit.owner:
+            continue
+        if unit.coord.chebyshev_to(other.coord) <= radius:
+            return True
+    return False
+
+
+def apply_standing_orders(
+    player: Player,
+    real_map: Map,
+    rules: RuleSet,
+    combat_resolver: CombatResolverProtocol,
+    rng: random.Random,
+) -> StandingOrderResult:
+    """Apply one step of each owned unit's standing order.
+
+    Runs at the top of `player`'s turn, before the controller is consulted.
+
+    For each owned unit:
+    - `None`: nothing to do.
+    - `Sentry()`: nothing this step. Wake check happens separately (see
+      `wake_sentried_units`).
+    - `Heading(d)`: step one cell in `d`. Cleared on interruption
+      (out-of-bounds, illegal terrain, friendly-occupied target, or enemy
+      visible in scan range *after* the step). Otherwise the heading
+      persists.
+    - `PatrolPath`: step into the next cell of the path; replace the
+      order with `after_step()`. Same interruption rules.
+
+    Returns the IDs of units that moved successfully, units whose orders
+    were interrupted, and units that were sentried this turn.
+    """
+    moved: list[UnitId] = []
+    interrupted: list[UnitId] = []
+    sentried: list[UnitId] = []
+
+    # Snapshot the list so removals during iteration don't trip us up.
+    own_units = [u for u in real_map.all_units() if u.owner is player]
+
+    for unit in own_units:
+        order = unit.standing_order
+        if order is None:
+            continue
+        if isinstance(order, Sentry):
+            sentried.append(unit.id)
+            continue
+
+        if isinstance(order, Heading):
+            target = unit.coord.step(order.direction)
+            next_order_on_success = order  # heading persists
+        else:
+            # PatrolPath — the only remaining variant after Sentry/Heading.
+            nxt = order.next_cell()
+            if nxt is None:
+                unit.standing_order = None
+                interrupted.append(unit.id)
+                continue
+            target = nxt
+            next_order_on_success = order.after_step()
+
+        if not is_legal_step(unit, target, real_map, rules):
+            unit.standing_order = None
+            interrupted.append(unit.id)
+            continue
+
+        # Friendly-blocking interrupt: don't fight your way through your own.
+        occupants = real_map.units_at(target)
+        if (
+            occupants
+            and not rules.allow_unit_stacking
+            and any(o.owner is player for o in occupants)
+        ):
+            unit.standing_order = None
+            interrupted.append(unit.id)
+            continue
+
+        outcome = execute_unit_path(
+            unit=unit,
+            path=((target.x, target.y),),
+            real_map=real_map,
+            rules=rules,
+            combat_resolver=combat_resolver,
+            rng=rng,
+        )
+
+        unit_alive = real_map.unit_by_id(unit.id) is not None
+        if not unit_alive or outcome.last_outcome is not StepOutcome.OK:
+            # Combat killed us, capture failed, or step otherwise failed.
+            if unit_alive:
+                unit.standing_order = None
+            interrupted.append(unit.id)
+            continue
+
+        # Step succeeded. Check post-step interruption: enemy now in scan.
+        if enemy_in_scan_range(unit, real_map):
+            unit.standing_order = None
+            interrupted.append(unit.id)
+            moved.append(unit.id)
+            continue
+
+        unit.standing_order = next_order_on_success
+        if unit.standing_order is None:
+            # PatrolPath naturally exhausted (one-shot finished).
+            interrupted.append(unit.id)
+        moved.append(unit.id)
+
+    return StandingOrderResult(
+        moved_unit_ids=tuple(moved),
+        interrupted_unit_ids=tuple(interrupted),
+        woken_sentry_ids=(),
+    )
+
+
+def wake_sentried_units(player: Player, real_map: Map) -> tuple[UnitId, ...]:
+    """Wake any sentried own unit with an enemy currently in scan range.
+
+    Called at the top of `player`'s turn, before `apply_standing_orders`.
+    Returns the IDs of units that were woken (had their Sentry cleared).
+
+    Per spec, a surprise NEVER auto-sentries — it auto-WAKES. The
+    "adjacent combat" wake trigger is subsumed here because an enemy
+    fighting next to a unit is, by definition, within scan range.
+    """
+    woken: list[UnitId] = []
+    for unit in real_map.all_units():
+        if unit.owner is not player:
+            continue
+        if not isinstance(unit.standing_order, Sentry):
+            continue
+        if enemy_in_scan_range(unit, real_map):
+            unit.standing_order = None
+            woken.append(unit.id)
+    return tuple(woken)
 
 
 def _try_capture_city(
