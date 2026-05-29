@@ -24,6 +24,12 @@ class TerrainKind(Enum):
     CITY = "city"
 
 
+# Terrain a ground unit can stand on, and equivalently the terrain that counts
+# as "land" for landmass/coastline reasoning (a city sits on land). Shared so
+# mapgen, setup, and the AI's terrain analysis agree on one definition.
+LAND_TERRAINS = frozenset({TerrainKind.LAND, TerrainKind.CITY})
+
+
 @dataclass(frozen=True, slots=True)
 class Tile:
     """A single cell of the map.

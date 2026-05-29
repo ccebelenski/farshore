@@ -499,9 +499,36 @@ regeneration is bounded.
 
 ---
 
-## Phase 11 — IntelService (2 sessions)
+## Phase 11 — IntelService (DONE)
 
 **Deliverable:** `IntelService` produces `IntelReport` with `Threats`, `Opportunities`, `ChokePoints`, `Theaters` from a `WorldView`.
+
+> **Shipped.** `ai/strategic/intel/` package: `report.py` (frozen artifact
+> types), `threats.py`, `opportunities.py`, `chokepoints.py`, `theaters.py`,
+> and `service.py` assembling the report. Each computation is a pure function
+> over `WorldView`; `IntelService` is stateless, so the same view yields a
+> deeply-equal (and hashable) `IntelReport` — the purity gate. Notes:
+> - **Threats:** projection horizon `PROJECTION_TURNS = 3` (a speed-1 army
+>   three cells out registers as a threat, matching the design scenario);
+>   reach is a bounded BFS over legal terrain, treating unobserved cells as
+>   traversable (conservative for the defender). Combat power = strength ×
+>   remaining hits.
+> - **Opportunities:** neutral/enemy cities + currently-visible enemy units,
+>   scored `value × probability / (1 + distance)`. No friendly assets → no
+>   opportunities (nothing can act). Stale (remembered-only) enemies are not
+>   attack targets.
+> - **ChokePoints:** purely local one-cell strait/isthmus pinch test over
+>   *known* terrain only — never fires through fog.
+> - **Theaters:** flood-fill of *known* land/city cells into 8-connected
+>   components (one-ring fringe added for adjacent water/unexplored, but
+>   inference is not propagated, so two known islands always give exactly two
+>   theaters). State from city ownership: both → CONTESTED, one side → that
+>   side's core, neutral-only → CONTESTED, empty → UNEXPLORED.
+>
+> Tests under `tests/empire/ai/strategic/intel/` (19 canaries) share scenario
+> builders via `_world.py`; this introduced the first `from tests...` import,
+> so `pyright`'s tests execution-environment gained `extraPaths = ["."]` to
+> mirror the runtime path pytest already provides.
 
 **Canary tests:**
 - **Purity:** same `WorldView` → same `IntelReport` (deep equality).

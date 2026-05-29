@@ -93,6 +93,10 @@ reportUnknownArgumentType = "none"
 # we still want full strict typing on the production code in src/.
 [[tool.pyright.executionEnvironments]]
 root = "tests"
+# Tests import shared scenario builders via the top-level `tests` package
+# (e.g. `from tests.empire... import ...`); pytest puts the project root on
+# sys.path at runtime, so mirror that for pyright's import resolution.
+extraPaths = ["."]
 reportUnknownMemberType = "none"
 reportUnknownVariableType = "none"
 reportUnknownArgumentType = "none"

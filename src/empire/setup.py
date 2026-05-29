@@ -30,7 +30,7 @@ from empire.core.identity import PlayerId
 from empire.core.map import Map, ViewMap
 from empire.core.player import Player
 from empire.core.ruleset import STANDARD, MapProfile
-from empire.core.tile import TerrainKind
+from empire.core.tile import LAND_TERRAINS, TerrainKind
 from empire.core.unit import UnitKind
 from empire.mapgen.height_field import HeightFieldMapGenerator
 
@@ -39,8 +39,6 @@ from empire.mapgen.height_field import HeightFieldMapGenerator
 MIN_CAPITAL_CITIES = 3
 # Bound on regeneration attempts before we give up on a profile.
 MAX_MAP_ATTEMPTS = 50
-
-_LAND = {TerrainKind.LAND, TerrainKind.CITY}
 
 
 def build_game(
@@ -133,7 +131,7 @@ def _assign_capitals(
 
 def _land_continents(real_map: Map) -> list[set[tuple[int, int]]]:
     """All connected land/city components (8-connectivity)."""
-    return _components(real_map, lambda t: t in _LAND)
+    return _components(real_map, lambda t: t in LAND_TERRAINS)
 
 
 def _open_ocean(real_map: Map) -> set[tuple[int, int]]:
