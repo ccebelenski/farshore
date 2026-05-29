@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, ClassVar, cast
 
-from empire.core.city import City, OrderKind, ProductionState
+from empire.core.city import City, DefaultOrder, OrderKind, ProductionState
 from empire.core.coord import Coord, Direction
 from empire.core.game import Game
 from empire.core.identity import CityId, PlayerId, UnitId
@@ -233,9 +233,28 @@ class V1Serializer:
             "owner_id": int(c.owner.id) if c.owner is not None else None,
             "production": self._production_to_dict(c.production),
             "default_orders": {
-                kind.value: order.value for kind, order in c.default_orders.items()
+                kind.value: self._default_order_to_dict(order)
+                for kind, order in c.default_orders.items()
             },
         }
+
+    def _default_order_to_dict(self, order: DefaultOrder) -> dict[str, Any]:
+        return {
+            "kind": order.kind.value,
+            "target": (
+                [order.target.x, order.target.y] if order.target is not None else None
+            ),
+        }
+
+    def _default_order_from_dict(self, d: Any) -> DefaultOrder:
+        # Back-compat: an older save stored the bare OrderKind string.
+        if isinstance(d, str):
+            return DefaultOrder(OrderKind(d))
+        target = d.get("target")
+        return DefaultOrder(
+            kind=OrderKind(d["kind"]),
+            target=Coord(int(target[0]), int(target[1])) if target is not None else None,
+        )
 
     def _city_from_dict(
         self, d: Mapping[str, Any], players_by_id: Mapping[PlayerId, Player]
@@ -243,8 +262,8 @@ class V1Serializer:
         owner_id = d.get("owner_id")
         owner = players_by_id[PlayerId(int(owner_id))] if owner_id is not None else None
         orders = {
-            UnitKind(kind_str): OrderKind(order_str)
-            for kind_str, order_str in d.get("default_orders", {}).items()
+            UnitKind(kind_str): self._default_order_from_dict(order_payload)
+            for kind_str, order_payload in d.get("default_orders", {}).items()
         }
         return City(
             id=CityId(int(d["id"])),

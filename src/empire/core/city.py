@@ -20,16 +20,24 @@ if TYPE_CHECKING:
 
 
 class OrderKind(Enum):
-    """Default per-city, per-unit-kind order issued on production.
-
-    See `planning/01-game-rules-spec.md` §5.3. The MOVE_TO and ATTACK
-    variants will carry payload in later phases (target coord, etc.);
-    for now they are simple tags.
-    """
+    """Default per-city, per-unit-kind order issued on production (spec §5.3)."""
 
     SENTRY = "sentry"
     MOVE_TO = "move_to"
     ATTACK_NEAREST_ENEMY = "attack_nearest_enemy"
+
+
+@dataclass(frozen=True, slots=True)
+class DefaultOrder:
+    """A city's standing instruction for a freshly produced unit kind.
+
+    `MOVE_TO` carries the destination `target`; the other kinds leave it
+    None. Applied by the production tick, which translates the order into
+    the unit's initial standing order (see engine `apply_default_order`).
+    """
+
+    kind: OrderKind
+    target: Coord | None = None
 
 
 class ProductionState:
@@ -73,7 +81,7 @@ class ProductionState:
         self.work -= UNIT_REGISTRY[self.building].build_time
 
 
-def _empty_orders() -> dict[UnitKind, OrderKind]:
+def _empty_orders() -> dict[UnitKind, DefaultOrder]:
     return {}
 
 
@@ -92,7 +100,7 @@ class City:
     coord: Coord
     owner: Player | None
     production: ProductionState = field(default_factory=ProductionState)
-    default_orders: dict[UnitKind, OrderKind] = field(default_factory=_empty_orders)
+    default_orders: dict[UnitKind, DefaultOrder] = field(default_factory=_empty_orders)
 
     @property
     def scan_range(self) -> int:
@@ -102,5 +110,5 @@ class City:
     def is_neutral(self) -> bool:
         return self.owner is None
 
-    def default_order_for(self, kind: UnitKind) -> OrderKind:
-        return self.default_orders.get(kind, OrderKind.SENTRY)
+    def default_order_for(self, kind: UnitKind) -> DefaultOrder:
+        return self.default_orders.get(kind, DefaultOrder(OrderKind.SENTRY))

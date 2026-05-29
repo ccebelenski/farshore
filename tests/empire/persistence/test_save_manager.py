@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from empire.core.city import City, OrderKind, ProductionState
+from empire.core.city import City, DefaultOrder, OrderKind, ProductionState
 from empire.core.coord import Coord
 from empire.core.game import Game
 from empire.core.identity import CityId, PlayerId, UnitId
@@ -39,7 +39,7 @@ def _build_tiny_game() -> Game:
         owner=p1,
         production=ProductionState(building=UnitKind.ARMY, work=2),
     )
-    city1.default_orders[UnitKind.ARMY] = OrderKind.ATTACK_NEAREST_ENEMY
+    city1.default_orders[UnitKind.ARMY] = DefaultOrder(OrderKind.ATTACK_NEAREST_ENEMY)
     city2 = City(id=CityId(2), coord=Coord(3, 3), owner=p2)
     neutral = City(id=CityId(3), coord=Coord(2, 2), owner=None)
 
@@ -154,7 +154,7 @@ def test_round_trip_preserves_production_state() -> None:
     city = next(c for c in loaded.map.cities() if c.id == CityId(1))
     assert city.production.building is UnitKind.ARMY
     assert city.production.work == 2
-    assert city.default_orders[UnitKind.ARMY] is OrderKind.ATTACK_NEAREST_ENEMY
+    assert city.default_orders[UnitKind.ARMY].kind is OrderKind.ATTACK_NEAREST_ENEMY
 
 
 def test_round_trip_preserves_units_and_their_state() -> None:
@@ -348,6 +348,22 @@ def test_round_trip_preserves_standing_orders(tmp_path: Path) -> None:
     assert bs_order.remaining == (Coord(2, 0), Coord(2, 1))
     assert bs_order.reverse_on_end is True
     assert isinstance(loaded_units[99].standing_order, Sentry)
+
+
+def test_round_trip_preserves_move_to_default_order(tmp_path: Path) -> None:
+    """A MOVE_TO default order keeps its target coord across save/load."""
+    game = _build_tiny_game()
+    city = next(c for c in game.map.cities() if c.id == CityId(1))
+    city.default_orders[UnitKind.FIGHTER] = DefaultOrder(OrderKind.MOVE_TO, Coord(2, 3))
+
+    path = tmp_path / "save.json"
+    SaveManager().save(game, path)
+    loaded = SaveManager().load(path)
+
+    loaded_city = next(c for c in loaded.map.cities() if c.id == CityId(1))
+    order = loaded_city.default_orders[UnitKind.FIGHTER]
+    assert order.kind is OrderKind.MOVE_TO
+    assert order.target == Coord(2, 3)
 
 
 def test_round_trip_preserves_cargo_mid_voyage(tmp_path: Path) -> None:

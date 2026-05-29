@@ -26,6 +26,7 @@ Unit / city:
   Tab              peek next unit (current keeps its moves)
   Shift+N          previous unit (un-handles it for revision)
   p                set production for own city at cursor
+  k                set a city's default order for the units it builds
   .                persistent sentry — wakes on enemy in scan range
   d                set heading — next direction key walks every turn
   g                go-to — move cursor to target, Enter to confirm

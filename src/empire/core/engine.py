@@ -16,12 +16,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Protocol
 
-from empire.core.city import City
+from empire.core.city import City, OrderKind
 from empire.core.coord import Coord, Direction
 from empire.core.identity import CityId, UnitId
 from empire.core.map import Map
 from empire.core.ruleset import RuleSet
-from empire.core.standing_order import Heading, Sentry
+from empire.core.standing_order import Heading, PatrolPath, Sentry
 from empire.core.tile import TerrainKind
 from empire.core.unit import UNIT_REGISTRY, Unit, UnitKind
 
@@ -171,9 +171,53 @@ def run_production_tick(
         elif kind is UnitKind.SATELLITE:
             new_unit.range = rules.satellite_range
         real_map.place_unit(new_unit, city.coord)
+        apply_default_order(new_unit, city)
         city.production.consume()
         produced.append(new_unit)
     return produced
+
+
+def apply_default_order(unit: Unit, city: City) -> None:
+    """Translate a city's default order for `unit`'s kind into a standing order.
+
+    Spec §5.3:
+    - `SENTRY` → the unit holds in the city (the implicit default).
+    - `MOVE_TO(target)` → a `PatrolPath` along a greedy 8-directional line
+      toward the target. Core can't depend on the pathfinding layer, so this
+      is a straight march that interrupts on obstacles (coast/enemy/block)
+      rather than a BFS route — adequate for a default; the player's `g`
+      go-to offers true routing. The unit stops on arrival.
+    - `ATTACK_NEAREST_ENEMY` → recorded on the city but left for the
+      controller/AI layers to act on; no standing order is set here.
+    """
+    order = city.default_order_for(unit.kind)
+    if order.kind is OrderKind.SENTRY:
+        unit.standing_order = Sentry()
+    elif order.kind is OrderKind.MOVE_TO and order.target is not None:
+        cells = _greedy_line(city.coord, order.target)
+        if cells:
+            unit.standing_order = PatrolPath.new(cells)
+
+
+def _greedy_line(start: Coord, target: Coord) -> tuple[Coord, ...]:
+    """Adjacent-cell chebyshev line from just after `start` through `target`.
+
+    Each step moves one cell toward the target on both axes (diagonal where
+    possible), so every cell is a legal one-step move. Returns an empty tuple
+    when start == target.
+    """
+    cells: list[Coord] = []
+    cur = start
+    while cur != target:
+        nx = cur.x + _sign(target.x - cur.x)
+        ny = cur.y + _sign(target.y - cur.y)
+        cur = Coord(nx, ny)
+        cells.append(cur)
+    return tuple(cells)
+
+
+def _sign(n: int) -> int:
+    return (n > 0) - (n < 0)
 
 
 # -----------------------------------------------------------------------------

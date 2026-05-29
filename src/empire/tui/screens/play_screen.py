@@ -24,7 +24,7 @@ from textual.screen import Screen
 from textual.widgets import Footer
 
 from empire.contracts.turn_plan import ProductionOrder, TurnPlan
-from empire.core.city import City
+from empire.core.city import City, DefaultOrder, OrderKind
 from empire.core.coord import Coord, Direction
 from empire.core.engine import (
     StepOutcome,
@@ -43,7 +43,12 @@ from empire.pathfinding.bfs import BFSPathfinder
 from empire.pathfinding.cost import AIR, ARMY, SEA
 from empire.persistence.save_manager import SaveManager
 from empire.tui.human_controller import HumanController
-from empire.tui.modals import ConfirmModal, HelpModal, ProductionModal
+from empire.tui.modals import (
+    ConfirmModal,
+    DefaultOrderModal,
+    HelpModal,
+    ProductionModal,
+)
 from empire.tui.widgets import (
     CursorMode,
     LogPanel,
@@ -95,6 +100,7 @@ class PlayScreen(Screen[None]):
         Binding("shift+n", "prev_unit", "prev unit"),
         Binding("tab", "peek_next_unit", "peek next"),
         Binding("p", "production", "production"),
+        Binding("k", "city_orders", "city orders"),
         Binding("full_stop", "sentry", "sentry"),
         Binding("r", "reset_path", "reset path"),
         Binding("escape", "deselect", "deselect"),
@@ -147,6 +153,9 @@ class PlayScreen(Screen[None]):
         self._awaiting_goto_target: bool = False
         # Next direction key unloads the selected carrier's next cargo unit.
         self._awaiting_unload: bool = False
+        # When set, the cursor is picking a MOVE_TO destination for a city's
+        # default order: (city_id, unit_kind).
+        self._awaiting_city_order_target: tuple[CityId, UnitKind] | None = None
         self._hint: str = "press ? for help"
 
     # ---- composition ------------------------------------------------------
@@ -203,8 +212,8 @@ class PlayScreen(Screen[None]):
         if self._awaiting_heading and self._selected_unit_id is not None:
             self._set_heading(self._selected_unit_id, d)
             return
-        # Go-to mode: direction keys move the cursor while picking a target.
-        if self._awaiting_goto_target:
+        # Go-to / city-order-target modes: direction keys move the cursor.
+        if self._awaiting_goto_target or self._awaiting_city_order_target is not None:
             new = self._cursor.step(d)
             if self._game.map.in_bounds(new):
                 self._cursor = new
@@ -401,10 +410,16 @@ class PlayScreen(Screen[None]):
         self._refresh_view()
 
     def action_deselect(self) -> None:
-        if self._awaiting_heading or self._awaiting_goto_target or self._awaiting_unload:
+        if (
+            self._awaiting_heading
+            or self._awaiting_goto_target
+            or self._awaiting_unload
+            or self._awaiting_city_order_target is not None
+        ):
             self._awaiting_heading = False
             self._awaiting_goto_target = False
             self._awaiting_unload = False
+            self._awaiting_city_order_target = None
             self._hint = "cancelled"
             self._refresh_view()
             return
@@ -481,7 +496,18 @@ class PlayScreen(Screen[None]):
         self._refresh_view()
 
     def action_confirm(self) -> None:
-        """Enter key: confirm whatever modal-mode is active (currently go-to)."""
+        """Enter key: confirm whatever modal-mode is active (go-to / city order)."""
+        if self._awaiting_city_order_target is not None:
+            city_id, kind = self._awaiting_city_order_target
+            self._awaiting_city_order_target = None
+            city = self._game.map.city_by_id(city_id)
+            if city is not None:
+                city.default_orders[kind] = DefaultOrder(OrderKind.MOVE_TO, self._cursor)
+                self._hint = (
+                    f"new {kind.value}: move-to ({self._cursor.x},{self._cursor.y})"
+                )
+            self._refresh_view()
+            return
         if not self._awaiting_goto_target:
             return
         unit = self._selected_unit()
@@ -528,6 +554,39 @@ class PlayScreen(Screen[None]):
 
         self.app.push_screen(ProductionModal(current), _set_target)
 
+    def action_city_orders(self) -> None:
+        """Set the default order applied to units this city produces (spec §5.3)."""
+        city = self._city_at_cursor()
+        if city is None or city.owner is not self._human:
+            self._hint = "no own city here"
+            self._refresh_view()
+            return
+        # Configure the order for the kind the city is currently building
+        # (Army is a sensible fallback when idle).
+        kind = city.production.building or UnitKind.ARMY
+        current = city.default_order_for(kind).kind
+
+        def _set_order(result: OrderKind | None) -> None:
+            if result is None:
+                self._hint = "city orders unchanged"
+                self._refresh_view()
+                return
+            if result is OrderKind.MOVE_TO:
+                # Hand off to a cursor pick for the destination cell.
+                self._awaiting_city_order_target = (city.id, kind)
+                self._cursor = city.coord
+                self._hint = (
+                    f"{kind.value} move-to: pick a cell with direction keys, "
+                    f"Enter to confirm (Esc cancels)"
+                )
+                self._refresh_view()
+                return
+            city.default_orders[kind] = DefaultOrder(result)
+            self._hint = f"new {kind.value}: {result.value}"
+            self._refresh_view()
+
+        self.app.push_screen(DefaultOrderModal(kind, current), _set_order)
+
     def action_end_turn(self) -> None:
         plan = self._build_plan()
         self._human_ctrl.set_plan(plan)
@@ -540,6 +599,7 @@ class PlayScreen(Screen[None]):
         self._awaiting_heading = False
         self._awaiting_goto_target = False
         self._awaiting_unload = False
+        self._awaiting_city_order_target = None
         self._game.run_turn()
         if self._game.is_over():
             winner = self._game.winner()

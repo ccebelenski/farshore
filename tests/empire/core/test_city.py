@@ -2,7 +2,7 @@
 
 import pytest
 
-from empire.core.city import City, OrderKind, ProductionState
+from empire.core.city import City, DefaultOrder, OrderKind, ProductionState
 from empire.core.coord import Coord
 from empire.core.identity import CityId, PlayerId
 from empire.core.map import ViewMap
@@ -32,14 +32,14 @@ def test_owned_city(owner: Player) -> None:
 
 def test_default_order_is_sentry_when_unset() -> None:
     c = City(id=CityId(1), coord=Coord(0, 0), owner=None)
-    assert c.default_order_for(UnitKind.ARMY) is OrderKind.SENTRY
+    assert c.default_order_for(UnitKind.ARMY).kind is OrderKind.SENTRY
 
 
 def test_default_order_returns_configured_value() -> None:
     c = City(id=CityId(1), coord=Coord(0, 0), owner=None)
-    c.default_orders[UnitKind.FIGHTER] = OrderKind.ATTACK_NEAREST_ENEMY
-    assert c.default_order_for(UnitKind.FIGHTER) is OrderKind.ATTACK_NEAREST_ENEMY
-    assert c.default_order_for(UnitKind.ARMY) is OrderKind.SENTRY
+    c.default_orders[UnitKind.FIGHTER] = DefaultOrder(OrderKind.ATTACK_NEAREST_ENEMY)
+    assert c.default_order_for(UnitKind.FIGHTER).kind is OrderKind.ATTACK_NEAREST_ENEMY
+    assert c.default_order_for(UnitKind.ARMY).kind is OrderKind.SENTRY
 
 
 # --- ProductionState ----------------------------------------------------------
