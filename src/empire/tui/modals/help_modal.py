@@ -29,6 +29,7 @@ Unit / city:
   .                persistent sentry — wakes on enemy in scan range
   d                set heading — next direction key walks every turn
   g                go-to — move cursor to target, Enter to confirm
+  o                unload — next direction lands the carrier's cargo
   w                wake selected unit (clear standing order)
   Esc              deselect / cancel pending mode
 
@@ -36,6 +37,10 @@ Moves are immediate: with a unit selected, each direction key applies
 one step (combat + city capture resolve live). When the unit's move
 budget is spent, the next unit auto-selects. End the turn with `e`
 to let the AI play.
+
+Cargo: step an Army onto a friendly Transport (or a Fighter onto a
+Carrier) to load it. Select the carrier and press `o`, then a direction,
+to unload — a unit can't unload the same turn it loaded.
 
 Turn flow:
   e                end turn (run AI, advance)

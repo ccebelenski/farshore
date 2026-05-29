@@ -26,7 +26,12 @@ from textual.widgets import Footer
 from empire.contracts.turn_plan import ProductionOrder, TurnPlan
 from empire.core.city import City
 from empire.core.coord import Coord, Direction
-from empire.core.engine import execute_unit_path, scan_set_for_player
+from empire.core.engine import (
+    StepOutcome,
+    execute_unit_path,
+    execute_unload,
+    scan_set_for_player,
+)
 from empire.core.events import CityCapturedEvent, UnitMovedEvent, UnitRemovedEvent
 from empire.core.game import Game
 from empire.core.identity import CityId, UnitId
@@ -84,6 +89,7 @@ class PlayScreen(Screen[None]):
         Binding("u", "select_unit", "select unit"),
         Binding("d", "set_heading", "set heading"),
         Binding("g", "go_to", "go-to"),
+        Binding("o", "unload", "unload cargo"),
         Binding("w", "wake", "wake unit"),
         Binding("n", "next_unit", "next unit"),
         Binding("shift+n", "prev_unit", "prev unit"),
@@ -139,6 +145,8 @@ class PlayScreen(Screen[None]):
         self._awaiting_heading: bool = False
         # Cursor mode is "pick a destination for go-to" while True.
         self._awaiting_goto_target: bool = False
+        # Next direction key unloads the selected carrier's next cargo unit.
+        self._awaiting_unload: bool = False
         self._hint: str = "press ? for help"
 
     # ---- composition ------------------------------------------------------
@@ -201,6 +209,10 @@ class PlayScreen(Screen[None]):
             if self._game.map.in_bounds(new):
                 self._cursor = new
             self._refresh_view()
+            return
+        # Unload mode: the next direction key lands a cargo unit ashore.
+        if self._awaiting_unload and self._selected_unit_id is not None:
+            self._do_unload(self._selected_unit_id, d)
             return
         if self._selected_unit_id is None:
             # No selection: direction keys move the cursor freely.
@@ -268,6 +280,26 @@ class PlayScreen(Screen[None]):
             self._selected_unit_id = None
             self._handled.add(unit.id)
             self._hint = f"unit destroyed at ({start.x},{start.y})"
+            self._advance_to_next_unit()
+            self._refresh_view()
+            return
+
+        # Loading: the unit boarded a friendly carrier and is now off the map.
+        if outcome.last_outcome is StepOutcome.LOADED:
+            carrier = next(
+                (o for o in self._game.map.units_at(unit.coord) if o.owner is self._human),
+                None,
+            )
+            label = (
+                f"{carrier.kind.value.upper()}#{int(carrier.id)}"
+                if carrier is not None
+                else "carrier"
+            )
+            cargo_n = len(carrier.cargo) if carrier is not None else 0
+            cap = carrier.effective_capacity() if carrier is not None else 0
+            self._handled.add(unit.id)
+            self._selected_unit_id = None
+            self._hint = f"loaded onto {label} ({cargo_n}/{cap})"
             self._advance_to_next_unit()
             self._refresh_view()
             return
@@ -369,9 +401,10 @@ class PlayScreen(Screen[None]):
         self._refresh_view()
 
     def action_deselect(self) -> None:
-        if self._awaiting_heading or self._awaiting_goto_target:
+        if self._awaiting_heading or self._awaiting_goto_target or self._awaiting_unload:
             self._awaiting_heading = False
             self._awaiting_goto_target = False
+            self._awaiting_unload = False
             self._hint = "cancelled"
             self._refresh_view()
             return
@@ -415,6 +448,24 @@ class PlayScreen(Screen[None]):
         self._awaiting_goto_target = True
         self._cursor = unit.coord
         self._hint = "go-to: direction keys move cursor; Enter to confirm, Esc to cancel"
+        self._refresh_view()
+
+    def action_unload(self) -> None:
+        """Arm unload: the next direction key lands the carrier's next cargo unit."""
+        if self._selected_unit_id is None:
+            self._hint = "select a carrier first"
+            self._refresh_view()
+            return
+        unit = self._selected_unit()
+        if unit is None or not unit.cargo:
+            self._hint = "selected unit has no cargo to unload"
+            self._refresh_view()
+            return
+        self._awaiting_unload = True
+        self._hint = (
+            f"unload ({len(unit.cargo)} aboard): press a direction "
+            f"toward the destination cell (Esc to cancel)"
+        )
         self._refresh_view()
 
     def action_wake(self) -> None:
@@ -488,6 +539,7 @@ class PlayScreen(Screen[None]):
         self._handled.clear()
         self._awaiting_heading = False
         self._awaiting_goto_target = False
+        self._awaiting_unload = False
         self._game.run_turn()
         if self._game.is_over():
             winner = self._game.winner()
@@ -530,8 +582,30 @@ class PlayScreen(Screen[None]):
             if p.id == self._human.id:
                 continue
             self._game.attach_controller(p.id, BaselineAI())
+        # Reset transient selection/cursor state to the loaded game — the old
+        # cursor may be out of bounds for a differently-shaped map.
+        self._selected_unit_id = None
+        self._handled.clear()
+        self._moves_used.clear()
+        self._awaiting_heading = False
+        self._awaiting_goto_target = False
+        self._awaiting_unload = False
+        self._cursor = self._home_cursor()
+        scanned = scan_set_for_player(self._human, self._game.map)
+        self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)
         self._hint = f"loaded from {path}"
         self._refresh_view()
+
+    def _home_cursor(self) -> Coord:
+        """A valid starting cursor for the current game: the human's first
+        city, then first unit, else the map origin."""
+        for city in self._game.map.cities():
+            if city.owner is self._human:
+                return city.coord
+        for unit in self._game.map.board_units():
+            if unit.owner is self._human:
+                return unit.coord
+        return Coord(0, 0)
 
     def action_quit(self) -> None:
         def _on_answer(confirmed: bool | None) -> None:
@@ -561,10 +635,12 @@ class PlayScreen(Screen[None]):
         """Own units with moves remaining; by default skips already-handled.
 
         Units with a non-None `standing_order` are skipped: the engine
-        will drive them next turn (or has driven them this turn).
+        will drive them next turn (or has driven them this turn). Aboard
+        cargo is skipped too — it's commanded via its carrier (unload),
+        not the normal auto-cycle (`board_units` excludes it).
         """
         result: list[Unit] = []
-        for unit in self._game.map.all_units():
+        for unit in self._game.map.board_units():
             if unit.owner is not self._human:
                 continue
             if unit.moves_this_turn() <= 0:
@@ -646,6 +722,46 @@ class PlayScreen(Screen[None]):
         self._awaiting_heading = False
         self._hint = f"heading set: {d.name}"
         self._advance_to_next_unit()
+        self._refresh_view()
+
+    def _do_unload(self, carrier_id: UnitId, d: Direction) -> None:
+        """Land the carrier's next aboard unit on the cell in direction `d`."""
+        self._awaiting_unload = False
+        carrier = self._game.map.unit_by_id(carrier_id)
+        if carrier is None or not carrier.cargo:
+            self._refresh_view()
+            return
+        cargo = self._game.map.unit_by_id(carrier.cargo[0])
+        if cargo is None:
+            self._refresh_view()
+            return
+        to = carrier.coord.step(d)
+        outcome = execute_unload(
+            cargo=cargo,
+            to=to,
+            real_map=self._game.map,
+            rules=self._game.rules,
+            combat_resolver=self._game.combat_resolver,
+            rng=self._game.rng,
+        )
+        if outcome.last_outcome is StepOutcome.OK:
+            self._bus.publish(UnitMovedEvent(unit_id=cargo.id, from_=carrier.coord, to=to))
+            for cid in outcome.cities_captured:
+                self._bus.publish(
+                    CityCapturedEvent(
+                        city_id=cid, new_owner_id=self._human.id, previous_owner_id=None
+                    )
+                )
+            scanned = scan_set_for_player(self._human, self._game.map)
+            self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)
+            remaining = len(carrier.cargo)
+            self._hint = f"unloaded to ({to.x},{to.y}); {remaining} still aboard"
+        elif outcome.last_outcome is StepOutcome.NO_UNLOAD_YET:
+            self._hint = "can't unload the same turn it loaded — try next turn"
+        else:
+            for uid in outcome.units_destroyed:
+                self._bus.publish(UnitRemovedEvent(unit_id=uid, last_coord=to))
+            self._hint = f"unload failed ({outcome.last_outcome.value})"
         self._refresh_view()
 
     def _build_goto_path(self, unit: Unit, target: Coord) -> list[Coord] | None:

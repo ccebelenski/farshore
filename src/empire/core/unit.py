@@ -63,6 +63,9 @@ class Unit(ABC):
     legal_terrain: ClassVar[frozenset[TerrainKind]]
     symbol: ClassVar[str]
     scan_range: ClassVar[int]  # Chebyshev radius of vision per spec §6.2
+    # The single unit kind this carrier may hold as cargo (spec §2.2), or
+    # None for units that carry nothing. Transport=ARMY, Carrier=FIGHTER.
+    cargo_kind: ClassVar[UnitKind | None] = None
 
     def __init__(self, id_: UnitId, owner: Player, coord: Coord) -> None:
         self.id: UnitId = id_
@@ -73,6 +76,32 @@ class Unit(ABC):
         # Cross-turn order: Heading, PatrolPath, Sentry, or None. Engine
         # applies one step per turn before the controller is consulted.
         self.standing_order: StandingOrder | None = None
+        # Cargo (spec §2.2/§3.4). `cargo` holds the IDs of units aboard this
+        # carrier, in load order; non-empty only for Transport/Carrier.
+        # `carried_by` is the carrier this unit is aboard (None when on the
+        # map independently). `loaded_this_turn` blocks a same-turn
+        # load→unload round-trip (spec §3.4).
+        self.cargo: list[UnitId] = []
+        self.carried_by: UnitId | None = None
+        self.loaded_this_turn: bool = False
+
+    def is_aboard(self) -> bool:
+        """True if this unit is currently cargo aboard a carrier."""
+        return self.carried_by is not None
+
+    def can_carry(self, other: Unit) -> bool:
+        """True if `other` may load onto this carrier right now.
+
+        Requires: this unit is a carrier for `other`'s kind, `other` is
+        friendly, and there is free (damage-scaled) capacity. Aboard units
+        cannot themselves carry, and a carrier cannot board another carrier.
+        """
+        cls = type(self)
+        if cls.cargo_kind is None or other.kind is not cls.cargo_kind:
+            return False
+        if other.owner is not self.owner:
+            return False
+        return len(self.cargo) < self.effective_capacity()
 
     @property
     def coord(self) -> Coord:
@@ -215,6 +244,7 @@ class Transport(Unit):
     legal_terrain = _WATER_OR_CITY
     symbol = "T"
     scan_range = 2
+    cargo_kind = UnitKind.ARMY
 
     def attack_preferences(self) -> str:
         return ""  # Transports do not initiate combat
@@ -231,6 +261,7 @@ class Carrier(Unit):
     legal_terrain = _WATER_OR_CITY
     symbol = "C"
     scan_range = 4
+    cargo_kind = UnitKind.FIGHTER
 
     def attack_preferences(self) -> str:
         return "CTPDSBAF"

@@ -335,9 +335,12 @@ class TurnManager:
         player.view.update_from_scan(scanned, self.game.map, self.game.turn)
 
     def _end_of_round(self) -> None:
+        # Clear the per-turn cargo guard so units loaded this round may
+        # unload next round (spec §3.4: unload uses the *next* turn's budget).
+        for unit in self.game.map.all_units():
+            unit.loaded_this_turn = False
         # Placeholder: satellite lifetime decay, fighter fuel attrition,
-        # repair logic. None of these are wired in Phase 8.
-        pass
+        # repair logic — wired in Phase 10.8.
 
 
 def _coord_of_city(order: object, real_map: Map) -> Coord:

@@ -180,11 +180,26 @@ class Map:
     # ---- unit queries ---------------------------------------------------
 
     def units_at(self, c: Coord) -> Sequence[Unit]:
-        """Return the units currently occupying `c`. Empty tuple if none."""
+        """Return the units currently occupying `c`. Empty tuple if none.
+
+        Aboard cargo units are *not* on the map independently (spec §2.2),
+        so they never appear here even though they share their carrier's
+        coordinate.
+        """
         return tuple(self._units_by_coord.get(c, ()))
 
     def all_units(self) -> Iterator[Unit]:
+        """Every unit in the game, including cargo aboard carriers.
+
+        Use `board_units()` for units physically on the board (the usual
+        case for scan, auto-cycle, and standing orders); aboard cargo must
+        be skipped by those. `all_units` is for save/load and id allocation.
+        """
         return iter(self._all_units.values())
+
+    def board_units(self) -> Iterator[Unit]:
+        """Units physically present on the board (excludes aboard cargo)."""
+        return (u for u in self._all_units.values() if u.carried_by is None)
 
     def unit_by_id(self, unit_id: UnitId) -> Unit | None:
         return self._all_units.get(unit_id)
@@ -201,7 +216,12 @@ class Map:
         self._units_by_coord.setdefault(c, []).append(u)
 
     def remove_unit(self, u: Unit) -> None:
-        """Remove a unit from the map. The unit's coord is unchanged (caller-visible)."""
+        """Remove a unit from the map. The unit's coord is unchanged (caller-visible).
+
+        A carrier going down takes its cargo with it (spec §4.5: units
+        stationed inside are destroyed) — each aboard unit is removed from
+        the game too.
+        """
         coord = u.coord
         bucket = self._units_by_coord.get(coord)
         if bucket is not None and u in bucket:
@@ -209,9 +229,17 @@ class Map:
             if not bucket:
                 del self._units_by_coord[coord]
         self._all_units.pop(u.id, None)
+        for cargo_id in u.cargo:
+            self._all_units.pop(cargo_id, None)
+        u.cargo.clear()
 
     def move_unit(self, u: Unit, to: Coord) -> None:
-        """Move a unit from its current coord to `to`. No rule validation in Phase 2."""
+        """Move a unit from its current coord to `to`. No rule validation in Phase 2.
+
+        A carrier drags its aboard cargo along — their coordinates track the
+        carrier so save/load and unload-placement stay consistent (cargo is
+        never in the spatial index, so only the coordinate is updated).
+        """
         old = u.coord
         if old == to:
             return
@@ -222,3 +250,50 @@ class Map:
                 del self._units_by_coord[old]
         u._set_coord(to)  # pyright: ignore[reportPrivateUsage]
         self._units_by_coord.setdefault(to, []).append(u)
+        for cargo_id in u.cargo:
+            cargo = self._all_units.get(cargo_id)
+            if cargo is not None:
+                cargo._set_coord(to)  # pyright: ignore[reportPrivateUsage]
+
+    # ---- cargo (spec §2.2 / §3.4) --------------------------------------
+
+    def add_aboard_unit(self, u: Unit) -> None:
+        """Register a unit that is already aboard a carrier (load-time only).
+
+        Used by save/load to reconstruct cargo: the unit joins the registry
+        (`all_units`) but never the spatial index, since aboard units do not
+        occupy a cell independently. `u.carried_by` must already be set.
+        """
+        self._all_units[u.id] = u
+
+    def load_cargo(self, carrier: Unit, cargo: Unit) -> None:
+        """Move `cargo` off the board and aboard `carrier`.
+
+        The cargo leaves the spatial index (it no longer occupies a cell
+        independently) but stays in the registry; its coordinate tracks the
+        carrier. Capacity/kind must already be validated by the caller via
+        `carrier.can_carry(cargo)`.
+        """
+        existing = self._units_by_coord.get(cargo.coord)
+        if existing is not None and cargo in existing:
+            existing.remove(cargo)
+            if not existing:
+                del self._units_by_coord[cargo.coord]
+        cargo._set_coord(carrier.coord)  # pyright: ignore[reportPrivateUsage]
+        cargo.carried_by = carrier.id
+        cargo.loaded_this_turn = True
+        carrier.cargo.append(cargo.id)
+
+    def unload_cargo(self, carrier: Unit, cargo: Unit, to: Coord) -> None:
+        """Place aboard `cargo` back on the board at `to`.
+
+        Detaches the cargo from `carrier` and registers it in the spatial
+        index at `to`. Terrain/occupancy must already be validated by the
+        caller.
+        """
+        if cargo.id in carrier.cargo:
+            carrier.cargo.remove(cargo.id)
+        cargo.carried_by = None
+        cargo._set_coord(to)  # pyright: ignore[reportPrivateUsage]
+        self._all_units[cargo.id] = cargo
+        self._units_by_coord.setdefault(to, []).append(cargo)

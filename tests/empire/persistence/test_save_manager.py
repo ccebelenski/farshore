@@ -348,3 +348,33 @@ def test_round_trip_preserves_standing_orders(tmp_path: Path) -> None:
     assert bs_order.remaining == (Coord(2, 0), Coord(2, 1))
     assert bs_order.reverse_on_end is True
     assert isinstance(loaded_units[99].standing_order, Sentry)
+
+
+def test_round_trip_preserves_cargo_mid_voyage(tmp_path: Path) -> None:
+    """A transport with an army aboard at sea round-trips intact (spec §2.2)."""
+    from empire.core.unit import Transport
+
+    game = _build_tiny_game()
+    # Put a transport on the water tile and load an army aboard it.
+    transport = Transport(UnitId(50), game.players[0], Coord(0, 3))
+    game.map.place_unit(transport, Coord(0, 3))
+    cargo = Army(UnitId(51), game.players[0], Coord(0, 3))
+    game.map.place_unit(cargo, Coord(0, 3))
+    game.map.load_cargo(transport, cargo)
+    assert cargo.is_aboard()
+
+    path = tmp_path / "save.json"
+    SaveManager().save(game, path)
+    loaded = SaveManager().load(path)
+
+    loaded_transport = loaded.map.unit_by_id(UnitId(50))
+    loaded_cargo = loaded.map.unit_by_id(UnitId(51))
+    assert loaded_transport is not None and loaded_cargo is not None
+    # Carrier still holds the cargo; cargo still aboard and off the index.
+    assert loaded_transport.cargo == [UnitId(51)]
+    assert loaded_cargo.carried_by == UnitId(50)
+    assert loaded_cargo not in list(loaded.map.board_units())
+    assert list(loaded.map.units_at(Coord(0, 3))) == [loaded_transport]
+    # Byte-identical re-serialization confirms a clean round-trip.
+    s = V1Serializer()
+    assert s.to_dict(loaded) == s.to_dict(game)

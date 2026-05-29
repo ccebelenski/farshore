@@ -75,10 +75,14 @@ class V1Serializer:
             tiles=tiles,
         )
 
-        # 6. Units (placed via Map).
+        # 6. Units (placed via Map). Aboard cargo joins the registry but not
+        # the spatial index — it occupies no cell independently (spec §2.2).
         for unit_payload in payload["units"]:
             unit = self._unit_from_dict(unit_payload, players_by_id)
-            real_map.place_unit(unit, unit.coord)
+            if unit.carried_by is None:
+                real_map.place_unit(unit, unit.coord)
+            else:
+                real_map.add_aboard_unit(unit)
 
         # 7. ViewMaps populated.
         for player_payload in payload["players"]:
@@ -325,6 +329,9 @@ class V1Serializer:
             "hits": u.hits,
             "range": u.range,
             "standing_order": self._standing_order_to_dict(u.standing_order),
+            "cargo": [int(cid) for cid in u.cargo],
+            "carried_by": int(u.carried_by) if u.carried_by is not None else None,
+            "loaded_this_turn": u.loaded_this_turn,
         }
 
     def _unit_from_dict(
@@ -338,6 +345,10 @@ class V1Serializer:
         unit.hits = int(d["hits"])
         unit.range = int(d["range"])
         unit.standing_order = self._standing_order_from_dict(d.get("standing_order"))
+        unit.cargo = [UnitId(int(cid)) for cid in d.get("cargo", [])]
+        carried_by = d.get("carried_by")
+        unit.carried_by = UnitId(int(carried_by)) if carried_by is not None else None
+        unit.loaded_this_turn = bool(d.get("loaded_this_turn", False))
         return unit
 
     def _standing_order_to_dict(

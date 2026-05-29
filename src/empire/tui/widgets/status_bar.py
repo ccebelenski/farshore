@@ -75,6 +75,8 @@ class StatusState:
                 parts.append(f"order: go-to ({len(so.remaining)} cells left)")
             elif isinstance(so, Sentry):
                 parts.append("order: sentry")
+            if type(u).cargo_kind is not None:
+                parts.append(f"cargo: {len(u.cargo)}/{u.effective_capacity()}")
         if self.selected_city is not None:
             c = self.selected_city
             prod = c.production

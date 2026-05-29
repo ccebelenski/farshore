@@ -119,7 +119,7 @@ def scan_set_for_player(player: Player, real_map: Map) -> set[Coord]:
                 if 0 <= nx < width and 0 <= ny < height:
                     visible.add(Coord(nx, ny))
 
-    for unit in real_map.all_units():
+    for unit in real_map.board_units():
         if unit.owner is player:
             add_disc(unit.coord, type(unit).scan_range)
     for city in real_map.cities():
@@ -183,6 +183,8 @@ class StepOutcome(Enum):
     OUT_OF_MOVES = "out_of_moves"
     ATTACKER_DIED = "attacker_died"
     CAPTURE_FAILED = "capture_failed"
+    LOADED = "loaded"  # unit boarded a friendly carrier; its path ends here
+    NO_UNLOAD_YET = "no_unload_yet"  # cargo loaded this turn can't unload (spec §3.4)
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,6 +224,18 @@ def execute_unit_path(
             last_outcome = StepOutcome.OUT_OF_MOVES
             break
         target = Coord(step[0], step[1])
+
+        # Loading (spec §3.4): stepping into a friendly carrier with room is
+        # a *load*, not a blocked move — and is legal even onto a water cell
+        # the unit could never normally enter. The unit goes aboard and its
+        # path ends here.
+        carrier = _loadable_carrier_at(unit, target, real_map)
+        if carrier is not None:
+            real_map.load_cargo(carrier, unit)
+            steps_taken += 1
+            last_outcome = StepOutcome.LOADED
+            break
+
         if not is_legal_step(unit, target, real_map, rules):
             last_outcome = StepOutcome.ILLEGAL
             break
@@ -235,38 +249,18 @@ def execute_unit_path(
             last_outcome = StepOutcome.BLOCKED_BY_FRIENDLY
             break
 
-        # Enemy unit at target: combat.
-        defender = next((o for o in occupants if o.owner is not unit.owner), None)
-        if defender is not None:
-            combat_resolver.resolve(unit, defender, rng)
-            if unit.hits <= 0:
-                real_map.remove_unit(unit)
-                units_destroyed.append(unit.id)
-                last_outcome = StepOutcome.ATTACKER_DIED
-                return MoveOutcome(
-                    last_outcome=last_outcome,
-                    steps_taken=steps_taken,
-                    units_destroyed=tuple(units_destroyed),
-                    cities_captured=tuple(cities_captured),
-                )
-            real_map.remove_unit(defender)
-            units_destroyed.append(defender.id)
-
-        # City handling. If target is a CITY tile owned by someone else
-        # (including neutral), attempt capture.
-        target_tile = real_map.tile(target)
-        if target_tile.city is not None and target_tile.city.owner is not unit.owner:
-            if not _try_capture_city(unit, target_tile.city, rules, rng):
-                real_map.remove_unit(unit)
-                units_destroyed.append(unit.id)
-                last_outcome = StepOutcome.CAPTURE_FAILED
-                return MoveOutcome(
-                    last_outcome=last_outcome,
-                    steps_taken=steps_taken,
-                    units_destroyed=tuple(units_destroyed),
-                    cities_captured=tuple(cities_captured),
-                )
-            cities_captured.append(target_tile.city.id)
+        entry, destroyed, captured = _resolve_entry(
+            unit, target, real_map, rules, combat_resolver, rng
+        )
+        units_destroyed.extend(destroyed)
+        cities_captured.extend(captured)
+        if entry is not StepOutcome.OK:
+            return MoveOutcome(
+                last_outcome=entry,
+                steps_taken=steps_taken,
+                units_destroyed=tuple(units_destroyed),
+                cities_captured=tuple(cities_captured),
+            )
 
         real_map.move_unit(unit, target)
         steps_taken += 1
@@ -276,6 +270,166 @@ def execute_unit_path(
         steps_taken=steps_taken,
         units_destroyed=tuple(units_destroyed),
         cities_captured=tuple(cities_captured),
+    )
+
+
+def _resolve_entry(
+    unit: Unit,
+    target: Coord,
+    real_map: Map,
+    rules: RuleSet,
+    combat_resolver: CombatResolverProtocol,
+    rng: random.Random,
+) -> tuple[StepOutcome, list[UnitId], list[CityId]]:
+    """Resolve combat + city capture for `unit` entering `target`.
+
+    Shared by `execute_unit_path` (on-map step) and `execute_unload`
+    (amphibious landing). Does *not* place the unit — the caller does that
+    on an `OK` result. On `ATTACKER_DIED`/`CAPTURE_FAILED` the unit has
+    already been removed from the game. Assumes terrain legality and the
+    absence of a blocking friendly occupant are already checked.
+    """
+    destroyed: list[UnitId] = []
+    captured: list[CityId] = []
+
+    defender = next(
+        (o for o in real_map.units_at(target) if o.owner is not unit.owner), None
+    )
+    if defender is not None:
+        combat_resolver.resolve(unit, defender, rng)
+        if unit.hits <= 0:
+            real_map.remove_unit(unit)
+            destroyed.append(unit.id)
+            return (StepOutcome.ATTACKER_DIED, destroyed, captured)
+        real_map.remove_unit(defender)
+        destroyed.append(defender.id)
+
+    target_tile = real_map.tile(target)
+    if target_tile.city is not None and target_tile.city.owner is not unit.owner:
+        if not _try_capture_city(unit, target_tile.city, rules, rng):
+            real_map.remove_unit(unit)
+            destroyed.append(unit.id)
+            return (StepOutcome.CAPTURE_FAILED, destroyed, captured)
+        captured.append(target_tile.city.id)
+
+    return (StepOutcome.OK, destroyed, captured)
+
+
+def _loadable_carrier_at(unit: Unit, target: Coord, real_map: Map) -> Unit | None:
+    """The friendly carrier at `target` that `unit` could board, or None."""
+    if unit.is_aboard():
+        return None
+    if not real_map.in_bounds(target) or not real_map.tile(target).on_board:
+        return None
+    if unit.coord.chebyshev_to(target) > 1:
+        return None
+    for occ in real_map.units_at(target):
+        if occ.can_carry(unit):
+            return occ
+    return None
+
+
+def _has_adjacent_escort(carrier: Unit, real_map: Map) -> bool:
+    """True if a friendly armed warship sits adjacent to `carrier`.
+
+    Gates unloading under `transport_escort_required_for_unload` (spec §10).
+    A warship here is any friendly water-capable unit with non-zero strength
+    (i.e. not another transport).
+    """
+    for n in carrier.coord.neighbors():
+        if not real_map.in_bounds(n):
+            continue
+        for occ in real_map.units_at(n):
+            cls = type(occ)
+            if (
+                occ.owner is carrier.owner
+                and cls.strength > 0
+                and TerrainKind.WATER in cls.legal_terrain
+            ):
+                return True
+    return False
+
+
+def execute_unload(
+    cargo: Unit,
+    to: Coord,
+    real_map: Map,
+    rules: RuleSet,
+    combat_resolver: CombatResolverProtocol,
+    rng: random.Random,
+) -> MoveOutcome:
+    """Unload `cargo` from its carrier onto adjacent cell `to` (spec §3.4).
+
+    A unit cannot unload on the same turn it loaded. The landing resolves
+    combat / city capture at `to` exactly like a normal step (so an army can
+    storm ashore into an enemy or neutral city). On any failure the cargo
+    stays aboard, except when it dies in the landing combat.
+    """
+    carrier = (
+        real_map.unit_by_id(cargo.carried_by) if cargo.carried_by is not None else None
+    )
+    if carrier is None:
+        return _unload_fail(StepOutcome.ILLEGAL)
+    if cargo.loaded_this_turn:
+        return _unload_fail(StepOutcome.NO_UNLOAD_YET)
+    if cargo.moves_this_turn() < 1:
+        return _unload_fail(StepOutcome.OUT_OF_MOVES)
+    if (
+        not real_map.in_bounds(to)
+        or not real_map.tile(to).on_board
+        or to == carrier.coord
+        or carrier.coord.chebyshev_to(to) > 1
+    ):
+        return _unload_fail(StepOutcome.ILLEGAL)
+
+    tile = real_map.tile(to)
+    assaulting_city = tile.city is not None and tile.city.owner is not cargo.owner
+    if not assaulting_city and not can_enter_terrain(cargo, tile.terrain, real_map, to):
+        return _unload_fail(StepOutcome.ILLEGAL)
+
+    if rules.transport_escort_required_for_unload and not _has_adjacent_escort(
+        carrier, real_map
+    ):
+        return _unload_fail(StepOutcome.ILLEGAL)
+
+    occupants = real_map.units_at(to)
+    if (
+        occupants
+        and not rules.allow_unit_stacking
+        and any(o.owner is cargo.owner for o in occupants)
+    ):
+        return _unload_fail(StepOutcome.BLOCKED_BY_FRIENDLY)
+
+    # Commit: detach to "in transit" (off the board), resolve the landing,
+    # then place ashore on success.
+    if cargo.id in carrier.cargo:
+        carrier.cargo.remove(cargo.id)
+    cargo.carried_by = None
+    entry, destroyed, captured = _resolve_entry(
+        cargo, to, real_map, rules, combat_resolver, rng
+    )
+    if entry is not StepOutcome.OK:
+        return MoveOutcome(
+            last_outcome=entry,
+            steps_taken=0,
+            units_destroyed=tuple(destroyed),
+            cities_captured=tuple(captured),
+        )
+    real_map.unload_cargo(carrier, cargo, to)
+    return MoveOutcome(
+        last_outcome=StepOutcome.OK,
+        steps_taken=1,
+        units_destroyed=tuple(destroyed),
+        cities_captured=tuple(captured),
+    )
+
+
+def _unload_fail(outcome: StepOutcome) -> MoveOutcome:
+    return MoveOutcome(
+        last_outcome=outcome,
+        steps_taken=0,
+        units_destroyed=(),
+        cities_captured=(),
     )
 
 
@@ -300,7 +454,7 @@ def enemy_in_scan_range(unit: Unit, real_map: Map) -> bool:
     trigger for autonomous Heading/PatrolPath moves.
     """
     radius = type(unit).scan_range
-    for other in real_map.all_units():
+    for other in real_map.board_units():
         if other.owner is unit.owner:
             continue
         if unit.coord.chebyshev_to(other.coord) <= radius:
@@ -338,7 +492,7 @@ def apply_standing_orders(
     sentried: list[UnitId] = []
 
     # Snapshot the list so removals during iteration don't trip us up.
-    own_units = [u for u in real_map.all_units() if u.owner is player]
+    own_units = [u for u in real_map.board_units() if u.owner is player]
 
     for unit in own_units:
         order = unit.standing_order
@@ -425,7 +579,7 @@ def wake_sentried_units(player: Player, real_map: Map) -> tuple[UnitId, ...]:
     fighting next to a unit is, by definition, within scan range.
     """
     woken: list[UnitId] = []
-    for unit in real_map.all_units():
+    for unit in real_map.board_units():
         if unit.owner is not player:
             continue
         if not isinstance(unit.standing_order, Sentry):
