@@ -323,6 +323,171 @@ Follow-on from 10.5 hands-on play. Two of classic Empire's most-used commands ne
 
 ---
 
+> **Deferred Phase-8 mechanics (10.7–10.10).** Phase 8 wired movement,
+> combat, capture, production, fog, and the endgame check, but several
+> per-unit mechanics from the rules spec were left as explicit
+> placeholders (see `core/game.py::_end_of_round`: *"satellite lifetime
+> decay, fighter fuel attrition, repair logic — none of these are wired in
+> Phase 8"*). Cargo (§2.2/§3.4) was never given a phase at all. These gaps
+> surfaced during 10.5/10.6 hands-on play: **BaselineAI self-play games do
+> not terminate** — the dominant side captures most cities but cannot cross
+> water to take the last enemy cities, because Transports can't actually
+> carry Armies. The win condition (§8, zero cities) is therefore
+> unreachable on the usual multi-continent map. The phases below close the
+> spec gaps, ordered by how much they block winnability. They must land
+> before the StrategicAI phases (13–14) that *assume* cargo exists
+> (`TaskForce` force-matching on "(3 armies, 1 transport)";
+> `TransportFerryBehavior` = "load … sail … unload").
+
+## Phase 10.7 — Transport & Carrier cargo (load/unload) (2-3 sessions)
+
+**The winnability-critical gap.** Implements spec §2.2 (Cargo) and §3.4
+(Loading and unloading). Today the `capacity` ClassVar (Transport=6,
+Carrier=8) and `Unit.effective_capacity()` exist as groundwork, but there
+is no cargo *state* and no load/unload logic — sea carriers sail empty and
+armies are stranded on their home continent.
+
+**Engine work:**
+- Cargo state on `Unit`. A carrier (Transport/Carrier) holds an ordered
+  list of aboard `UnitId`s; an aboard unit knows its carrier. Aboard units
+  are removed from the `Map` cell index entirely (spec §2.2: "not on the
+  map independently while aboard") and travel with the carrier. Keep the
+  mutation single-owner per [[feedback-minimize-mutation]]: `Map` owns
+  placement; loading/unloading goes through `Map` methods, not direct field
+  pokes.
+- **Load:** a friendly Army stepping into a friendly Transport's cell (and
+  Fighter → Carrier) is treated as a load, not a collision-reject, when the
+  carrier has free `effective_capacity()`. Costs the cargo unit one
+  movement point; the unit comes off the map and onto the carrier.
+- **Unload:** an aboard unit steps from the carrier's cell to an adjacent
+  legal cell, spending a movement point. Spec §3.4: a unit cannot load and
+  unload in the *same* turn — enforce with a `loaded_this_turn` guard
+  (cleared at end-of-round), not just by move-budget accounting (a fast
+  unit could otherwise round-trip).
+- Capacity respects damage scaling via `effective_capacity()`; a carrier
+  taking hits while over capacity sheds nothing automatically (design
+  choice — note it), but can't load past the reduced cap.
+- Aboard units contribute no independent vision; the carrier's
+  `scan_range` covers them. Aboard units don't fight independently — if the
+  carrier is destroyed in combat, its cargo is lost with it (spec-consistent
+  with §4.5 "units stationed inside are destroyed"; note the choice).
+- Save/load: cargo lists round-trip; topological load resolves aboard-unit
+  references after their carrier exists.
+- Honor the existing `transport_escort_required_for_unload` ruleset flag
+  (§10): when set, an unload is illegal unless a friendly combat ship is
+  adjacent. (STANDARD leaves it off — wire the check, default-off.)
+
+**TUI work:**
+- Stepping a selected Army onto a friendly Transport loads it (with a
+  status-bar confirmation: "loaded onto TRANSPORT#7 — 3/6"). Stepping an
+  aboard unit off (select it from the carrier, direction key) unloads.
+- A carrier's StatusBar line shows cargo count ("cargo: 3/6"); a way to
+  cycle/select aboard units to give them unload orders.
+
+**Canary tests:**
+- **Load/unload round-trip:** army loads onto adjacent-water transport,
+  transport sails 2 cells, army unloads onto a different shore — ends on
+  the far landmass. Same for Fighter ↔ Carrier.
+- **Capacity:** the 7th army can't board a capacity-6 transport; a
+  damaged carrier's reduced `effective_capacity()` is enforced.
+- **No same-turn round-trip:** a freshly-loaded unit cannot unload until
+  next turn even with movement points left.
+- **Carrier sinks with cargo:** destroying a loaded transport in combat
+  removes the aboard armies from the game.
+- **Save/load:** a mid-voyage game (loaded transport at sea) round-trips
+  byte-identically.
+
+**Exit gate:** Gates green. A human can build a transport, load an army,
+ferry it to another continent, unload, and capture a city there — i.e.
+**actually win a two-continent game**. A BaselineAI self-play game on a
+two-continent map terminates (this is the real signal that the win
+condition is reachable; BaselineAI's *use* of transports is refined in
+Phase 14, but the mechanic must let a game end here).
+
+---
+
+## Phase 10.8 — Deferred unit lifecycle: fuel, orbit, repair (1-2 sessions)
+
+The trio explicitly placeholdered in `_end_of_round`. None block winning,
+but all three are spec mechanics that currently no-op, so Fighters,
+Satellites, and damaged units don't behave per the rules.
+
+**Engine work:**
+- **Fighter fuel (§3.5).** Decrement `range` by 1 per cell moved. At
+  end-of-turn, a Fighter with `range == 0` not on a friendly City or
+  friendly Carrier is lost (publish a `UnitRemovedEvent`). Landing on a
+  friendly City/Carrier resets `range` to `base_range`. (Couples with 10.7:
+  "on a friendly Carrier" means aboard or co-located per the carrier rules.)
+- **Satellite lifecycle (§2.4).** Autonomous orbital movement — one cell
+  per turn in its launch direction, bouncing off the map edge (default per
+  spec). Runs in a dedicated end-of-round step (satellites aren't
+  controller-driven). Decrement lifetime each round; at 0 the satellite
+  deorbits and is removed. Vision covers every cell it passes through this
+  round, not just the final cell.
+- **Repair (§2.3).** A unit that begins and ends a turn stationary in a
+  friendly city regenerates 1 HP (capped at `max_hits`).
+
+**Canary tests:**
+- Fighter flown past its range with no friendly field in reach is removed;
+  one that reaches a friendly city the same turn survives and refuels.
+- A launched satellite moves deterministically, bounces at the edge,
+  reveals its trajectory, and deorbits exactly at its lifetime.
+- A 1-HP unit parked in a friendly city is at 2 HP next turn; a unit that
+  moved that turn does not repair.
+
+**Exit gate:** Gates green.
+
+---
+
+## Phase 10.9 — City default-order enforcement (1 session)
+
+The data model is already complete and round-trips through save/load:
+`OrderKind` (`SENTRY` / `MOVE_TO` / `ATTACK_NEAREST_ENEMY`),
+`City.default_orders`, and `City.default_order_for()` (§5.3). **Nothing
+consumes it** — a newly produced unit is never handed its city's default
+order. SENTRY happens to be the implicit no-op, so the gap is invisible
+until a player sets `MOVE_TO`/`ATTACK_NEAREST_ENEMY` and nothing happens.
+
+**Engine work:**
+- On unit production, look up the city's `default_order_for(kind)` and
+  translate it into the unit's initial standing order (reusing Phase 10.6
+  machinery): `MOVE_TO(coord)` → a `PatrolPath` (BFS at production time);
+  `SENTRY` → `Sentry()`; `ATTACK_NEAREST_ENEMY` → resolved by the
+  controller/behavior layer (record intent; deterministic targeting lands
+  with the AI phases).
+
+**TUI work:**
+- The production modal lets the player set a city's per-kind default order.
+
+**Canary test:** a city with `MOVE_TO(target)` default produces an army
+that, left untouched, walks toward the target over subsequent turns.
+
+**Exit gate:** Gates green.
+
+---
+
+## Phase 10.10 — Capital-selection eligibility (1 session)
+
+`setup.build_game` currently just assigns the two largest continents as
+capitals — a documented stand-in. Spec §9.2 and
+[[feedback-capital-eligibility]] require enforcing eligibility *at the
+selection layer*: a capital-eligible continent has **≥3 cities** (capital
++ ≥2 capture targets) and **≥1 ocean-coastal city** (so transports can be
+built/hosted). If fewer than `num_players` continents qualify, reject the
+map and regenerate. This is partly a winnability concern too — a capital
+stranded on a one-city island can neither expand nor (pre-10.7) leave.
+
+**Canary tests:**
+- A handcrafted map whose only large continent has 2 cities is rejected;
+  one with a qualifying continent is accepted.
+- Selected capitals always sit on continents meeting both criteria.
+- Regeneration terminates (bounded retry count, surfaced if exceeded).
+
+**Exit gate:** Gates green. The Phase-10 validation harness reports a
+non-zero termination rate once 10.7 + 10.10 are both in.
+
+---
+
 ## Phase 11 — IntelService (2 sessions)
 
 **Deliverable:** `IntelService` produces `IntelReport` with `Threats`, `Opportunities`, `ChokePoints`, `Theaters` from a `WorldView`.
