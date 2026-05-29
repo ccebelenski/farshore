@@ -332,6 +332,9 @@ class V1Serializer:
             "cargo": [int(cid) for cid in u.cargo],
             "carried_by": int(u.carried_by) if u.carried_by is not None else None,
             "loaded_this_turn": u.loaded_this_turn,
+            "orbit_direction": (
+                u.orbit_direction.name if u.orbit_direction is not None else None
+            ),
         }
 
     def _unit_from_dict(
@@ -349,6 +352,8 @@ class V1Serializer:
         carried_by = d.get("carried_by")
         unit.carried_by = UnitId(int(carried_by)) if carried_by is not None else None
         unit.loaded_this_turn = bool(d.get("loaded_this_turn", False))
+        orbit = d.get("orbit_direction")
+        unit.orbit_direction = Direction[str(orbit)] if orbit is not None else None
         return unit
 
     def _standing_order_to_dict(

@@ -17,7 +17,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Protocol
 
 from empire.core.city import City
-from empire.core.coord import Coord
+from empire.core.coord import Coord, Direction
 from empire.core.identity import CityId, UnitId
 from empire.core.map import Map
 from empire.core.ruleset import RuleSet
@@ -165,6 +165,11 @@ def run_production_tick(
         kind = city.production.building
         unit_cls = UNIT_REGISTRY[kind]
         new_unit = unit_cls(next_unit_id_fn(), player, city.coord)
+        # Apply the ruleset's range knobs to range-limited units (spec §2.1).
+        if kind is UnitKind.FIGHTER:
+            new_unit.range = rules.fighter_base_range
+        elif kind is UnitKind.SATELLITE:
+            new_unit.range = rules.satellite_range
         real_map.place_unit(new_unit, city.coord)
         city.production.consume()
         produced.append(new_unit)
@@ -234,6 +239,8 @@ def execute_unit_path(
             real_map.load_cargo(carrier, unit)
             steps_taken += 1
             last_outcome = StepOutcome.LOADED
+            if unit.kind is UnitKind.FIGHTER:
+                unit.range = rules.fighter_base_range  # refuels aboard a carrier
             break
 
         if not is_legal_step(unit, target, real_map, rules):
@@ -244,7 +251,9 @@ def execute_unit_path(
         if (
             occupants
             and not rules.allow_unit_stacking
-            and any(o.owner is unit.owner for o in occupants)
+            and any(
+                o.owner is unit.owner and not _is_intangible(o) for o in occupants
+            )
         ):
             last_outcome = StepOutcome.BLOCKED_BY_FRIENDLY
             break
@@ -264,6 +273,7 @@ def execute_unit_path(
 
         real_map.move_unit(unit, target)
         steps_taken += 1
+        _spend_fighter_fuel(unit, target, real_map, rules)
 
     return MoveOutcome(
         last_outcome=last_outcome,
@@ -293,7 +303,12 @@ def _resolve_entry(
     captured: list[CityId] = []
 
     defender = next(
-        (o for o in real_map.units_at(target) if o.owner is not unit.owner), None
+        (
+            o
+            for o in real_map.units_at(target)
+            if o.owner is not unit.owner and not _is_intangible(o)
+        ),
+        None,
     )
     if defender is not None:
         combat_resolver.resolve(unit, defender, rng)
@@ -396,7 +411,7 @@ def execute_unload(
     if (
         occupants
         and not rules.allow_unit_stacking
-        and any(o.owner is cargo.owner for o in occupants)
+        and any(o.owner is cargo.owner and not _is_intangible(o) for o in occupants)
     ):
         return _unload_fail(StepOutcome.BLOCKED_BY_FRIENDLY)
 
@@ -431,6 +446,113 @@ def _unload_fail(outcome: StepOutcome) -> MoveOutcome:
         units_destroyed=(),
         cities_captured=(),
     )
+
+
+def _is_intangible(unit: Unit) -> bool:
+    """Satellites can be neither attacked nor blocked (spec §2.4)."""
+    return unit.kind is UnitKind.SATELLITE
+
+
+def _spend_fighter_fuel(unit: Unit, at: Coord, real_map: Map, rules: RuleSet) -> None:
+    """Burn one fuel point for a Fighter's step, refuelling on a friendly city.
+
+    Out-of-fuel fighters are reaped at end-of-round (`crash_out_of_fuel_
+    fighters`), not here, so a fighter that lands on its final fuel point
+    survives (spec §3.5).
+    """
+    if unit.kind is not UnitKind.FIGHTER:
+        return
+    unit.range = max(0, unit.range - 1)
+    tile = real_map.tile(at)
+    if tile.city is not None and tile.city.owner is unit.owner:
+        unit.range = rules.fighter_base_range
+
+
+# -----------------------------------------------------------------------------
+# End-of-round lifecycle: fighter fuel, satellite orbit/decay, repair (§2-3)
+# -----------------------------------------------------------------------------
+
+
+def crash_out_of_fuel_fighters(real_map: Map, rules: RuleSet) -> tuple[UnitId, ...]:
+    """Remove fighters that are out of fuel and not safely landed (spec §3.5).
+
+    A fighter survives at 0 fuel only if it ends the round on a friendly
+    city (a friendly carrier would have refuelled it on landing / loading).
+    """
+    del rules
+    crashed: list[UnitId] = []
+    for unit in list(real_map.board_units()):
+        if unit.kind is not UnitKind.FIGHTER or unit.range > 0:
+            continue
+        tile = real_map.tile(unit.coord)
+        on_friendly_city = tile.city is not None and tile.city.owner is unit.owner
+        if not on_friendly_city:
+            real_map.remove_unit(unit)
+            crashed.append(unit.id)
+    return tuple(crashed)
+
+
+def advance_satellites(real_map: Map) -> tuple[tuple[UnitId, ...], tuple[UnitId, ...]]:
+    """Orbit every satellite one cell and decay its lifetime (spec §2.4).
+
+    Each satellite steps one cell along `orbit_direction`, reflecting off
+    the map edge (the offending axis flips), then loses one turn of
+    lifetime; at zero it deorbits and is removed. Returns
+    `(moved_ids, deorbited_ids)`.
+    """
+    moved: list[UnitId] = []
+    deorbited: list[UnitId] = []
+    for sat in list(real_map.board_units()):
+        if sat.kind is not UnitKind.SATELLITE or sat.orbit_direction is None:
+            continue
+        new_dir, dest = _orbit_step(sat.coord, sat.orbit_direction, real_map)
+        sat.orbit_direction = new_dir
+        if dest != sat.coord:
+            real_map.move_unit(sat, dest)
+            moved.append(sat.id)
+        sat.range -= 1
+        if sat.range <= 0:
+            real_map.remove_unit(sat)
+            deorbited.append(sat.id)
+    return (tuple(moved), tuple(deorbited))
+
+
+def _orbit_step(
+    coord: Coord, direction: Direction, real_map: Map
+) -> tuple[Direction, Coord]:
+    """Next (direction, coord) for an orbiting body, bouncing off edges.
+
+    Reflects each axis that would carry the body off the board, so a
+    satellite ricochets along the interior rather than leaving the map.
+    """
+    dx, dy = direction.dx, direction.dy
+    if not (0 <= coord.x + dx < real_map.width):
+        dx = -dx
+    if not (0 <= coord.y + dy < real_map.height):
+        dy = -dy
+    new_dir = next(
+        (d for d in Direction if d.dx == dx and d.dy == dy), direction
+    )
+    return (new_dir, Coord(coord.x + dx, coord.y + dy))
+
+
+def repair_in_cities(real_map: Map) -> tuple[UnitId, ...]:
+    """Heal +1 HP for each unit that held station in a friendly city (spec §2.3).
+
+    A unit repairs only if it did not move this round (it must begin *and*
+    end the turn in the city). Also clears the per-round movement flag.
+    """
+    repaired: list[UnitId] = []
+    for unit in real_map.board_units():
+        moved = unit._moved_this_round  # pyright: ignore[reportPrivateUsage]
+        unit._moved_this_round = False  # pyright: ignore[reportPrivateUsage]
+        if moved or unit.hits >= type(unit).max_hits:
+            continue
+        tile = real_map.tile(unit.coord)
+        if tile.city is not None and tile.city.owner is unit.owner:
+            unit.hits += 1
+            repaired.append(unit.id)
+    return tuple(repaired)
 
 
 # -----------------------------------------------------------------------------

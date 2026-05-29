@@ -25,8 +25,11 @@ from typing import TYPE_CHECKING
 from empire.core.coord import Coord
 from empire.core.engine import (
     CombatResolverProtocol,
+    advance_satellites,
     apply_standing_orders,
+    crash_out_of_fuel_fighters,
     execute_unit_path,
+    repair_in_cities,
     run_production_tick,
     scan_set_for_player,
     wake_sentried_units,
@@ -335,12 +338,41 @@ class TurnManager:
         player.view.update_from_scan(scanned, self.game.map, self.game.turn)
 
     def _end_of_round(self) -> None:
+        from empire.core.events import UnitMovedEvent, UnitRemovedEvent
+
+        # Last-known coords for informational removal/move events (some units
+        # are gone or relocated by the time we publish).
+        last_coords = {u.id: u.coord for u in self.game.map.all_units()}
+
         # Clear the per-turn cargo guard so units loaded this round may
         # unload next round (spec §3.4: unload uses the *next* turn's budget).
         for unit in self.game.map.all_units():
             unit.loaded_this_turn = False
-        # Placeholder: satellite lifetime decay, fighter fuel attrition,
-        # repair logic — wired in Phase 10.8.
+
+        # Fighters out of fuel and not landed crash (spec §3.5).
+        for uid in crash_out_of_fuel_fighters(self.game.map, self.game.rules):
+            self.game.event_bus.publish(
+                UnitRemovedEvent(unit_id=uid, last_coord=last_coords[uid])
+            )
+
+        # Satellites orbit one cell and lose a turn of lifetime (spec §2.4).
+        moved, deorbited = advance_satellites(self.game.map)
+        for uid in moved:
+            sat = self.game.map.unit_by_id(uid)
+            if sat is not None:
+                self.game.event_bus.publish(
+                    UnitMovedEvent(
+                        unit_id=uid, from_=last_coords[uid], to=sat.coord
+                    )
+                )
+        for uid in deorbited:
+            self.game.event_bus.publish(
+                UnitRemovedEvent(unit_id=uid, last_coord=last_coords[uid])
+            )
+
+        # Stationary units in friendly cities repair (spec §2.3). Also clears
+        # the per-round movement flags.
+        repair_in_cities(self.game.map)
 
 
 def _coord_of_city(order: object, real_map: Map) -> Coord:

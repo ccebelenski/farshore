@@ -249,6 +249,7 @@ class Map:
             if not bucket:
                 del self._units_by_coord[old]
         u._set_coord(to)  # pyright: ignore[reportPrivateUsage]
+        u._moved_this_round = True  # pyright: ignore[reportPrivateUsage]
         self._units_by_coord.setdefault(to, []).append(u)
         for cargo_id in u.cargo:
             cargo = self._all_units.get(cargo_id)

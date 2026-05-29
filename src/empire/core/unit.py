@@ -17,7 +17,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import TYPE_CHECKING, ClassVar
 
-from empire.core.coord import Coord
+from empire.core.coord import Coord, Direction
 from empire.core.identity import UnitId
 from empire.core.tile import TerrainKind
 
@@ -84,6 +84,11 @@ class Unit(ABC):
         self.cargo: list[UnitId] = []
         self.carried_by: UnitId | None = None
         self.loaded_this_turn: bool = False
+        # Orbital heading for Satellites (spec §2.4); None for everything
+        # else. `_moved_this_round` is end-of-round bookkeeping for the
+        # repair rule (spec §2.3) — a unit only heals if it stayed put.
+        self.orbit_direction: Direction | None = None
+        self._moved_this_round: bool = False
 
     def is_aboard(self) -> bool:
         """True if this unit is currently cargo aboard a carrier."""
@@ -294,6 +299,12 @@ class Satellite(Unit):
     legal_terrain = _ANY_TERRAIN  # orbits over anything
     symbol = "*"
     scan_range = 10
+
+    def __init__(self, id_: UnitId, owner: Player, coord: Coord) -> None:
+        super().__init__(id_, owner, coord)
+        # A freshly launched satellite orbits eastward until it bounces off
+        # a map edge (spec §2.4). Save/load preserves the live heading.
+        self.orbit_direction = Direction.E
 
     def attack_preferences(self) -> str:
         return ""  # Satellites cannot attack (or be attacked)
