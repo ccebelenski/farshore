@@ -339,7 +339,7 @@ Follow-on from 10.5 hands-on play. Two of classic Empire's most-used commands ne
 > (`TaskForce` force-matching on "(3 armies, 1 transport)";
 > `TransportFerryBehavior` = "load … sail … unload").
 
-## Phase 10.7 — Transport & Carrier cargo (load/unload) (2-3 sessions)
+## Phase 10.7 — Transport & Carrier cargo (load/unload) (DONE)
 
 **The winnability-critical gap.** Implements spec §2.2 (Cargo) and §3.4
 (Loading and unloading). Today the `capacity` ClassVar (Transport=6,
@@ -406,7 +406,7 @@ Phase 14, but the mechanic must let a game end here).
 
 ---
 
-## Phase 10.8 — Deferred unit lifecycle: fuel, orbit, repair (1-2 sessions)
+## Phase 10.8 — Deferred unit lifecycle: fuel, orbit, repair (DONE)
 
 The trio explicitly placeholdered in `_end_of_round`. None block winning,
 but all three are spec mechanics that currently no-op, so Fighters,
@@ -439,7 +439,7 @@ Satellites, and damaged units don't behave per the rules.
 
 ---
 
-## Phase 10.9 — City default-order enforcement (1 session)
+## Phase 10.9 — City default-order enforcement (DONE)
 
 The data model is already complete and round-trips through save/load:
 `OrderKind` (`SENTRY` / `MOVE_TO` / `ATTACK_NEAREST_ENEMY`),
@@ -466,7 +466,7 @@ that, left untouched, walks toward the target over subsequent turns.
 
 ---
 
-## Phase 10.10 — Capital-selection eligibility (1 session)
+## Phase 10.10 — Capital-selection eligibility (DONE)
 
 `setup.build_game` currently just assigns the two largest continents as
 capitals — a documented stand-in. Spec §9.2 and
@@ -483,8 +483,19 @@ stranded on a one-city island can neither expand nor (pre-10.7) leave.
 - Selected capitals always sit on continents meeting both criteria.
 - Regeneration terminates (bounded retry count, surfaced if exceeded).
 
-**Exit gate:** Gates green. The Phase-10 validation harness reports a
-non-zero termination rate once 10.7 + 10.10 are both in.
+**Exit gate:** Gates green. `build_game` deterministically yields capitals
+on distinct eligible continents for every profile/seed it's used with, and
+regeneration is bounded.
+
+> **Correction (implementation note).** An earlier draft claimed the
+> validation harness would show a non-zero BaselineAI self-play termination
+> rate once 10.7 + 10.10 landed. That's wrong: 10.10 *guarantees* capitals
+> sit on separate landmasses, and BaselineAI does not yet build or use
+> transports (that's Phase 14's `TransportFerryBehavior`), so neither side
+> can reach the other across water. Self-play termination therefore still
+> waits on Phase 14. The cargo *mechanic* and the human ferry-to-win path
+> are proven in 10.7; 10.10's own gate is capital placement + bounded
+> regeneration, verified by its canary tests.
 
 ---
 
