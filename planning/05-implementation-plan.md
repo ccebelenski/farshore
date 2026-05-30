@@ -794,15 +794,32 @@ separate-continent profile, all `make check` gates green.
 | v4 + per-target assault size + cost budget | 29% (2/7) | fast 1-army neutral grabs just re-fragmented |
 | v5 + aggressive hunt (seek neutrals/enemies) | 35% (8/23) | more decisive games, no win-rate gain |
 
-**Conclusion:** concentration alone lifted the AI from a catastrophic 0% to
-~39%, but it **plateaus at ~35-40% — competitive with, but losing to, the
-greedy baseline** — and every further tactical lever failed to improve it
-(several regressed hard). The remaining gap looks structural, not a tuning
-detail (hypotheses: the §5.4 capture-disband tax turns the game into an
-attrition race that rewards relentless per-unit greed, which the baseline does
-natively; and the strategist's FORMING latency costs tempo). v2 is committed;
-direction beyond it is a design discussion (deepen the strategist / re-examine
-§5.4 / try the LLM strategist / re-baseline the bar). Not gate-passing yet.
+| v6 Shield/Sustain/Dagger doctrine | 17% (1/6) | discipline → too passive; can't take cities |
+
+**Rule × AI matrix** (the decisive finding) — same arena, 24 games each:
+
+| | v2 (no posture) | v7 (posture: EXPAND/PRESS/CONTEST/CONSOLIDATE) |
+|---|---|---|
+| **§5.4 current rule** (capture disbands the army) | 39% | **45.5%** ↑ |
+| **softened rule** (conqueror garrisons; no disband tax) | **52%** | **13.6%** ↓↓ |
+
+**Conclusion.** Two coupled findings:
+1. **The §5.4 capture-disband tax handicaps strategy by ~13 points** — the
+   *same* v2 AI goes 39% → 52% when a conqueror garrisons instead of being
+   disbanded. The rule turns the game into a body-throwing attrition race that
+   rewards the baseline's blunt greed. (Tested by monkeypatching the engine's
+   land garrison limit 0→1 in the arena; not a committed change.)
+2. **The optimal strategy is coupled to the rule.** Posture (`AIMemory`
+   trajectory + EXPAND/PRESS/CONTEST/CONSOLIDATE) *helps* under §5.4 (39→45.5,
+   best variant on the real rule) because CONSOLIDATE-turtling survives an
+   attrition grind — but is *catastrophic* under the fair rule (52→13.6),
+   because turtling when temporarily behind cedes the economy in a game that
+   rewards continued expansion.
+
+So: **decide the rule first, then tune the AI to it.** v2 (committed) is the
+robust baseline across both rules; v6/v7 are recorded but not committed (v6 too
+passive; v7 rule-brittle). The exit gate (>60% vs baseline) is unmet and won't
+be cleanly reachable until §5.4 is settled — a game-design call for the user.
 
 ---
 
