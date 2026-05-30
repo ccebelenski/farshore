@@ -784,6 +784,26 @@ FORMING/EN_ROUTE + rendezvous, `FeasibilityOracle`, `AIMemory`.
 significance (one-sided binomial p < 0.05), no regression on the SMALL
 separate-continent profile, all `make check` gates green.
 
+**Results so far (arena: 24 land-brawl games/variant, swapped sides):**
+
+| variant | StrategicAI win-rate (decided) | note |
+|---|---|---|
+| v1 original layered AI | **0%** (0/10) | fragmented; armies smeared 1-per-goal |
+| **v2 concentration** (committed) | **39%** (9/23) | fists not tokens; the decisive fix |
+| v3 + threat-sized defence + success filter | 0% (0/6) | turtled; filter stopped all enemy-city captures |
+| v4 + per-target assault size + cost budget | 29% (2/7) | fast 1-army neutral grabs just re-fragmented |
+| v5 + aggressive hunt (seek neutrals/enemies) | 35% (8/23) | more decisive games, no win-rate gain |
+
+**Conclusion:** concentration alone lifted the AI from a catastrophic 0% to
+~39%, but it **plateaus at ~35-40% — competitive with, but losing to, the
+greedy baseline** — and every further tactical lever failed to improve it
+(several regressed hard). The remaining gap looks structural, not a tuning
+detail (hypotheses: the §5.4 capture-disband tax turns the game into an
+attrition race that rewards relentless per-unit greed, which the baseline does
+natively; and the strategist's FORMING latency costs tempo). v2 is committed;
+direction beyond it is a design discussion (deepen the strategist / re-examine
+§5.4 / try the LLM strategist / re-baseline the bar). Not gate-passing yet.
+
 ---
 
 ## Phase 16 — Persistence hardening + schema v1 freeze (1-2 sessions)
