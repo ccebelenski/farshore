@@ -696,9 +696,40 @@ Stitching: ensure every `(UnitKind, Role)` pair the strategist can emit resolves
 
 ---
 
-## Phase 15 — StrategicAI integration & validation milestone (2 sessions)
+## Phase 15 — StrategicAI integration & validation milestone (INTEGRATION DONE; VALIDATION BLOCKED)
 
 **Deliverable:** `StrategicAI` wired together; all four layers active.
+
+> **Integration shipped** in `ai/strategic/ai.py`: `StrategicAI` (an
+> `AIController`) runs intel → strategist → operational → tactical each turn,
+> persisting goals + task forces in `AIMemory` (one instance per player).
+> `AIMemory.to_dict`/`from_dict` added; mid-game AI state round-trips (Phase-15
+> save/load criterion met at the AIMemory level). Operational continuity fixed
+> to match forces to goals by *content signature*, not the strategist's
+> per-turn goal id. Gate green (604 passed).
+>
+> **Validation NOT met — stopped for the user (this is the foreseen
+> checkpoint).** Seeded `StrategicAI` vs `BaselineAI` (SMALL profile, 8 seeds,
+> 200-turn cap): **0/8 terminated, StrategicAI 0 wins**; StrategicAI held 1
+> city vs BaselineAI's 3-5. Three issues, two of them real bugs:
+> 1. **Stalemate (foreseen, §Phase-10 note):** STANDARD/SMALL maps put
+>    capitals on separate continents (10.10) and the AI has no way to *unload*
+>    across water — `TurnPlan` can't express an amphibious unload (only the
+>    automatic load-on-step exists). So invasions never complete and games run
+>    to the cap. Needs an AI unload mechanism (TurnPlan + engine + ferry
+>    behavior) — a real feature, not tuning.
+> 2. **No exploration:** StrategicAI never scouts, so it never *sees* a neutral
+>    city → never emits `CaptureCityGoal`. Only `BuildForcesGoal` is ever
+>    active. Needs an always-on early-game explore drive.
+> 3. **`BuildForcesGoal` kills its own armies:** its operational target is the
+>    AI's own capital, so a freshly-built army is told to "go to" the city it's
+>    already in → sentries → disbanded by the §5.4 garrison rule. Build-forces
+>    must not park units on a friendly city.
+>
+> Decisions for the user before validation can pass: how StrategicAI should
+> explore; what `BuildForcesGoal` does with built units; and whether to build
+> AI amphibious unload now (required for cross-continent termination) or add a
+> single-continent validation profile to measure land-combat quality first.
 
 **Validation:**
 - 50 seeded `StrategicAI` vs `BaselineAI` games at NORMAL difficulty.

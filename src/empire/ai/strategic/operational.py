@@ -30,6 +30,7 @@ from empire.ai.strategic.goals import (
     ExploreAreaGoal,
     ForceComposition,
     Goal,
+    GoalKind,
     ProjectPowerGoal,
     goal_from_dict,
 )
@@ -140,14 +141,24 @@ class OperationalPlanner:
         live_unit_ids = {u.id for u in view.own_units}
 
         survivors = self._reap_and_update(memory.task_forces, view, turn, live_unit_ids)
+        # Match forces to goals by *content* signature, not the strategist's
+        # per-turn goal id (which is reallocated each plan). A goal that already
+        # has a live force just refreshes that force's goal reference.
+        by_signature = {
+            _goal_signature(tf.goal): tf for tf in survivors if not tf.is_terminal()
+        }
         claimed = {uid for tf in survivors for uid in tf.unit_ids}
-        served = {tf.goal.id for tf in survivors if not tf.is_terminal()}
         idle = self._idle_pool(view, claimed)
 
         for goal in goals:
-            if goal.id in served:
+            signature = _goal_signature(goal)
+            existing = by_signature.get(signature)
+            if existing is not None:
+                existing.goal = goal
                 continue
-            survivors.append(self._assemble(goal, idle, view, turn, memory))
+            new_force = self._assemble(goal, idle, view, turn, memory)
+            survivors.append(new_force)
+            by_signature[signature] = new_force
 
         memory.task_forces = survivors
         orders = self._production_requests(survivors, view)
@@ -180,7 +191,9 @@ class OperationalPlanner:
             if tf.goal.progress_signal(view) >= 1.0:
                 tf.state = TaskForceState.COMPLETE
                 tf.terminal_since = turn
-            elif not tf.unit_ids:
+            elif not tf.unit_ids and tf.state is not TaskForceState.FORMING:
+                # Had a force and lost it all. A FORMING force legitimately has
+                # no units yet — it's still awaiting production, not disbanded.
                 tf.state = TaskForceState.DISBANDED
                 tf.terminal_since = turn
             survivors.append(tf)
@@ -258,6 +271,16 @@ class OperationalPlanner:
 
 
 # -- goal → operational requirements ------------------------------------------
+
+
+def _goal_signature(goal: Goal) -> tuple[object, ...]:
+    """A stable identity for a goal's *intent*, independent of its per-turn id
+    — so the same objective keeps the same task force across turns."""
+    if isinstance(goal, (CaptureCityGoal, DefendCityGoal)):
+        return (goal.kind, int(goal.target_city_id))
+    if isinstance(goal, (ExploreAreaGoal, ProjectPowerGoal, DenyContinentGoal)):
+        return (goal.kind, goal.target_region)
+    return (GoalKind.BUILD_FORCES,)  # at most one build-forces force
 
 
 def _required_composition(goal: Goal) -> ForceComposition:
