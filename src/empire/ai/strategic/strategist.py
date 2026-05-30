@@ -18,7 +18,6 @@ from abc import ABC, abstractmethod
 
 from empire.ai.strategic.feasibility import FeasibilityOracle
 from empire.ai.strategic.goals import (
-    BuildForcesGoal,
     CaptureCityGoal,
     DefendCityGoal,
     DenyContinentGoal,
@@ -40,7 +39,6 @@ _DEFEND_PRIORITY = 0.9
 _DENY_PRIORITY = 0.6
 _PROJECT_PRIORITY = 0.5
 _EXPLORE_PRIORITY = 0.2
-_BUILD_PRIORITY = 0.1
 _CAPTURE_SCORE_NORM = 10.0  # opportunity score that maps to priority 1.0
 _ARMY = UnitKind.ARMY
 
@@ -71,9 +69,11 @@ class DeterministicStrategist(Strategist):
         self._defensive_goals(intel, view, goals, counter)
         self._consolidate_goals(intel, view, goals, counter)
         self._expand_goals(intel, view, goals, counter)
-        self._project_power_goals(intel, view, goals, counter)
         self._explore_goals(intel, goals, counter)
-        self._build_forces_goal(view, goals, counter)
+        # Note: idle units default to 'hunt mode' in the tactical layer
+        # (frontier exploration), so there is no need for a goal whose only
+        # job is to occupy them — and a build-forces goal that parked units on
+        # the capital would feed them to the §5.4 garrison disband.
 
         # Best value-per-turn first; ties broken on id for reproducibility.
         goals.sort(key=lambda g: (-g.rank(), int(g.id)))
@@ -164,10 +164,9 @@ class DeterministicStrategist(Strategist):
         if not anchors:
             return
         capture_cap = max(1, len(view.own_cities))
-        emitted = 0
+        captures = 0
+        projected = False
         for opp in intel.opportunities:
-            if emitted >= capture_cap:
-                break
             if opp.kind not in (
                 OpportunityKind.CAPTURE_NEUTRAL_CITY,
                 OpportunityKind.CAPTURE_ENEMY_CITY,
@@ -175,58 +174,55 @@ class DeterministicStrategist(Strategist):
                 continue
             if opp.target_city_id is None:
                 continue
+            start = min(anchors, key=lambda a: a.chebyshev_to(opp.target))
             duration = max(2, opp.distance + 1)  # army speed 1
             by_turn = view.turn + duration
-            assault = ForceComposition.of({_ARMY: 1})
-            if not self._oracle.can_assemble(assault, by_turn, view):
-                continue
-            start = min(anchors, key=lambda a: a.chebyshev_to(opp.target))
-            if not self._oracle.reachable(start, opp.target, _ARMY, by_turn, view):
-                continue
-            priority = min(1.0, opp.score / _CAPTURE_SCORE_NORM)
-            goals.append(
-                CaptureCityGoal(
-                    id=counter.next(),
-                    priority=priority,
-                    estimated_duration=duration,
-                    budget=ResourceBudget(production_slots=1),
-                    target_city_id=opp.target_city_id,
-                    target_coord=opp.target,
+
+            land_ok = self._oracle.can_assemble(
+                ForceComposition.of({_ARMY: 1}), by_turn, view
+            ) and self._oracle.reachable(start, opp.target, _ARMY, by_turn, view)
+            if land_ok:
+                if captures >= capture_cap:
+                    continue
+                priority = min(1.0, opp.score / _CAPTURE_SCORE_NORM)
+                goals.append(
+                    CaptureCityGoal(
+                        id=counter.next(),
+                        priority=priority,
+                        estimated_duration=duration,
+                        budget=ResourceBudget(production_slots=1),
+                        target_city_id=opp.target_city_id,
+                        target_coord=opp.target,
+                    )
                 )
-            )
-            emitted += 1
+                captures += 1
+            elif not projected:
+                # Not reachable by land — it's across water, so it needs a
+                # transport. Emit one (capped) amphibious projection toward it.
+                projected = self._maybe_project(opp.target, view, goals, counter)
 
-    # -- step 4: cross-water power projection ---------------------------------
-
-    def _project_power_goals(
-        self,
-        intel: IntelReport,
-        view: WorldView,
-        goals: list[Goal],
-        counter: _Counter,
-    ) -> None:
-        if len(view.own_cities) < 2:
-            return  # need a production base before invading
-        by_turn = view.turn + 10
-        force = ForceComposition.of({_ARMY: 2, UnitKind.TRANSPORT: 1})
+    def _maybe_project(
+        self, target: Coord, view: WorldView, goals: list[Goal], counter: _Counter
+    ) -> bool:
+        """Emit a transport-borne ProjectPowerGoal toward `target` if we can
+        assemble the flotilla. Returns whether one was emitted."""
+        by_turn = view.turn + 12
+        force = ForceComposition.of({_ARMY: 1, UnitKind.TRANSPORT: 1})
         if not self._oracle.can_assemble(force, by_turn, view):
-            return
-        for theater in intel.theaters:
-            if theater.state is not TheaterState.ENEMY_CORE:
-                continue
-            goals.append(
-                ProjectPowerGoal(
-                    id=counter.next(),
-                    priority=_PROJECT_PRIORITY,
-                    estimated_duration=10,
-                    target_region=_sorted_cells(theater.cells),
-                    force_composition=force,
-                    transport_count=1,
-                )
+            return False
+        goals.append(
+            ProjectPowerGoal(
+                id=counter.next(),
+                priority=_PROJECT_PRIORITY,
+                estimated_duration=12,
+                target_region=(target,),
+                force_composition=force,
+                transport_count=1,
             )
-            return  # one invasion at a time
+        )
+        return True
 
-    # -- step 5: explore ------------------------------------------------------
+    # -- step 4: explore ------------------------------------------------------
 
     def _explore_goals(
         self, intel: IntelReport, goals: list[Goal], counter: _Counter
@@ -242,23 +238,6 @@ class DeterministicStrategist(Strategist):
                     target_region=_sorted_cells(theater.cells),
                 )
             )
-
-    # -- step 6: baseline force-building --------------------------------------
-
-    def _build_forces_goal(
-        self, view: WorldView, goals: list[Goal], counter: _Counter
-    ) -> None:
-        if not view.own_cities:
-            return
-        target = ForceComposition.of({_ARMY: 2 * len(view.own_cities)})
-        goals.append(
-            BuildForcesGoal(
-                id=counter.next(),
-                priority=_BUILD_PRIORITY,
-                estimated_duration=5,
-                force_composition_target=target,
-            )
-        )
 
 
 class _Counter:

@@ -10,12 +10,12 @@ from empire.ai.strategic.behaviors.base import (
     advance_toward,
     force_target,
     nearest_friendly_city,
+    nearest_frontier,
     sentry,
 )
 from empire.contracts.turn_plan import UnitMove
 from empire.contracts.world_view import WorldView
 from empire.core.coord import Coord
-from empire.core.tile import TerrainKind
 from empire.core.unit import Unit
 from empire.pathfinding.cost import AIR as AIR_PROFILE
 
@@ -54,28 +54,7 @@ class FighterScoutBehavior(Behavior):
     ) -> UnitMove:
         if not _fuel_safe(unit, force_target(force), view):
             return advance_toward(unit, nearest_friendly_city(unit, view), view, AIR_PROFILE)
-        target = force_target(force) or _nearest_frontier(unit, view)
+        target = force_target(force) or nearest_frontier(unit, view)
         if target is None:
             return sentry(unit)
         return advance_toward(unit, target, view, AIR_PROFILE)
-
-
-def _nearest_frontier(unit: Unit, view: WorldView, radius: int = 10) -> Coord | None:
-    """The closest seen, on-board cell that borders an unseen cell."""
-    seen = view.own_player.view.seen
-    best: Coord | None = None
-    best_dist = radius + 1
-    ux, uy = unit.coord.x, unit.coord.y
-    for dy in range(-radius, radius + 1):
-        for dx in range(-radius, radius + 1):
-            c = Coord(ux + dx, uy + dy)
-            if not view.in_bounds(c) or not seen(c):
-                continue
-            tile = view.terrain_at(c)
-            if tile is None or tile.terrain is TerrainKind.CITY:
-                continue
-            if any(view.in_bounds(n) and not seen(n) for n in c.neighbors()):
-                dist = unit.coord.chebyshev_to(c)
-                if dist < best_dist:
-                    best, best_dist = c, dist
-    return best

@@ -22,9 +22,10 @@ from empire.contracts.surprise import Surprise
 from empire.contracts.turn_plan import UnitMove
 from empire.contracts.world_view import WorldView
 from empire.core.coord import Coord
+from empire.core.tile import TerrainKind
 from empire.core.unit import Unit
 from empire.pathfinding.bfs import BFSPathfinder
-from empire.pathfinding.cost import PathCostProfile
+from empire.pathfinding.cost import AIR, ARMY, SEA, PathCostProfile
 
 if TYPE_CHECKING:
     from empire.ai.strategic.operational import TaskForce
@@ -121,3 +122,56 @@ def nearest_friendly_city(unit: Unit, view: WorldView) -> Coord | None:
     if not cities:
         return None
     return min(cities, key=lambda c: c.coord.chebyshev_to(unit.coord)).coord
+
+
+def profile_for(unit: Unit) -> PathCostProfile:
+    """The path-cost profile matching `unit`'s terrain: land → ARMY, water →
+    SEA, both → AIR."""
+    legal = type(unit).legal_terrain
+    land = TerrainKind.LAND in legal
+    water = TerrainKind.WATER in legal
+    if land and water:
+        return AIR
+    if water:
+        return SEA
+    return ARMY
+
+
+def nearest_frontier(unit: Unit, view: WorldView, radius: int = 12) -> Coord | None:
+    """The closest seen, on-board cell legal for `unit` that borders an unseen
+    cell — i.e. the nearest edge of the explored map to push into."""
+    seen = view.own_player.view.seen
+    legal = type(unit).legal_terrain
+    best: Coord | None = None
+    best_dist = radius + 1
+    ux, uy = unit.coord.x, unit.coord.y
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            c = Coord(ux + dx, uy + dy)
+            if not view.in_bounds(c) or not seen(c):
+                continue
+            tile = view.terrain_at(c)
+            if tile is None or tile.terrain not in legal:
+                continue
+            if any(view.in_bounds(n) and not seen(n) for n in c.neighbors()):
+                dist = unit.coord.chebyshev_to(c)
+                if dist < best_dist:
+                    best, best_dist = c, dist
+    return best
+
+
+class HuntBehavior(Behavior):
+    """Push toward the frontier when there's nothing better to do — the
+    user's 'hunt mode'. Idle units default to this rather than sentrying:
+    sitting in a friendly city would just get them disbanded (§5.4), and
+    wandering reveals neutral cities and enemies for the strategist to act on.
+    """
+
+    def next_move(
+        self, unit: Unit, view: WorldView, force: TaskForce | None
+    ) -> UnitMove:
+        del force
+        target = nearest_frontier(unit, view)
+        if target is None:
+            return sentry(unit)  # nothing left to explore from here
+        return advance_toward(unit, target, view, profile_for(unit))

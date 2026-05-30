@@ -708,28 +708,32 @@ Stitching: ensure every `(UnitKind, Role)` pair the strategist can emit resolves
 > to match forces to goals by *content signature*, not the strategist's
 > per-turn goal id. Gate green (604 passed).
 >
-> **Validation NOT met — stopped for the user (this is the foreseen
-> checkpoint).** Seeded `StrategicAI` vs `BaselineAI` (SMALL profile, 8 seeds,
-> 200-turn cap): **0/8 terminated, StrategicAI 0 wins**; StrategicAI held 1
-> city vs BaselineAI's 3-5. Three issues, two of them real bugs:
-> 1. **Stalemate (foreseen, §Phase-10 note):** STANDARD/SMALL maps put
->    capitals on separate continents (10.10) and the AI has no way to *unload*
->    across water — `TurnPlan` can't express an amphibious unload (only the
->    automatic load-on-step exists). So invasions never complete and games run
->    to the cap. Needs an AI unload mechanism (TurnPlan + engine + ferry
->    behavior) — a real feature, not tuning.
-> 2. **No exploration:** StrategicAI never scouts, so it never *sees* a neutral
->    city → never emits `CaptureCityGoal`. Only `BuildForcesGoal` is ever
->    active. Needs an always-on early-game explore drive.
-> 3. **`BuildForcesGoal` kills its own armies:** its operational target is the
->    AI's own capital, so a freshly-built army is told to "go to" the city it's
->    already in → sentries → disbanded by the §5.4 garrison rule. Build-forces
->    must not park units on a friendly city.
+> **Expansion bugs fixed; one feature gap blocks the win-rate gate.**
 >
-> Decisions for the user before validation can pass: how StrategicAI should
-> explore; what `BuildForcesGoal` does with built units; and whether to build
-> AI amphibious unload now (required for cross-continent termination) or add a
-> single-continent validation profile to measure land-combat quality first.
+> Two bugs found in the first validation run are fixed:
+> - **No exploration → no expansion (was: 1 city forever).** Idle units now
+>   default to **hunt mode** (`HuntBehavior`: push to the nearest frontier)
+>   instead of sentrying — so freshly-built armies leave the capital,
+>   exploration reveals neutral cities, and `CaptureCityGoal`s follow.
+> - **`BuildForcesGoal` parked armies on the capital** (its op-target was the
+>   AI's own city) where the §5.4 garrison rule disbanded them. The strategist
+>   no longer emits it; hunt mode occupies idle units instead.
+> - **Goal realism:** expand now emits a `CaptureCityGoal` only when the target
+>   is land-reachable; an across-water target gets a transport-borne
+>   `ProjectPowerGoal` instead.
+>
+> Re-measured (SMALL, 8 seeds, 300-turn cap): StrategicAI now expands to **4.4
+> cities avg, at parity with BaselineAI (4.4)** — up from 1. But **still 0/8
+> terminated**: capitals are on separate continents (10.10) and there is still
+> no way for the AI to *unload* across water (`TurnPlan` can't express an
+> amphibious unload — only the automatic load-on-step). So the strategic edge
+> (coordinated task forces, defence, power projection) never engages, and the
+> ≥60% win-rate gate cannot be assessed.
+>
+> **Remaining decision for the user:** build AI amphibious unload now
+> (TurnPlan + engine + ferry behavior — required for any cross-continent game
+> to terminate), and/or add a single-continent validation profile to measure
+> land-combat quality where the AIs can actually fight.
 
 **Validation:**
 - 50 seeded `StrategicAI` vs `BaselineAI` games at NORMAL difficulty.
