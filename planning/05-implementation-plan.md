@@ -744,6 +744,48 @@ Stitching: ensure every `(UnitKind, Role)` pair the strategist can emit resolves
 
 ---
 
+## Phase 15.5 — Force-economy redesign (StrategicAI must beat BaselineAI)
+
+**Why:** the land-brawl cross-check (both capitals on one continent, swapped
+sides) showed `StrategicAI` losing **0/10** to `BaselineAI`. Root cause =
+**fragmentation**: ~7 goals, ~3 armies, 1 unit crewed per force → smeared
+across the map while BaselineAI's "every army → nearest high-value target"
+emergently concentrated and won the §5.4 attrition war. The layered AI loses
+*because* of its breadth. Fix the force economy before any further AI work
+(this gates the LLM path too — the LLM only swaps the strategist).
+
+**Design (decided with the user; full rationale in `03-ai-design.md` §3.2 and
+memory `project_force_economy_redesign`):**
+1. **Top-K value discriminator, bounded by the force budget** (not a fixed
+   cap — multi-front when crewable). `value ≈ base(enemy_city > neutral_city >
+   explore; + defense urgency) × proximity_to_existing_force × likelihood_of_
+   success`. An enemy army hittable within strike range overrides passive
+   defence. Drop unwinnable objectives.
+2. **Goals fund goals:** an unfunded top objective → a build/stage goal that
+   concentrates production and **rallies idle units to its rendezvous** instead
+   of hunting; the force strikes as a fist at critical mass.
+3. **Concentration:** operational crews a force with more than the minimum and
+   pulls idle units into a forming force.
+4. **Simple reactive triage:** winnable defence → mass defenders sized to the
+   threat; unwinnable → let the city go, concentrate elsewhere.
+5. **Progress-scaled commitment (anti-oscillation):** incumbent goals get a
+   bonus growing with progress + type (attack-build sticky, hunting fluid);
+   switch only when a new goal clearly beats the bonus-adjusted incumbent. Uses
+   `AIMemory`.
+6. **Empirical tuning:** force-size buffer, budget/K bound, commitment margin,
+   success threshold tuned against the committed land-brawl **arena**
+   (`empire._arena`: swapped StrategicAI vs BaselineAI + binomial test), not
+   guessed.
+
+**Reuses:** `combat.evaluator.CombatEvaluator` (win probability), task-force
+FORMING/EN_ROUTE + rendezvous, `FeasibilityOracle`, `AIMemory`.
+
+**Exit gate:** StrategicAI beats BaselineAI in the arena with statistical
+significance (one-sided binomial p < 0.05), no regression on the SMALL
+separate-continent profile, all `make check` gates green.
+
+---
+
 ## Phase 16 — Persistence hardening + schema v1 freeze (1-2 sessions)
 
 **Deliverable:** Full serializers for every entity including `AIMemory`. Schema v1 frozen — golden saves committed for round-trip regression detection.

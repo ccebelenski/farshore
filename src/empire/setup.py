@@ -129,9 +129,14 @@ def _assign_capitals(
         capital.production.work = 0
 
 
-def _land_continents(real_map: Map) -> list[set[tuple[int, int]]]:
-    """All connected land/city components (8-connectivity)."""
+def land_continents(real_map: Map) -> list[set[tuple[int, int]]]:
+    """All connected land/city components (8-connectivity). Public for
+    map-analysis helpers and validation harnesses."""
     return _components(real_map, lambda t: t in LAND_TERRAINS)
+
+
+# Internal alias retained for existing call sites.
+_land_continents = land_continents
 
 
 def _open_ocean(real_map: Map) -> set[tuple[int, int]]:
