@@ -45,6 +45,10 @@ if TYPE_CHECKING:
 
 # Terminal task forces linger one turn (debug/telemetry grace) before reaping.
 _REAP_GRACE = 1
+# How many armies an offensive (capture/deny) force wants — enough to take a
+# city AND survive the counter, given the §5.4 capture-disband tax. A v1 knob;
+# tuned against the land-brawl arena.
+ATTACK_FORCE_SIZE = 3
 _ARMY = UnitKind.ARMY
 _TRANSPORT = UnitKind.TRANSPORT
 _WARSHIPS = frozenset(
@@ -160,6 +164,11 @@ class OperationalPlanner:
             survivors.append(new_force)
             by_signature[signature] = new_force
 
+        # Concentration: pour leftover idle units into the highest-priority
+        # under-strength forces, so new production massES into one fist instead
+        # of spawning scattered hunters.
+        self._reinforce(survivors, idle, view)
+
         memory.task_forces = survivors
         orders = self._production_requests(survivors, view)
         return OperationalPlan(task_forces=survivors, production_orders=orders)
@@ -248,6 +257,34 @@ class OperationalPlanner:
         memory.next_task_force_id += 1
         return tf
 
+    def _reinforce(
+        self,
+        forces: list[TaskForce],
+        idle: dict[UnitKind, list[UnitId]],
+        view: WorldView,
+    ) -> None:
+        """Distribute leftover idle units into under-strength forces, highest
+        value-per-turn first, and promote a force to EN_ROUTE once crewed."""
+        active = sorted(
+            (tf for tf in forces if not tf.is_terminal()),
+            key=lambda tf: tf.goal.rank(),
+            reverse=True,
+        )
+        for tf in active:
+            short = False
+            for kind, needed in _required_composition(tf.goal).entries:
+                have = sum(1 for uid in tf.unit_ids if _unit_kind(view, uid) is kind)
+                pool = idle.get(kind, [])
+                while have < needed and pool:
+                    uid = pool.pop(0)
+                    tf.unit_ids.append(uid)
+                    tf.role_assignments[uid] = _role_for(tf.goal, kind)
+                    have += 1
+                if have < needed:
+                    short = True
+            if tf.state is TaskForceState.FORMING and not short:
+                tf.state = TaskForceState.EN_ROUTE
+
     def _production_requests(
         self, task_forces: list[TaskForce], view: WorldView
     ) -> list[ProductionOrder]:
@@ -285,7 +322,7 @@ def _goal_signature(goal: Goal) -> tuple[object, ...]:
 
 def _required_composition(goal: Goal) -> ForceComposition:
     if isinstance(goal, CaptureCityGoal):
-        return ForceComposition.of({_ARMY: 1})
+        return ForceComposition.of({_ARMY: ATTACK_FORCE_SIZE})
     if isinstance(goal, DefendCityGoal):
         return ForceComposition.of({_ARMY: max(1, goal.garrison_size_needed)})
     if isinstance(goal, ProjectPowerGoal):
@@ -293,7 +330,7 @@ def _required_composition(goal: Goal) -> ForceComposition:
         counts[_TRANSPORT] = max(counts.get(_TRANSPORT, 0), goal.transport_count)
         return ForceComposition.of(counts)
     if isinstance(goal, DenyContinentGoal):
-        return ForceComposition.of({_ARMY: 2})
+        return ForceComposition.of({_ARMY: ATTACK_FORCE_SIZE})
     if isinstance(goal, ExploreAreaGoal):
         return ForceComposition.of({_ARMY: 1})
     if isinstance(goal, BuildForcesGoal):

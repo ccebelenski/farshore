@@ -29,6 +29,7 @@ from empire.ai.strategic.goals import (
 )
 from empire.ai.strategic.intel.report import IntelReport, OpportunityKind, TheaterState
 from empire.ai.strategic.memory import AIMemory
+from empire.ai.strategic.operational import ATTACK_FORCE_SIZE
 from empire.contracts.world_view import WorldView
 from empire.core.coord import Coord
 from empire.core.identity import CityId, GoalId
@@ -67,13 +68,12 @@ class DeterministicStrategist(Strategist):
         counter = _Counter()
 
         self._defensive_goals(intel, view, goals, counter)
-        self._consolidate_goals(intel, view, goals, counter)
         self._expand_goals(intel, view, goals, counter)
-        self._explore_goals(intel, goals, counter)
-        # Note: idle units default to 'hunt mode' in the tactical layer
-        # (frontier exploration), so there is no need for a goal whose only
-        # job is to occupy them — and a build-forces goal that parked units on
-        # the capital would feed them to the §5.4 garrison disband.
+        # Consolidate (DenyContinent) and explore goals are intentionally not
+        # emitted: they scattered armies to distant theater cells, defeating
+        # concentration. Hunt mode (idle units → frontier, in the tactical
+        # layer) covers exploration; capture goals cover expansion. The goal
+        # types still exist for the LLM strategist and future tuning.
 
         # Best value-per-turn first; ties broken on id for reproducibility.
         goals.sort(key=lambda g: (-g.rank(), int(g.id)))
@@ -163,7 +163,11 @@ class DeterministicStrategist(Strategist):
         anchors = [c.coord for c in view.own_cities] + [u.coord for u in view.own_units]
         if not anchors:
             return
-        capture_cap = max(1, len(view.own_cities))
+        # Budget offensive forces by the army pool, not the city count: only
+        # open as many fronts as we can actually crew (+1 forming), so force
+        # concentrates instead of fragmenting.
+        own_armies = sum(1 for u in view.own_units if u.kind is _ARMY)
+        capture_cap = max(1, own_armies // ATTACK_FORCE_SIZE + 1)
         captures = 0
         projected = False
         for opp in intel.opportunities:
