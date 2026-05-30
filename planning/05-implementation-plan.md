@@ -622,9 +622,29 @@ Net: ~3× wall-clock on the goals; strategist is unavoidably sequential at the e
 
 ---
 
-## Phase 13 — OperationalPlanner + TaskForce + reaper (2 sessions)
+## Phase 13 — OperationalPlanner + TaskForce + reaper (DONE)
 
 **Deliverable:** `OperationalPlanner` consumes goals, assembles `TaskForce`s, emits production orders, reaps terminal-state TFs at end-of-turn.
+
+> **Shipped** in `ai/strategic/operational.py`: `Role`, `TaskForceState`,
+> mutable `TaskForce` (with `to_dict`/`from_dict`), and `OperationalPlanner`.
+> `plan(goals, view, memory) -> OperationalPlan` reaps terminal forces past a
+> one-turn grace, prunes dead units + promotes survivors to COMPLETE/DISBANDED,
+> then assembles new forces for unserved goals from the idle pool (lowest-id
+> first, consumed so two forces never claim a unit), filling roles by goal
+> type. Forming forces emit `ProductionOrder`s for the shortfall. Active TFs
+> live in `AIMemory.task_forces` across turns.
+>
+> **Deviations (resolve-and-note):** a `TaskForce` stores unit *ids*, not live
+> `Unit` refs (§3.3's `units: list[Unit]`) — cleaner to serialize, no stale
+> refs; the tactical executor resolves ids against the map. The "game with
+> active TFs round-trips" canary is covered at the `TaskForce` level here
+> (JSON round-trip test); the full game-with-AIMemory round-trip lands with
+> AIMemory serialization in Phase 16.
+
+**Exit gate:** Gates green — `make check`, 542 passed (+7: force-matching,
+short-force production request, continuity, COMPLETE/DISBANDED reaping,
+goal-completion, TF JSON round-trip).
 
 **Canary tests:**
 - **Force matching:** given a goal requiring (3 armies, 1 transport) and an idle pool that contains them, the resulting `TaskForce` includes exactly those units.
