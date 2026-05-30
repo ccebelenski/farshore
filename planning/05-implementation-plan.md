@@ -655,9 +655,30 @@ goal-completion, TF JSON round-trip).
 
 ---
 
-## Phase 14 — TacticalExecutor + Behaviors (3-4 sessions)
+## Phase 14 — TacticalExecutor + Behaviors (DONE)
 
 **Deliverable:** `Behavior` ABC, `Unit.behavior_for(role)` inversion, concrete behaviors (`ArmyAssault`, `ArmyGarrison`, `TransportFerry`, `FighterStrike`, `FighterScout`, `ShipEscort`, `ShipPatrol`, `SubAmbush`), `DefaultBehavior` (sentry no-op).
+
+> **Shipped** in `ai/strategic/behaviors/`: `Behavior` ABC + `DefaultBehavior`
+> + shared movement helpers (`base.py`); army / air / naval behavior modules;
+> a `behavior_for(kind, role)` registry; and `TacticalExecutor`
+> (`tactical.py`) — `plan_moves(forces, view)` (one `UnitMove` per board unit,
+> idle units sentry) + `revise_move` for mid-turn surprises. Movement reuses
+> the Phase-7 `BFSPathfinder` with the ARMY/SEA/AIR cost profiles; fighters are
+> fuel-aware (peel home to refuel), scouts seek the frontier, escorts close on
+> their transport.
+>
+> **Deviation (resolve-and-note):** the design's `Unit.behavior_for(role)`
+> can't live on `Unit` — `core` may not depend on `ai` (import-linter). The
+> registry instead lives in the AI layer keyed by `UnitKind`; the per-kind
+> modularity the design wanted is preserved (each kind's behaviors live in
+> their own module). Built inline rather than via the planned parallel
+> behavior-agents. `revise` defaults to re-planning a fresh step, which is
+> total over every `Surprise` variant.
+
+**Exit gate:** Gates green — `make check`, 598 passed (+56: full (kind, role)
+coverage, revise-no-crash over every surprise × every behavior, and a
+scenario per behavior).
 
 **Canary tests:**
 - **Coverage:** for every `(UnitKind, Role)` pair the strategist could emit, `unit.behavior_for(role)` returns *some* `Behavior` (possibly `DefaultBehavior`).
