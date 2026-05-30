@@ -577,9 +577,34 @@ Each in its own file under `ai/strategic/intel/` + its own canary test. `IntelSe
 
 ---
 
-## Phase 12 — FeasibilityOracle + Goals + DeterministicStrategist (2-3 sessions)
+## Phase 12 — FeasibilityOracle + Goals + DeterministicStrategist (DONE)
 
 **Deliverable:** `FeasibilityOracle`, full `Goal` hierarchy, `DeterministicStrategist`.
+
+> **Shipped.**
+> - `ai/strategic/goals/` — `base.py` (`Goal` ABC + `ForceComposition` +
+>   `ResourceBudget` + `GoalKind`) and `concrete.py` (the six goals:
+>   `CaptureCityGoal`, `DefendCityGoal`, `ExploreAreaGoal`, `ProjectPowerGoal`,
+>   `DenyContinentGoal`, `BuildForcesGoal`). Each goal is a frozen value type
+>   with a `progress_signal(view)` and `to_dict`/`goal_from_dict` round-trip.
+> - `ai/strategic/feasibility.py` — `FeasibilityOracle`: stateless,
+>   view-per-call `can_assemble` (production-window capacity), `defensible`
+>   (local force vs threat power), `reachable` (bounded terrain-aware BFS).
+> - `ai/strategic/strategist.py` — `Strategist` ABC + `DeterministicStrategist`
+>   (defend → consolidate → expand → project → explore → build, then
+>   rank-and-cap). Every force-requiring goal is gated through the oracle, so
+>   infeasible goals are never emitted. Pure given (intel, view).
+> - `ai/strategic/memory.py` — minimal `AIMemory` (grows in Phases 13+/16).
+>
+> **Notes:** reconciled the two design docs — the oracle is stateless and
+> takes `view` per call (§7), so `Strategist.plan(intel, memory, view)` carries
+> the view and the strategist holds the oracle. The `strategic/__init__` is
+> kept import-free to avoid a package-init cycle; import pieces from their
+> submodules. Built inline rather than via the planned parallel goal-agents.
+
+**Exit gate:** Gates green — `make check`, 535 passed (+20 canaries:
+goal serialization/progress, oracle purity + correctness, strategist
+defend/capture/no-infeasible scenarios).
 
 **Canary tests:**
 - **Oracle purity:** `can_assemble`, `defensible`, `reachable` all deterministic on the same `WorldView`.
