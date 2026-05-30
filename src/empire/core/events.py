@@ -52,6 +52,15 @@ class UnitRemovedEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class UnitDisbandedEvent:
+    """A unit removed for exceeding a city's support limit (spec §5.4) —
+    e.g. an army that never left a friendly city, or a second ship in dock."""
+
+    unit_id: UnitId
+    last_coord: Coord
+
+
+@dataclass(frozen=True, slots=True)
 class CityCapturedEvent:
     city_id: CityId
     new_owner_id: PlayerId | None

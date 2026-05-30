@@ -176,8 +176,12 @@ def test_production_tick_does_not_emit_when_not_ready(p1: Player) -> None:
     assert city.production.work == 3  # ticked from 2 to 3
 
 
-def test_production_waits_when_city_cell_occupied(p1: Player) -> None:
-    """If the city's cell is occupied and stacking is off, the unit waits."""
+def test_production_emits_onto_occupied_city_cell(p1: Player) -> None:
+    """Production always emits on the city cell, even if occupied (spec §5.1).
+
+    Stacking on the city is a transient state; the turn-end disband phase
+    (`disband_overcrowded_city_units`) enforces the city's support limits.
+    """
     city = City(
         id=CityId(1),
         coord=Coord(0, 0),
@@ -188,9 +192,11 @@ def test_production_waits_when_city_cell_occupied(p1: Player) -> None:
     sitting = Army(UnitId(5), p1, Coord(0, 0))
     m.place_unit(sitting, Coord(0, 0))
     produced = run_production_tick(p1, m, STANDARD, lambda: UnitId(10))
-    assert produced == []
-    # Work hit threshold; ready() is True but we didn't consume.
-    assert city.production.ready() is True
+    assert [u.id for u in produced] == [UnitId(10)]
+    assert produced[0].coord == Coord(0, 0)
+    # Both armies now share the city cell; work was consumed.
+    assert {u.id for u in m.units_at(Coord(0, 0))} == {UnitId(5), UnitId(10)}
+    assert city.production.ready() is False
 
 
 # --- combat trigger ---------------------------------------------------------

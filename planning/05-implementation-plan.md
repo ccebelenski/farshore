@@ -499,6 +499,37 @@ regeneration is bounded.
 
 ---
 
+## Phase 10.11 — City support facilities + ground bombardment (DONE)
+
+Inserted out of plan order (done after Phase 11 chronologically), driven by
+playtesting the TUI: produced units were silently auto-sentried and never
+offered. Fixing that opened up a coherent batch of core-mechanic work, all
+spec'd in `01-game-rules-spec.md` §5.1/§5.3/§5.4 and §4.6.
+
+> **Shipped.**
+> - **Produced units await orders** (engine `apply_default_order`): an unset
+>   city default leaves no standing order, so the unit enters the order cycle
+>   instead of being auto-sentried (§5.3).
+> - **City as a unit-support facility** (§5.4): units are produced *on* the
+>   city cell; a turn-end disband phase (`disband_overcrowded_city_units`,
+>   wired as `TurnManager._disband_phase` before production) enforces per-kind
+>   limits — army 0 (armies can't garrison; a conquering army is consumed as
+>   the city's defence), fighter 8 (airbase), sea 1 (dry-dock, repairs via the
+>   existing §2.3 rule, can't load/unload). Armies can't move into a friendly
+>   city. The disband scraps empty ships before loaded ones so it never routes
+>   cargo through the combat-sink path.
+> - **Ground bombardment** (§4.6): `execute_bombardment` — BB/DD/Patrol,
+>   ≥2 HP, one adjacent salvo/turn; army/fighter destroyed outright (ship −1
+>   HP), a docked ship resolved as ordinary combat. TUI `f` key to fire.
+>
+> **Open tuning item:** Patrol's `max_hits` is 1, which the ≥2-HP reserve rule
+> bars from ever firing — resolve by bumping Patrol HP or accepting the quirk.
+
+**Tests:** `test_city_support.py`, `test_bombardment.py`, plus updated
+`test_default_orders.py` / `test_engine.py`. Gates green.
+
+---
+
 ## Phase 11 — IntelService (DONE)
 
 **Deliverable:** `IntelService` produces `IntelReport` with `Threats`, `Opportunities`, `ChokePoints`, `Theaters` from a `WorldView`.

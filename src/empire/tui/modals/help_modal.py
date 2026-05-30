@@ -31,6 +31,7 @@ Unit / city:
   d                set heading — next direction key walks every turn
   g                go-to — move cursor to target, Enter to confirm
   o                unload — next direction lands the carrier's cargo
+  f                bombard — warship fires at the next direction's cell
   w                wake selected unit (clear standing order)
   Esc              deselect / cancel pending mode
 

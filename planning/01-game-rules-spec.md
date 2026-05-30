@@ -166,15 +166,30 @@ When an Army successfully moves into an enemy or neutral city's cell (combat res
 
 Under `army_capture_city_deterministic = false` (the default), city capture succeeds on a probability check (50%) — even after defeating the defender, the city may "resist" and the Army is destroyed instead. With the rule on, capture is deterministic.
 
+### 4.6 Ground bombardment
+
+Surface warships can shell adjacent shore and air targets — the mechanism by which a navy projects power onto the coast.
+
+- **Who:** Battleship, Destroyer, Patrol (surface gun platforms). Submarines (ship hunters), Carriers (project power through their fighters), and Transports (unarmed) cannot bombard.
+- **When:** once per turn, as the ship's entire action that turn (re-laying the guns costs the turn). The ship must have **at least 2 HP** — it always reserves its last point, so a bombardment can never sink the firing ship. *(Note: with Patrol's current `max_hits` of 1 this bars Patrols in practice; a stat/rule tension to resolve in tuning.)*
+- **Target:** one cell at Chebyshev distance 1. The shot ignores terrain (it is a strike, not a move) and the firing ship does **not** move. Only enemy units are valid; satellites are never targetable.
+- **Resolution** — the salvo strikes one occupant, by priority **ship → fighter → army**:
+  - An **army or fighter** is destroyed outright regardless of HP; the firing ship takes exactly **1 HP** of damage.
+  - A **ship** (only ever a hull docked in the shelled city) is resolved as ordinary combat (§4.2) instead — attrition damage to both, the firing ship staying in place. The flat 1-HP cost does not apply.
+- **Cities:** a city has no HP and cannot be captured by gunfire (only Armies capture cities, §4.5), but its garrison is **not** shielded — shelling a coastal city hits the units inside it. Because a docked ship is the priority target, a berthed hull soaks the salvo and effectively screens the airbase behind it until it is gone.
+- **Out of scope:** open-water ship-versus-ship engagements are unchanged — they remain ordinary move-in combat (§4.1). Bombardment is not a ranged anti-ship weapon; a lone ship on open water is not a bombardment target.
+
+The strategic effect: a warship denies the adjacent coastline to enemy armies and fighters, enabling combined-arms landings (shell the beach clear, then unload). But each salvo costs 1 HP, restored only by berthing in a friendly dry-dock (§5.4) at +1 HP/turn — so bombardment is a finite, refreshable resource.
+
 ---
 
 ## 5. Production
 
 ### 5.1 Per-turn tick
 
-Each turn, each owned city accumulates one production point toward its current build target. When accumulated work ≥ that target's `build_time`, the unit is produced: it appears in the city's cell (subject to a one-unit-per-cell rule), and accumulated work resets to zero.
+Each turn, each owned city accumulates one production point toward its current build target. When accumulated work ≥ that target's `build_time`, the unit is produced: it appears **on the city's cell** and accumulated work resets to zero.
 
-If the cell is occupied at production time, the new unit is held pending and emerges the next turn the cell is clear.
+A produced unit may share the city cell even when something is already there — stacking on a city cell is permitted as a transient state regardless of `allow_unit_stacking`. The city's support limits (§5.4) decide, at turn-end, how many units may remain; the rest are disbanded. Production therefore never stalls on a full cell.
 
 ### 5.2 Changing production
 
@@ -182,7 +197,21 @@ The player (or AI) may change a city's production target at any time. Doing so i
 
 ### 5.3 Default orders
 
-Each city may have a default order per unit kind: what to do with the unit immediately upon production. Options include `SENTRY` (sit in the city), `MOVE_TO(coord)` (head to a destination), or `ATTACK_NEAREST_ENEMY`. The implementation maintains this per-city, per-unit-kind map; default for all is `SENTRY`.
+Each city may have a default order per unit kind: what to do with the unit immediately upon production. Options are `SENTRY` (sit in the city), `MOVE_TO(coord)` (head to a destination), or `ATTACK_NEAREST_ENEMY`. The implementation maintains this per-city, per-unit-kind map.
+
+**Unset is not `SENTRY`.** When a city has no explicit default for a kind, the produced unit gets **no standing order** — it awaits orders, entering the player's order cycle (or, for an AI, its controller decides). Auto-sentrying produced units would mean the player is never prompted for them and the AI would treat them as already-handled. A city must be *explicitly* set to `SENTRY` for its output to hold station.
+
+### 5.4 City support limits (garrison / airbase / dry-dock)
+
+A city supports a limited number of friendly units resting on its cell, by category. At each player's **turn-end**, units of a category beyond its limit are **disbanded** (oldest keep their slots; newest excess are removed).
+
+| Category | Limit | Notes |
+|---|---|---|
+| Army (land) | **0** | Armies may never garrison a friendly city — a garrison would make the city effectively uncapturable. Consequently an army may **not move into an already-friendly city** (capturing an enemy/neutral city is still legal: it isn't friendly until taken). The only ways an army lands on a friendly city are production with nowhere to go, or having just conquered it (out of moves) — either way it is disbanded at turn-end, becoming the city's abstract defence. |
+| Fighter (air) | **8** | The city is an airbase, holding the same number of fighters as a Carrier. |
+| Sea | **1** | The city is a dry-dock: one ship may berth and repairs +1 HP/turn (§2.3). A ship in dry-dock can neither **load nor unload** cargo. |
+
+Satellites are exempt (they orbit rather than dock; §2.4).
 
 ---
 

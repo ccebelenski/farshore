@@ -54,13 +54,18 @@ def test_sentry_default_sets_sentry_order(p1: Player) -> None:
     assert isinstance(army.standing_order, Sentry)
 
 
-def test_unset_default_is_sentry(p1: Player) -> None:
+def test_unset_default_leaves_no_order(p1: Player) -> None:
+    """No explicit city default → the produced unit awaits orders (spec §5.3).
+
+    It must NOT be auto-sentried, or the TUI auto-cycle would never offer it
+    and the AI would treat it as already-handled.
+    """
     city = City(id=CityId(1), coord=Coord(0, 0), owner=p1)
     army = Army(UnitId(1), p1, Coord(0, 0))
 
-    apply_default_order(army, city)  # no default configured → SENTRY
+    apply_default_order(army, city)  # no default configured → awaits orders
 
-    assert isinstance(army.standing_order, Sentry)
+    assert army.standing_order is None
 
 
 def test_move_to_default_sets_patrol_toward_target(p1: Player) -> None:

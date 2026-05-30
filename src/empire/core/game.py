@@ -28,6 +28,7 @@ from empire.core.engine import (
     advance_satellites,
     apply_standing_orders,
     crash_out_of_fuel_fighters,
+    disband_overcrowded_city_units,
     execute_unit_path,
     repair_in_cities,
     run_production_tick,
@@ -182,11 +183,32 @@ class TurnManager:
 
     def run_round(self) -> None:
         for player in self.game.players:
+            self._disband_phase(player)
             self._production_phase(player)
             self._standing_orders_phase(player)
             self._movement_phase(player)
             self._scan_phase(player)
         self._end_of_round()
+
+    def _disband_phase(self, player: Player) -> None:
+        """Resolve the end of `player`'s previous turn: disband units left in a
+        friendly city beyond its support limit (spec §5.4).
+
+        Runs *before* production so it never touches a unit produced this
+        segment — that unit must survive to be commanded this turn. It catches
+        last turn's un-moved army, an army that just conquered a city (now its
+        abstract defence), and over-capacity ships/fighters. Placing it at the
+        segment start is what makes the timing uniform for the human (whose
+        moves happen between `e` presses, outside `run_round`) and the AI.
+        """
+        from empire.core.events import UnitDisbandedEvent
+
+        # Snapshot coords before removal so the event carries a real location.
+        coords = {u.id: u.coord for u in self.game.map.all_units()}
+        for uid in disband_overcrowded_city_units(player, self.game.map):
+            self.game.event_bus.publish(
+                UnitDisbandedEvent(unit_id=uid, last_coord=coords[uid])
+            )
 
     def _standing_orders_phase(self, player: Player) -> None:
         """Apply each owned unit's persistent order, before the controller plans.

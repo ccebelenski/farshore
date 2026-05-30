@@ -19,6 +19,7 @@ from empire.core.events import (
     CityCapturedEvent,
     GameEndedEvent,
     TurnAdvancedEvent,
+    UnitDisbandedEvent,
     UnitMovedEvent,
     UnitPlacedEvent,
     UnitRemovedEvent,
@@ -110,6 +111,17 @@ class LogPanel(VerticalScroll):
                 f"({e.last_coord.x},{e.last_coord.y})[/magenta]",
             )
 
+        def on_disbanded(e: UnitDisbandedEvent) -> None:
+            # Disband fires on the owner's own city cell, which the owner can
+            # always see; fog-filter by location so enemy disbands at unseen
+            # cities stay hidden. Yellow: a (usually self-inflicted) loss.
+            if not seen(e.last_coord):
+                return
+            write(
+                f"  [yellow]unit#{int(e.unit_id)} disbanded (no city room) at "
+                f"({e.last_coord.x},{e.last_coord.y})[/yellow]",
+            )
+
         def on_captured(e: CityCapturedEvent) -> None:
             from empire.core.identity import CityId
 
@@ -136,5 +148,6 @@ class LogPanel(VerticalScroll):
         bus.subscribe(UnitPlacedEvent, on_placed)
         bus.subscribe(UnitMovedEvent, on_moved)
         bus.subscribe(UnitRemovedEvent, on_removed)
+        bus.subscribe(UnitDisbandedEvent, on_disbanded)
         bus.subscribe(CityCapturedEvent, on_captured)
         bus.subscribe(GameEndedEvent, on_ended)

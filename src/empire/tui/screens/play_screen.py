@@ -27,7 +27,10 @@ from empire.contracts.turn_plan import ProductionOrder, TurnPlan
 from empire.core.city import City, DefaultOrder, OrderKind
 from empire.core.coord import Coord, Direction
 from empire.core.engine import (
+    BombardmentOutcome,
     StepOutcome,
+    can_bombard,
+    execute_bombardment,
     execute_unit_path,
     execute_unload,
     scan_set_for_player,
@@ -95,6 +98,7 @@ class PlayScreen(Screen[None]):
         Binding("d", "set_heading", "set heading"),
         Binding("g", "go_to", "go-to"),
         Binding("o", "unload", "unload cargo"),
+        Binding("f", "bombard", "bombard"),
         Binding("w", "wake", "wake unit"),
         Binding("n", "next_unit", "next unit"),
         Binding("shift+n", "prev_unit", "prev unit"),
@@ -153,6 +157,8 @@ class PlayScreen(Screen[None]):
         self._awaiting_goto_target: bool = False
         # Next direction key unloads the selected carrier's next cargo unit.
         self._awaiting_unload: bool = False
+        # Next direction key fires a bombardment at that adjacent cell.
+        self._awaiting_bombard: bool = False
         # When set, the cursor is picking a MOVE_TO destination for a city's
         # default order: (city_id, unit_kind).
         self._awaiting_city_order_target: tuple[CityId, UnitKind] | None = None
@@ -222,6 +228,10 @@ class PlayScreen(Screen[None]):
         # Unload mode: the next direction key lands a cargo unit ashore.
         if self._awaiting_unload and self._selected_unit_id is not None:
             self._do_unload(self._selected_unit_id, d)
+            return
+        # Bombard mode: the next direction key fires at that adjacent cell.
+        if self._awaiting_bombard and self._selected_unit_id is not None:
+            self._do_bombard(self._selected_unit_id, d)
             return
         if self._selected_unit_id is None:
             # No selection: direction keys move the cursor freely.
@@ -414,11 +424,13 @@ class PlayScreen(Screen[None]):
             self._awaiting_heading
             or self._awaiting_goto_target
             or self._awaiting_unload
+            or self._awaiting_bombard
             or self._awaiting_city_order_target is not None
         ):
             self._awaiting_heading = False
             self._awaiting_goto_target = False
             self._awaiting_unload = False
+            self._awaiting_bombard = False
             self._awaiting_city_order_target = None
             self._hint = "cancelled"
             self._refresh_view()
@@ -481,6 +493,70 @@ class PlayScreen(Screen[None]):
             f"unload ({len(unit.cargo)} aboard): press a direction "
             f"toward the destination cell (Esc to cancel)"
         )
+        self._refresh_view()
+
+    def action_bombard(self) -> None:
+        """Arm bombardment: the next direction key fires at that adjacent cell."""
+        if self._selected_unit_id is None:
+            self._hint = "select a warship first"
+            self._refresh_view()
+            return
+        unit = self._selected_unit()
+        if unit is None or not can_bombard(unit):
+            self._hint = "can't bombard — needs a Battleship/Destroyer/Patrol with 2+ HP"
+            self._refresh_view()
+            return
+        self._awaiting_bombard = True
+        self._hint = "bombard: press a direction toward the adjacent target (Esc to cancel)"
+        self._refresh_view()
+
+    def _do_bombard(self, ship_id: UnitId, d: Direction) -> None:
+        """Fire one salvo from the selected ship at the adjacent cell in `d`."""
+        self._awaiting_bombard = False
+        ship = self._game.map.unit_by_id(ship_id)
+        if ship is None:
+            self._refresh_view()
+            return
+        target = ship.coord.step(d)
+        result = execute_bombardment(
+            ship=ship,
+            target=target,
+            real_map=self._game.map,
+            rules=self._game.rules,
+            combat_resolver=self._game.combat_resolver,
+            rng=self._game.rng,
+        )
+        fired = result.outcome in (
+            BombardmentOutcome.TARGET_DESTROYED,
+            BombardmentOutcome.TARGET_SUNK,
+            BombardmentOutcome.ATTACKER_SUNK,
+        )
+        if not fired:
+            # No salvo spent (ineligible / out of range / empty cell).
+            self._hint = f"can't bombard there ({result.outcome.value})"
+            self._refresh_view()
+            return
+
+        if result.target_id is not None:
+            self._bus.publish(
+                UnitRemovedEvent(unit_id=result.target_id, last_coord=target)
+            )
+        if result.attacker_destroyed:
+            self._bus.publish(UnitRemovedEvent(unit_id=ship.id, last_coord=ship.coord))
+
+        # The salvo is the ship's action for the turn.
+        self._handled.add(ship.id)
+        alive = self._game.map.unit_by_id(ship.id)
+        if alive is not None:
+            self._moves_used[ship.id] = alive.moves_this_turn()
+        scanned = scan_set_for_player(self._human, self._game.map)
+        self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)
+        if result.outcome is BombardmentOutcome.ATTACKER_SUNK:
+            self._hint = f"bombardment lost the duel at ({target.x},{target.y})"
+        elif alive is not None:
+            self._hint = f"bombarded ({target.x},{target.y}); ship now at {alive.hits} HP"
+        self._selected_unit_id = None
+        self._advance_to_next_unit()
         self._refresh_view()
 
     def action_wake(self) -> None:
@@ -739,14 +815,28 @@ class PlayScreen(Screen[None]):
                 target = candidates[0]
         self._select_and_center(target)
         remaining = len(candidates)
-        self._hint = (
-            f"{remaining} unit(s) need orders; direction keys queue path, "
-            f"'n' skip, '.' sentry"
-        )
+        warning = self._in_city_warning(target)
+        if warning is not None:
+            self._hint = warning
+        else:
+            self._hint = (
+                f"{remaining} unit(s) need orders; direction keys queue path, "
+                f"'n' skip, '.' sentry"
+            )
 
     def _select_and_center(self, unit: Unit) -> None:
         self._selected_unit_id = unit.id
         self._cursor = unit.coord
+
+    def _in_city_warning(self, unit: Unit) -> str | None:
+        """A move-or-lose warning if `unit` sits in a friendly city it can't
+        garrison (spec §5.4). Armies (city limit 0) are always at risk."""
+        tile = self._game.map.tile(unit.coord)
+        if tile.city is None or tile.city.owner is not self._human:
+            return None
+        if unit.kind is UnitKind.ARMY:
+            return "army in your city — move it out this turn or it disbands"
+        return None
 
     def _build_plan(self) -> TurnPlan:
         """Build the human's TurnPlan for end-of-turn.

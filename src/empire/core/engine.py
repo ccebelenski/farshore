@@ -143,10 +143,12 @@ def run_production_tick(
     """Tick production for every city owned by `player`.
 
     Each tick advances the city's production by one. When the
-    accumulated work reaches the build target, a unit is emitted on the
-    city's cell (subject to one-unit-per-cell unless `allow_unit_stacking`)
-    and placed via `Map.place_unit`. The accumulator is then consumed by
-    one full build-time's worth so excess work carries forward.
+    accumulated work reaches the build target, a unit is emitted *on the
+    city's cell* and placed via `Map.place_unit`. Stacking on the city cell
+    is permitted as a transient state regardless of `allow_unit_stacking`;
+    the turn-end disband phase (`disband_overcrowded_city_units`) enforces
+    the city's per-category support limits. The accumulator is then consumed
+    by one full build-time's worth so excess work carries forward.
 
     Returns the list of newly-produced units.
     """
@@ -158,9 +160,6 @@ def run_production_tick(
             continue
         city.production.tick()
         if not city.production.ready():
-            continue
-        if not rules.allow_unit_stacking and real_map.units_at(city.coord):
-            # Cell occupied; unit waits a turn. Don't consume.
             continue
         kind = city.production.building
         unit_cls = UNIT_REGISTRY[kind]
@@ -178,10 +177,14 @@ def run_production_tick(
 
 
 def apply_default_order(unit: Unit, city: City) -> None:
-    """Translate a city's default order for `unit`'s kind into a standing order.
+    """Translate a city's *explicit* default order for `unit`'s kind into a
+    standing order.
 
     Spec §5.3:
-    - `SENTRY` → the unit holds in the city (the implicit default).
+    - No explicit default → no standing order: the freshly-produced unit
+      awaits orders (it enters the player's order cycle / the AI commands it).
+      Crucially this is NOT auto-SENTRY — produced units must be offered.
+    - `SENTRY` → the unit holds in the city.
     - `MOVE_TO(target)` → a `PatrolPath` along a greedy 8-directional line
       toward the target. Core can't depend on the pathfinding layer, so this
       is a straight march that interrupts on obstacles (coast/enemy/block)
@@ -190,7 +193,9 @@ def apply_default_order(unit: Unit, city: City) -> None:
     - `ATTACK_NEAREST_ENEMY` → recorded on the city but left for the
       controller/AI layers to act on; no standing order is set here.
     """
-    order = city.default_order_for(unit.kind)
+    order = city.default_orders.get(unit.kind)
+    if order is None:
+        return  # unset → unit awaits orders (do not auto-sentry)
     if order.kind is OrderKind.SENTRY:
         unit.standing_order = Sentry()
     elif order.kind is OrderKind.MOVE_TO and order.target is not None:
@@ -228,6 +233,7 @@ def _sign(n: int) -> int:
 class StepOutcome(Enum):
     OK = "ok"
     ILLEGAL = "illegal"
+    FRIENDLY_CITY = "friendly_city"  # an army may not enter a friendly city
     BLOCKED_BY_FRIENDLY = "blocked_by_friendly"
     OUT_OF_MOVES = "out_of_moves"
     ATTACKER_DIED = "attacker_died"
@@ -290,6 +296,15 @@ def execute_unit_path(
         if not is_legal_step(unit, target, real_map, rules):
             last_outcome = StepOutcome.ILLEGAL
             break
+
+        # Armies may not enter a friendly city — garrisoning would make cities
+        # uncapturable (spec §5.4). Capturing an enemy/neutral city is still a
+        # legal move: the city isn't the mover's yet, so this guard misses it.
+        if unit.kind is UnitKind.ARMY:
+            target_city = real_map.tile(target).city
+            if target_city is not None and target_city.owner is unit.owner:
+                last_outcome = StepOutcome.FRIENDLY_CITY
+                break
 
         occupants = real_map.units_at(target)
         if (
@@ -382,6 +397,9 @@ def _loadable_carrier_at(unit: Unit, target: Coord, real_map: Map) -> Unit | Non
         return None
     if unit.coord.chebyshev_to(target) > 1:
         return None
+    # A ship in dry-dock (on a city cell) can neither load nor unload (spec §5.4).
+    if real_map.tile(target).city is not None:
+        return None
     for occ in real_map.units_at(target):
         if occ.can_carry(unit):
             return occ
@@ -428,6 +446,9 @@ def execute_unload(
         real_map.unit_by_id(cargo.carried_by) if cargo.carried_by is not None else None
     )
     if carrier is None:
+        return _unload_fail(StepOutcome.ILLEGAL)
+    # A carrier in dry-dock (on a city cell) cannot unload (spec §5.4).
+    if real_map.tile(carrier.coord).city is not None:
         return _unload_fail(StepOutcome.ILLEGAL)
     if cargo.loaded_this_turn:
         return _unload_fail(StepOutcome.NO_UNLOAD_YET)
@@ -495,6 +516,113 @@ def _unload_fail(outcome: StepOutcome) -> MoveOutcome:
 def _is_intangible(unit: Unit) -> bool:
     """Satellites can be neither attacked nor blocked (spec §2.4)."""
     return unit.kind is UnitKind.SATELLITE
+
+
+# -----------------------------------------------------------------------------
+# Ground bombardment: surface warships strike adjacent shore/air targets (§4.6)
+# -----------------------------------------------------------------------------
+
+# Surface gun platforms. Submarines hunt ships; carriers fight through their
+# air wing; transports are unarmed — none of them bombard.
+_BOMBARD_KINDS = frozenset(
+    {UnitKind.BATTLESHIP, UnitKind.DESTROYER, UnitKind.PATROL}
+)
+# A ship always reserves its last hit, so it can never bombard itself to death.
+MIN_BOMBARD_HP = 2
+
+
+class BombardmentOutcome(Enum):
+    TARGET_DESTROYED = "target_destroyed"  # army/fighter wiped out
+    TARGET_SUNK = "target_sunk"  # docked ship lost the ensuing naval duel
+    ATTACKER_SUNK = "attacker_sunk"  # the bombarding ship lost that duel
+    NO_TARGET = "no_target"  # nothing bombardable in the cell
+    OUT_OF_RANGE = "out_of_range"  # not an adjacent on-board cell
+    INELIGIBLE = "ineligible"  # wrong ship kind, or under MIN_BOMBARD_HP
+
+
+@dataclass(frozen=True, slots=True)
+class BombardResult:
+    outcome: BombardmentOutcome
+    target_id: UnitId | None = None
+    attacker_destroyed: bool = False
+
+
+def can_bombard(ship: Unit) -> bool:
+    """True if `ship` is a surface warship with the HP to fire (spec §4.6)."""
+    return ship.kind in _BOMBARD_KINDS and ship.hits >= MIN_BOMBARD_HP
+
+
+def execute_bombardment(
+    ship: Unit,
+    target: Coord,
+    real_map: Map,
+    rules: RuleSet,
+    combat_resolver: CombatResolverProtocol,
+    rng: random.Random,
+) -> BombardResult:
+    """Fire one salvo from `ship` at the adjacent cell `target` (spec §4.6).
+
+    The salvo hits a single enemy occupant, by priority **ship → fighter →
+    army**. An army or fighter is destroyed outright (any HP) and the ship
+    pays exactly 1 HP. A ship target (only ever a hull docked in the shelled
+    city) is instead resolved as ordinary combat — the attacker stays put
+    since the strike is ranged. Open-water naval duels are unaffected; a lone
+    ship on open water is not a bombardment target.
+    """
+    del rules  # reserved for future bombardment rule toggles
+    if not can_bombard(ship):
+        return BombardResult(BombardmentOutcome.INELIGIBLE)
+    if not real_map.in_bounds(target) or ship.coord.chebyshev_to(target) != 1:
+        return BombardResult(BombardmentOutcome.OUT_OF_RANGE)
+
+    victim = _bombard_target(ship, target, real_map)
+    if victim is None:
+        return BombardResult(BombardmentOutcome.NO_TARGET)
+
+    if victim.kind in _SEA_KINDS:
+        # Naval target: ordinary attrition combat, attacker stays in place.
+        combat_resolver.resolve(ship, victim, rng)
+        if ship.hits <= 0:
+            real_map.remove_unit(ship)
+            return BombardResult(
+                BombardmentOutcome.ATTACKER_SUNK,
+                target_id=victim.id,
+                attacker_destroyed=True,
+            )
+        real_map.remove_unit(victim)
+        return BombardResult(BombardmentOutcome.TARGET_SUNK, target_id=victim.id)
+
+    # Army or fighter: wiped out regardless of HP; the salvo costs 1 HP.
+    real_map.remove_unit(victim)
+    ship.hits -= 1
+    return BombardResult(BombardmentOutcome.TARGET_DESTROYED, target_id=victim.id)
+
+
+def _bombard_target(ship: Unit, target: Coord, real_map: Map) -> Unit | None:
+    """The single enemy unit a salvo on `target` strikes, or None.
+
+    Priority: a docked **ship** (only counted when the cell is a city — open
+    water naval duels stay move-in combat), then a **fighter**, then an
+    **army** (transient, since armies can't garrison). Intangible units
+    (satellites) are never targets.
+    """
+    enemies = [
+        u
+        for u in real_map.units_at(target)
+        if u.owner is not ship.owner and not _is_intangible(u)
+    ]
+    if not enemies:
+        return None
+    predicates: list[Callable[[Unit], bool]] = []
+    if real_map.tile(target).city is not None:
+        predicates.append(lambda u: u.kind in _SEA_KINDS)
+    predicates.append(lambda u: u.kind is UnitKind.FIGHTER)
+    predicates.append(lambda u: u.kind is UnitKind.ARMY)
+    for predicate in predicates:
+        for unit in enemies:
+            if predicate(unit):
+                return unit
+    return None
 
 
 def _spend_fighter_fuel(unit: Unit, at: Coord, real_map: Map, rules: RuleSet) -> None:
@@ -597,6 +725,90 @@ def repair_in_cities(real_map: Map) -> tuple[UnitId, ...]:
             unit.hits += 1
             repaired.append(unit.id)
     return tuple(repaired)
+
+
+# -----------------------------------------------------------------------------
+# City support limits: garrison / airbase / dry-dock (spec §5.4)
+# -----------------------------------------------------------------------------
+
+# Sea kinds share the city's single dry-dock slot.
+_SEA_KINDS = frozenset(
+    {
+        UnitKind.PATROL,
+        UnitKind.DESTROYER,
+        UnitKind.SUBMARINE,
+        UnitKind.TRANSPORT,
+        UnitKind.CARRIER,
+        UnitKind.BATTLESHIP,
+    }
+)
+
+# How many friendly units of each support category may rest on a city cell.
+# Army 0: armies may never garrison a friendly city (it would make the city
+# uncapturable). Fighter 8: airbase, same as a Carrier. Sea 1: dry-dock holds
+# one ship (which also repairs via `repair_in_cities`). Satellites are exempt
+# (they orbit; see `_city_support_category`).
+_CITY_SUPPORT_LIMITS: dict[str, int] = {"land": 0, "air": 8, "sea": 1}
+
+
+def _city_support_category(kind: UnitKind) -> str | None:
+    """The city-support category for `kind`, or None if exempt.
+
+    Satellites are exempt: they orbit rather than dock, and leave a city on
+    their own via `advance_satellites`.
+    """
+    if kind is UnitKind.ARMY:
+        return "land"
+    if kind is UnitKind.FIGHTER:
+        return "air"
+    if kind in _SEA_KINDS:
+        return "sea"
+    return None  # SATELLITE
+
+
+def disband_overcrowded_city_units(player: Player, real_map: Map) -> tuple[UnitId, ...]:
+    """Disband `player`'s units that exceed a city's per-category support limit.
+
+    Run at each player's turn-end. For every category over its limit on a
+    friendly city cell the excess is removed; loaded ships keep their berth
+    and, among equals, the oldest (lowest id) units keep their slots — so the
+    unit scrapped is the empty, freshly-produced one. Armies have a limit of
+    0, so any army resting on a friendly city is disbanded — a produced army
+    that never marched out, or one that just conquered the city and is now its
+    abstract defence.
+
+    A disband must never drown cargo: `Map.remove_unit` sinks a carrier's hold
+    (that is the combat-loss path, spec §4.5), so we deliberately scrap empty
+    ships before loaded ones. Under standard (no-stacking) rules the only
+    over-limit ship is the empty produced hull, so a loaded ship is never the
+    one removed here.
+
+    Returns the disbanded unit ids, ascending.
+    """
+    disbanded: list[UnitId] = []
+    for city in real_map.cities():
+        if city.owner is not player:
+            continue
+        by_category: dict[str, list[Unit]] = {}
+        for unit in real_map.units_at(city.coord):
+            if unit.owner is not player:
+                continue
+            category = _city_support_category(unit.kind)
+            if category is None:
+                continue
+            by_category.setdefault(category, []).append(unit)
+        for category, units in by_category.items():
+            limit = _CITY_SUPPORT_LIMITS[category]
+            if len(units) <= limit:
+                continue
+            # Keep loaded ships, then oldest; scrap empty/newest first so an
+            # administrative disband never sinks a hold full of cargo.
+            units.sort(key=lambda u: (not u.cargo, int(u.id)))
+            for unit in units[limit:]:
+                real_map.remove_unit(unit)
+                disbanded.append(unit.id)
+    disbanded.sort(key=int)
+    return tuple(disbanded)
 
 
 # -----------------------------------------------------------------------------
