@@ -80,7 +80,7 @@ def test_every_subclass_declares_every_required_classvar() -> None:
 _GOLDEN: Final[dict[UnitKind, dict[str, object]]] = {
     UnitKind.ARMY: {"max_hits": 1, "speed": 1, "strength": 1, "build_time": 5, "symbol": "A"},
     UnitKind.FIGHTER: {"max_hits": 1, "speed": 8, "strength": 1, "build_time": 10, "symbol": "F"},
-    UnitKind.PATROL: {"max_hits": 1, "speed": 4, "strength": 1, "build_time": 15, "symbol": "P"},
+    UnitKind.PATROL: {"max_hits": 2, "speed": 4, "strength": 1, "build_time": 15, "symbol": "P"},
     UnitKind.DESTROYER: {"max_hits": 3, "speed": 3, "strength": 2, "build_time": 20, "symbol": "D"},
     UnitKind.SUBMARINE: {"max_hits": 2, "speed": 2, "strength": 3, "build_time": 25, "symbol": "S"},
     UnitKind.TRANSPORT: {"max_hits": 3, "speed": 2, "strength": 0, "build_time": 30, "symbol": "T"},

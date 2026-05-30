@@ -82,14 +82,15 @@ def _bombard(m: Map, ship: Unit, target: Coord) -> BombardResult:
 def test_eligibility_by_kind_and_hp(p1: Player) -> None:
     assert can_bombard(Battleship(UnitId(1), p1, Coord(0, 0)))  # 18 HP
     assert can_bombard(Destroyer(UnitId(2), p1, Coord(0, 0)))  # 3 HP
+    assert can_bombard(Patrol(UnitId(3), p1, Coord(0, 0)))  # 2 HP — fires, then 1
     # Wrong kinds never bombard.
     assert not can_bombard(Submarine(UnitId(4), p1, Coord(0, 0)))
     assert not can_bombard(Carrier(UnitId(5), p1, Coord(0, 0)))
     assert not can_bombard(Transport(UnitId(6), p1, Coord(0, 0)))
-    # Patrol is a gun platform by kind, but its 1-HP hull can't satisfy the
-    # reserve-the-last-point rule, so in practice it can never fire. This is a
-    # known stat/rule tension flagged for tuning (bump Patrol HP, or accept it).
-    assert not can_bombard(Patrol(UnitId(3), p1, Coord(0, 0)))
+    # A warship at 1 HP can't fire — it always reserves its last point.
+    patrol = Patrol(UnitId(7), p1, Coord(0, 0))
+    patrol.hits = 1
+    assert not can_bombard(patrol)
 
 
 def test_ship_at_one_hp_cannot_bombard(p1: Player, p2: Player) -> None:

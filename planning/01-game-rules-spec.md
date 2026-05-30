@@ -171,7 +171,7 @@ Under `army_capture_city_deterministic = false` (the default), city capture succ
 Surface warships can shell adjacent shore and air targets — the mechanism by which a navy projects power onto the coast.
 
 - **Who:** Battleship, Destroyer, Patrol (surface gun platforms). Submarines (ship hunters), Carriers (project power through their fighters), and Transports (unarmed) cannot bombard.
-- **When:** once per turn, as the ship's entire action that turn (re-laying the guns costs the turn). The ship must have **at least 2 HP** — it always reserves its last point, so a bombardment can never sink the firing ship. *(Note: with Patrol's current `max_hits` of 1 this bars Patrols in practice; a stat/rule tension to resolve in tuning.)*
+- **When:** once per turn, as the ship's entire action that turn (re-laying the guns costs the turn). The ship must have **at least 2 HP** — it always reserves its last point, so a bombardment can never sink the firing ship. (A Patrol, at 2 HP, fires once and drops to 1; it must repair before it can fire again.)
 - **Target:** one cell at Chebyshev distance 1. The shot ignores terrain (it is a strike, not a move) and the firing ship does **not** move. Only enemy units are valid; satellites are never targetable.
 - **Resolution** — the salvo strikes one occupant, by priority **ship → fighter → army**:
   - An **army or fighter** is destroyed outright regardless of HP; the firing ship takes exactly **1 HP** of damage.

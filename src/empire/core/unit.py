@@ -192,7 +192,7 @@ class Fighter(Unit):
 
 class Patrol(Unit):
     kind = UnitKind.PATROL
-    max_hits = 1
+    max_hits = 2
     speed = 4
     strength = 1
     capacity = 0

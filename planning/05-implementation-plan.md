@@ -521,9 +521,8 @@ spec'd in `01-game-rules-spec.md` §5.1/§5.3/§5.4 and §4.6.
 > - **Ground bombardment** (§4.6): `execute_bombardment` — BB/DD/Patrol,
 >   ≥2 HP, one adjacent salvo/turn; army/fighter destroyed outright (ship −1
 >   HP), a docked ship resolved as ordinary combat. TUI `f` key to fire.
->
-> **Open tuning item:** Patrol's `max_hits` is 1, which the ≥2-HP reserve rule
-> bars from ever firing — resolve by bumping Patrol HP or accepting the quirk.
+>   Patrol `max_hits` bumped 1 → 2 (matching the Submarine) so it can fire
+>   once before needing repair.
 
 **Tests:** `test_city_support.py`, `test_bombardment.py`, plus updated
 `test_default_orders.py` / `test_engine.py`. Gates green.
