@@ -182,6 +182,17 @@ class TurnManager:
         self.game: Game = game
 
     def run_round(self) -> None:
+        from empire.core.engine import clear_movement_pins, reset_city_artillery
+
+        # Re-arm every city's one-shot artillery and clear last round's
+        # movement pins before anything moves (spec §4.7).
+        reset_city_artillery(self.game.map)
+        clear_movement_pins(self.game.map)
+        # Opening barrage: ALL cities (every player's + neutral) fire once,
+        # before anyone moves. This is symmetric — no unit has moved yet, so
+        # there is no first-mover advantage — and it is what shoots an army
+        # sitting adjacent *before* it can step onto the city to capture it.
+        self._opening_barrage_phase()
         for player in self.game.players:
             self._disband_phase(player)
             self._production_phase(player)
@@ -189,6 +200,44 @@ class TurnManager:
             self._movement_phase(player)
             self._scan_phase(player)
         self._end_of_round()
+
+    def _opening_barrage_phase(self) -> None:
+        """City artillery's opening salvo (spec §4.7): before any player moves,
+        every city — owned or neutral — fires once at its most dangerous
+        in-range enemy. Symmetric across players (nobody has moved), so it
+        carries no turn-order advantage. A city that fires here has spent its
+        one shot for the round; the reactive path in `_apply_turn_plan` only
+        fires cities that still have their shot (e.g. against a unit that
+        *enters* range mid-round). No-op unless the ruleset enables artillery.
+        """
+        if self.game.rules.city_artillery_range <= 0:
+            return
+        from empire.core.engine import ArtilleryOutcome, execute_city_artillery
+        from empire.core.events import CityFiredEvent, UnitRemovedEvent
+
+        for city in list(self.game.map.cities()):
+            coords = {u.id: u.coord for u in self.game.map.all_units()}
+            result = execute_city_artillery(
+                city, self.game.map, self.game.rules, self.game.rng
+            )
+            if result.target_id is None:
+                continue
+            tcoord = coords.get(result.target_id, city.coord)
+            destroyed = result.outcome is ArtilleryOutcome.TARGET_DESTROYED
+            hit = destroyed or result.outcome is ArtilleryOutcome.TARGET_DAMAGED
+            self.game.event_bus.publish(
+                CityFiredEvent(
+                    city_id=city.id,
+                    target_id=result.target_id,
+                    target_coord=tcoord,
+                    hit=hit,
+                    destroyed=destroyed,
+                )
+            )
+            if destroyed:
+                self.game.event_bus.publish(
+                    UnitRemovedEvent(unit_id=result.target_id, last_coord=tcoord)
+                )
 
     def _disband_phase(self, player: Player) -> None:
         """Resolve the end of `player`'s previous turn: disband units left in a
@@ -342,6 +391,36 @@ class TurnManager:
                 self.game.event_bus.publish(
                     UnitMovedEvent(unit_id=unit.id, from_=start, to=unit.coord)
                 )
+            # Reactive city artillery (spec §4.7): hostile or neutral cities the
+            # mover ended within range of get their overwatch shot at it.
+            if (
+                self.game.rules.city_artillery_range > 0
+                and self.game.map.unit_by_id(unit.id) is not None
+            ):
+                from empire.core.engine import ArtilleryOutcome, reactive_city_fire
+                from empire.core.events import CityFiredEvent
+
+                mcoord = unit.coord
+                for city_id, result in reactive_city_fire(
+                    unit, self.game.map, self.game.rules, self.game.rng
+                ):
+                    if result.target_id is None:
+                        continue
+                    destroyed = result.outcome is ArtilleryOutcome.TARGET_DESTROYED
+                    hit = destroyed or result.outcome is ArtilleryOutcome.TARGET_DAMAGED
+                    self.game.event_bus.publish(
+                        CityFiredEvent(
+                            city_id=city_id,
+                            target_id=result.target_id,
+                            target_coord=mcoord,
+                            hit=hit,
+                            destroyed=destroyed,
+                        )
+                    )
+                    if destroyed:
+                        self.game.event_bus.publish(
+                            UnitRemovedEvent(unit_id=result.target_id, last_coord=mcoord)
+                        )
             for uid in outcome.units_destroyed:
                 self.game.event_bus.publish(
                     UnitRemovedEvent(unit_id=uid, last_coord=start)

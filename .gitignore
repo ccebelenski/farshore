@@ -54,3 +54,6 @@ models/
 # Vendored reference: cloned separately by developers who want it;
 # referenced by planning docs but not part of this project.
 Empire-for-VMS/
+
+# Claude Code harness state (transient, per-session)
+.claude/

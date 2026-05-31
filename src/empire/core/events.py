@@ -65,3 +65,19 @@ class CityCapturedEvent:
     city_id: CityId
     new_owner_id: PlayerId | None
     previous_owner_id: PlayerId | None
+
+
+@dataclass(frozen=True, slots=True)
+class CityFiredEvent:
+    """A city's artillery fired at an enemy unit (spec §4.7).
+
+    `destroyed` is True if the salvo killed the target; `hit` is True if it
+    connected at all (a damaging hit on a multi-HP unit has hit=True,
+    destroyed=False). A miss has both False but still consumed the shot.
+    """
+
+    city_id: CityId
+    target_id: UnitId
+    target_coord: Coord
+    hit: bool
+    destroyed: bool

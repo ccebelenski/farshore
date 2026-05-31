@@ -89,6 +89,10 @@ class Unit(ABC):
         # repair rule (spec §2.3) — a unit only heals if it stayed put.
         self.orbit_direction: Direction | None = None
         self._moved_this_round: bool = False
+        # Transient (within-round): set when city artillery fires on this unit
+        # (spec §4.7), cleared at the start of each round. A pinned land/air
+        # unit cannot move this round; a pinned naval unit moves at half budget.
+        self.pinned: bool = False
 
     def is_aboard(self) -> bool:
         """True if this unit is currently cargo aboard a carrier."""
@@ -117,10 +121,21 @@ class Unit(ABC):
         self._coord = c
 
     def moves_this_turn(self) -> int:
-        """Damage-scaled movement budget: `ceil(speed * hits / max_hits)`."""
+        """Damage-scaled movement budget: `ceil(speed * hits / max_hits)`.
+
+        A unit pinned by city artillery this round (spec §4.7) loses mobility:
+        land and air units cannot move at all; naval units move at half budget
+        (rounded down). `pinned` is only ever set under the artillery ruleset,
+        so this is a no-op for STANDARD play.
+        """
         cls = type(self)
         # Integer ceil-division: (a + b - 1) // b.
-        return (cls.speed * self.hits + cls.max_hits - 1) // cls.max_hits
+        budget = (cls.speed * self.hits + cls.max_hits - 1) // cls.max_hits
+        if self.pinned:
+            if self.kind in (UnitKind.ARMY, UnitKind.FIGHTER):
+                return 0
+            return budget // 2
+        return budget
 
     def effective_capacity(self) -> int:
         """Damage-scaled cargo capacity: `ceil(capacity * hits / max_hits)`."""

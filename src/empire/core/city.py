@@ -101,6 +101,10 @@ class City:
     owner: Player | None
     production: ProductionState = field(default_factory=ProductionState)
     default_orders: dict[UnitKind, DefaultOrder] = field(default_factory=_empty_orders)
+    # Transient: artillery has one shot per round (spec §4.7). Reset to True
+    # at the start of each round; consumed (hit or miss) when the city fires.
+    # Not serialized — it is purely within-round state.
+    artillery_ready: bool = True
 
     @property
     def scan_range(self) -> int:

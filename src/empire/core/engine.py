@@ -625,6 +625,147 @@ def _bombard_target(ship: Unit, target: Coord, real_map: Map) -> Unit | None:
     return None
 
 
+# -----------------------------------------------------------------------------
+# City artillery: cities defend themselves with ranged fire (§4.7)
+# -----------------------------------------------------------------------------
+
+
+class ArtilleryOutcome(Enum):
+    TARGET_DESTROYED = "target_destroyed"  # salvo killed the unit
+    TARGET_DAMAGED = "target_damaged"  # salvo dealt 1 HP, unit survived
+    MISSED = "missed"  # fired but rolled a miss (shot still spent)
+    NO_TARGET = "no_target"  # nothing hostile in range
+    NOT_READY = "not_ready"  # already fired this round
+    DISABLED = "disabled"  # ruleset has no city artillery
+
+
+@dataclass(frozen=True, slots=True)
+class ArtilleryResult:
+    outcome: ArtilleryOutcome
+    target_id: UnitId | None = None
+
+
+def _artillery_danger(city: City, unit: Unit) -> tuple[int, int]:
+    """Sort key ranking how dangerous `unit` is to `city` (lower = fire first).
+
+    An Army is the existential threat — only an army captures a city — so it
+    outranks a Fighter, which outranks everything else; ties break on
+    proximity. This is the inverse of naval bombardment priority, which is
+    correct: a city shoots what can take it, not what is merely valuable.
+    """
+    if unit.kind is UnitKind.ARMY:
+        kind_rank = 0
+    elif unit.kind is UnitKind.FIGHTER:
+        kind_rank = 1
+    else:
+        kind_rank = 2
+    return (kind_rank, city.coord.chebyshev_to(unit.coord))
+
+
+def city_can_fire_at(city: City, victim: Unit, rules: RuleSet) -> bool:
+    """True if `city`'s artillery may fire at `victim` right now (spec §4.7).
+
+    A neutral city (owner None) is hostile to everyone; an owned city fires
+    only at units it does not own. Satellites are never targetable.
+    """
+    return (
+        rules.city_artillery_range > 0
+        and city.artillery_ready
+        and victim.owner is not city.owner
+        and not _is_intangible(victim)
+        and city.coord.chebyshev_to(victim.coord) <= rules.city_artillery_range
+    )
+
+
+def _best_artillery_target(city: City, real_map: Map, rules: RuleSet) -> Unit | None:
+    candidates = [u for u in real_map.all_units() if city_can_fire_at(city, u, rules)]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda u: _artillery_danger(city, u))
+
+
+def _fire_artillery(
+    city: City, victim: Unit, real_map: Map, rules: RuleSet, rng: random.Random
+) -> ArtilleryResult:
+    """Resolve one salvo from `city` at `victim`, consuming the round's shot.
+
+    The shot is spent whether it hits or misses ("takes time to re-aim"). A
+    hit deals 1 HP — fatal to a 1-HP army/fighter, a wound to a multi-HP hull.
+    Being fired upon may *pin* the target for the round (spec §4.7) — it loses
+    its movement (naval: halved) — with `city_artillery_pin_prob` chance, hit or
+    miss. A chance, not a certainty: an unsupported attacker usually stalls but
+    can slip through, so cities stay capturable by a coordinated assault.
+    """
+    city.artillery_ready = False
+    if rng.random() < rules.city_artillery_pin_prob:
+        victim.pinned = True
+    if rng.random() >= rules.city_artillery_hit_prob:
+        return ArtilleryResult(ArtilleryOutcome.MISSED, victim.id)
+    victim.hits -= 1
+    if victim.hits <= 0:
+        real_map.remove_unit(victim)
+        return ArtilleryResult(ArtilleryOutcome.TARGET_DESTROYED, victim.id)
+    return ArtilleryResult(ArtilleryOutcome.TARGET_DAMAGED, victim.id)
+
+
+def execute_city_artillery(
+    city: City, real_map: Map, rules: RuleSet, rng: random.Random
+) -> ArtilleryResult:
+    """Proactive fire: `city` picks its most dangerous in-range enemy and
+    fires one salvo (spec §4.7).
+
+    Used on the owner's turn to shell attackers massing in range. Auto-targets
+    the highest-priority threat; an explicit owner-chosen target (human / AI
+    in the turn plan) is a later refinement layered over this.
+    """
+    if rules.city_artillery_range <= 0:
+        return ArtilleryResult(ArtilleryOutcome.DISABLED)
+    if not city.artillery_ready:
+        return ArtilleryResult(ArtilleryOutcome.NOT_READY)
+    victim = _best_artillery_target(city, real_map, rules)
+    if victim is None:
+        return ArtilleryResult(ArtilleryOutcome.NO_TARGET)
+    return _fire_artillery(city, victim, real_map, rules, rng)
+
+
+def reactive_city_fire(
+    mover: Unit, real_map: Map, rules: RuleSet, rng: random.Random
+) -> list[tuple[CityId, ArtilleryResult]]:
+    """Overwatch fire: every hostile city (enemy-owned or neutral) that can
+    bear on `mover` and still has its shot fires one salvo at it (spec §4.7).
+
+    Called after `mover` finishes a move during its owner's movement phase —
+    this is what lets a *neutral* city defend itself (it has no turn of its
+    own) and what makes massing inside city range costly. Stops once the mover
+    is destroyed. Returns (city_id, result) for each city that fired.
+    """
+    results: list[tuple[CityId, ArtilleryResult]] = []
+    if rules.city_artillery_range <= 0 or _is_intangible(mover):
+        return results
+    for city in real_map.cities():
+        if city.owner is mover.owner:
+            continue
+        if not city_can_fire_at(city, mover, rules):
+            continue
+        result = _fire_artillery(city, mover, real_map, rules, rng)
+        results.append((city.id, result))
+        if result.outcome is ArtilleryOutcome.TARGET_DESTROYED:
+            break
+    return results
+
+
+def reset_city_artillery(real_map: Map) -> None:
+    """Re-arm every city's artillery at the start of a round (spec §4.7)."""
+    for city in real_map.cities():
+        city.artillery_ready = True
+
+
+def clear_movement_pins(real_map: Map) -> None:
+    """Clear last round's artillery pins at the start of a round (spec §4.7)."""
+    for unit in real_map.all_units():
+        unit.pinned = False
+
+
 def _spend_fighter_fuel(unit: Unit, at: Coord, real_map: Map, rules: RuleSet) -> None:
     """Burn one fuel point for a Fighter's step, refuelling on a friendly city.
 

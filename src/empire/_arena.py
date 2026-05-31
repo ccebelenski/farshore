@@ -29,7 +29,7 @@ from empire.core.game import Game
 from empire.core.identity import PlayerId
 from empire.core.map import ViewMap
 from empire.core.player import Player
-from empire.core.ruleset import STANDARD, MapProfile
+from empire.core.ruleset import FORTIFIED_CITIES, STANDARD, MapProfile, RuleSet
 from empire.core.unit import UnitKind
 from empire.mapgen.height_field import HeightFieldMapGenerator
 from empire.setup import land_continents
@@ -55,9 +55,12 @@ def _farthest_pair(cities: list[City]) -> tuple[City, City]:
     return best
 
 
-def build_land_brawl(profile: MapProfile, seed: int) -> tuple[Game, list[Player]] | None:
+def build_land_brawl(
+    profile: MapProfile, seed: int, rules: RuleSet = STANDARD
+) -> tuple[Game, list[Player]] | None:
     """A game with both capitals on the largest continent, far apart. None if
-    no map with a big-enough shared continent turns up."""
+    no map with a big-enough shared continent turns up. `rules` selects the
+    ruleset (STANDARD vs FORTIFIED_CITIES) for the A/B artillery comparison."""
     gen = HeightFieldMapGenerator()
     master = random.Random(seed)
     for _ in range(_GEN_ATTEMPTS):
@@ -82,7 +85,7 @@ def build_land_brawl(profile: MapProfile, seed: int) -> tuple[Game, list[Player]
             cap.production.building = UnitKind.ARMY
             cap.production.work = 0
         game = Game(
-            rules=STANDARD, real_map=real_map, players=players,
+            rules=rules, real_map=real_map, players=players,
             seed=seed, combat_resolver=CombatResolver(),
         )
         return game, players
@@ -90,11 +93,12 @@ def build_land_brawl(profile: MapProfile, seed: int) -> tuple[Game, list[Player]
 
 
 def play_match(
-    profile: MapProfile, seed: int, strategic_first: bool, cap: int
+    profile: MapProfile, seed: int, strategic_first: bool, cap: int,
+    rules: RuleSet = STANDARD,
 ) -> tuple[str, int] | None:
     """Run one game; return (outcome, turns). Outcome is
     'strategic' | 'baseline' | 'draw' | 'unfinished'."""
-    built = build_land_brawl(profile, seed)
+    built = build_land_brawl(profile, seed, rules)
     if built is None:
         return None
     game, players = built
@@ -139,7 +143,8 @@ class ArenaResult:
 
 
 def run_arena(
-    seeds: int, cap: int, profile: MapProfile = ARENA_PROFILE, verbose: bool = True
+    seeds: int, cap: int, profile: MapProfile = ARENA_PROFILE, verbose: bool = True,
+    rules: RuleSet = STANDARD,
 ) -> ArenaResult:
     """Each seed played twice (sides swapped) to cancel positional bias."""
     result = ArenaResult()
@@ -147,7 +152,7 @@ def run_arena(
     start = time.time()
     for seed in range(seeds):
         for strategic_first in (True, False):
-            outcome = play_match(profile, seed, strategic_first, cap)
+            outcome = play_match(profile, seed, strategic_first, cap, rules)
             if outcome is None:
                 continue
             label, played = outcome
@@ -169,9 +174,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="StrategicAI vs BaselineAI land-brawl arena")
     parser.add_argument("--seeds", type=int, default=25, help="seeds (each played both ways)")
     parser.add_argument("--cap", type=int, default=250, help="per-game turn cap")
+    parser.add_argument(
+        "--fortified", action="store_true",
+        help="use the FORTIFIED_CITIES ruleset (city artillery) instead of STANDARD",
+    )
     args = parser.parse_args()
 
-    r = run_arena(args.seeds, args.cap)
+    rules = FORTIFIED_CITIES if args.fortified else STANDARD
+    print(f"ruleset: {rules.name}")
+    r = run_arena(args.seeds, args.cap, rules=rules)
     print(f"\n{2 * args.seeds} games: S={r.strategic} B={r.baseline} "
           f"draw={r.draw} unfinished={r.unfinished}")
     if r.decided:

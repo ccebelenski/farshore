@@ -793,6 +793,7 @@ separate-continent profile, all `make check` gates green.
 | v3 + threat-sized defence + success filter | 0% (0/6) | turtled; filter stopped all enemy-city captures |
 | v4 + per-target assault size + cost budget | 29% (2/7) | fast 1-army neutral grabs just re-fragmented |
 | v5 + aggressive hunt (seek neutrals/enemies) | 35% (8/23) | more decisive games, no win-rate gain |
+| v8 1-army shields + aggressive army-cost offense | 23% (5/22) | cheap neutral fronts re-fragment (same failure as v4); §5.4 tax punishes distribution hardest. Reverted. |
 
 | v6 Shield/Sustain/Dagger doctrine | 17% (1/6) | discipline → too passive; can't take cities |
 
@@ -820,6 +821,63 @@ So: **decide the rule first, then tune the AI to it.** v2 (committed) is the
 robust baseline across both rules; v6/v7 are recorded but not committed (v6 too
 passive; v7 rule-brittle). The exit gate (>60% vs baseline) is unmet and won't
 be cleanly reachable until §5.4 is settled — a game-design call for the user.
+
+---
+
+## Phase 15.6 — City artillery (FortifiedCities preset)
+
+**Why:** the user's call after the §5.4 fork — rather than soften the capture
+tax (which makes the horde *stronger*: a surviving conqueror is fresh fodder),
+make **cities fight back** so capture is a gauntlet, not a coin flip. Full
+rationale in spec §4.7 and memory `project_city_artillery`.
+
+**Design (decided with the user, locked):** cities have **no HP**; the only
+defense is **ranged single-target artillery** — Chebyshev range 2, one shot per
+city per round, flat ~50% hit chance, a hit = 1 HP (instant kill vs army/
+fighter). **Owned cities fire on the owner's turn** (controlled, most-dangerous
+in-range target); **neutral cities fire reactively** during an approaching
+enemy's movement phase (no turn of their own). Capture is **deterministic on
+arrival** under this preset (the gauntlet was the cost). Ships as the
+`FORTIFIED_CITIES` ruleset preset; `Classic`/`STANDARD` stay inert. The
+one-shot/round cadence is the anti-horde invariant: trickle dies on the
+approach, a concentrated assault punches through.
+
+**Engine (committed work):** `RuleSet.city_artillery_range/_hit_prob` +
+`FORTIFIED_CITIES` preset; `City.artillery_ready` transient flag;
+`engine.execute_city_artillery` / `reactive_city_fire` / `reset_city_artillery`
++ `ArtilleryOutcome`/`ArtilleryResult`; `CityFiredEvent`; `TurnManager`
+`_city_defense_phase` (proactive) + reactive hook in `_apply_turn_plan`;
+per-round re-arm in `run_round`. Arena gains a `--fortified` flag for the A/B.
+
+**Validation:** arena A/B with the *same* v2 AI, STANDARD vs FORTIFIED_CITIES —
+does the rule alone move the win-rate?
+
+**Result (40 games each, same v2 AI, 2026-05-30):**
+
+| ruleset | StrategicAI win-rate (decided) | p (better than baseline) | mean length |
+|---|---|---|---|
+| STANDARD (inert cities) — control | 35.9% (14/39) | 0.973 | 98 turns |
+| **FORTIFIED_CITIES** (artillery) | **27.8% (10/36)** | 0.998 | 96 turns |
+
+**The rule alone made the StrategicAI WORSE, by ~8 points (35.9 → 27.8).** The
+opposite of the design intent. Honest read of why: city artillery is symmetric
+and *defensive*, and against it what wins is **throwing enough bodies that some
+survive the gauntlet** — which is the horde's strength, not the strategist's.
+Two compounding reasons: (1) army speed is 1, so even a "concentrated" fist is
+strung out over the multi-turn approach and the city picks it off one army per
+round regardless — concentration doesn't actually arrive concentrated; (2) the
+current v2 AI does NOT yet use combined arms (no fighter-softening), which was
+the whole premise for the smart side exploiting the rule. So the rule was added
+without the AI capability meant to exploit it, and on the raw rule the
+volume-attacker benefits more. **The mechanism was added correctly; the
+hypothesis that "one-shot artillery rewards concentration over trickle" does not
+hold when the trickle has higher volume and everyone approaches at speed 1.**
+
+**Decision point (for the user):** the rule is inert→worse with today's AI. Two
+honest paths: (a) build the combined-arms AI the rule was designed to reward
+(fighter-softening + coordinated assault) and re-measure — the rule may only pay
+off *with* that AI; or (b) treat artillery as not worth it and revert. Do not
+self-decide; this is a design call.
 
 ---
 
