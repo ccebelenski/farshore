@@ -19,6 +19,7 @@ from empire._arena import ARENA_PROFILE, build_land_brawl
 from empire.ai.baseline.controller import BaselineAI
 from empire.ai.strategic.ai import StrategicAI
 from empire.ai.strategic.campaign import PREP_DEADLINE
+from empire.ai.strategic.goals import CaptureCityGoal
 from empire.ai.strategic.operational import TaskForceState
 from empire.core.events import CityFiredEvent
 from empire.core.ruleset import FORTIFIED_CITIES, STANDARD, RuleSet
@@ -45,6 +46,12 @@ class Stats:
     launch_forming_turns: int = 0
     launch_deadline_forced: int = 0
     launch_solo: int = 0  # launched with a single unit (a trickle, not a fist)
+    # Defended-capture launches only (the real fists — the trickle that matters,
+    # isolated from soft-grab walk-ins that *should* be solo).
+    def_launches: int = 0
+    def_armies: int = 0
+    def_solo: int = 0
+    def_deadline: int = 0
     # Formation coherence: max pairwise spread of an EN_ROUTE/ENGAGED force.
     spread_samples: int = 0
     spread_total: int = 0
@@ -86,6 +93,8 @@ def _play(seed: int, cap: int, rules: RuleSet, strategic_first: bool, st: Stats)
 
     game.event_bus.subscribe(CityFiredEvent, on_fired)
 
+    artillery = rules.city_artillery_range > 0
+
     st.games += 1
     prev_state: dict[int, TaskForceState] = {}
     for _ in range(cap):
@@ -111,6 +120,22 @@ def _play(seed: int, cap: int, rules: RuleSet, strategic_first: bool, st: Stats)
                     st.launch_deadline_forced += 1
                 if len(tf.unit_ids) <= 1:
                     st.launch_solo += 1
+                # Defended capture = a real fist (enemy city, or any city when
+                # artillery is on); soft neutral walk-ins are excluded.
+                if isinstance(tf.goal, CaptureCityGoal):
+                    target = next(
+                        (c for c in game.map.cities()
+                         if int(c.id) == int(tf.goal.target_city_id)),
+                        None,
+                    )
+                    defended = artillery or (target is not None and target.owner is not None)
+                    if defended:
+                        st.def_launches += 1
+                        st.def_armies += a
+                        if forming >= PREP_DEADLINE:
+                            st.def_deadline += 1
+                        if len(tf.unit_ids) <= 1:
+                            st.def_solo += 1
             if tf.state in (TaskForceState.EN_ROUTE, TaskForceState.ENGAGED):
                 pts = [coord[int(x)] for x in tf.unit_ids if int(x) in coord]
                 if len(pts) >= 2:
@@ -161,6 +186,10 @@ def _report(st: Stats, rules: RuleSet) -> None:
           f"(PREP_DEADLINE={PREP_DEADLINE})")
     print(f"  deadline-forced: {avg(st.launch_deadline_forced, st.launches):.0%}; "
           f"solo (trickle): {avg(st.launch_solo, st.launches):.0%}")
+    print(f"  DEFENDED fists only ({st.def_launches}): "
+          f"{avg(st.def_armies, st.def_launches):.1f} armies, "
+          f"{avg(st.def_solo, st.def_launches):.0%} solo, "
+          f"{avg(st.def_deadline, st.def_launches):.0%} deadline-forced")
     print(f"formation spread (en-route/engaged): "
           f"{avg(st.spread_total, st.spread_samples):.1f} cells mean max-pairwise")
     print(f"fighter fuel: {avg(st.fighter_lowfuel_turns, st.fighter_turns):.0%} "
