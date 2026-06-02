@@ -75,7 +75,12 @@ class StrategicAI:
         self, requested: list[ProductionOrder], view: WorldView
     ) -> tuple[ProductionOrder, ...]:
         """The operational layer's requests, plus a default build for any idle
-        city it didn't already task — so no city sits silent."""
+        city it didn't already task — so no city sits silent.
+
+        (Coordinated fighter production was reverted: telemetry showed it stole
+        ~⅓ of output from fists that were already trickling out under-strength —
+        air has to wait until the army fists actually concentrate. See the
+        Phase 15.7 concentration work.)"""
         ordered = {o.city_id for o in requested}
         orders = list(requested)
         for city in view.own_cities:

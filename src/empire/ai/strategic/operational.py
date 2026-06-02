@@ -426,10 +426,14 @@ class OperationalPlanner:
         if extra <= 0:
             return
         pool = idle.get(_ARMY, [])
-        cap = _fortified_fist(view.rules) + extra
         for tf in active:  # already rank-sorted, strongest objective first
             if tf.is_terminal() or not _is_offensive(tf.goal):
                 continue
+            entries = _required_composition(tf.goal, view).entries
+            base = next((n for k, n in entries if k is _ARMY), 0)
+            if base <= 1:
+                continue  # soft grab / non-fist: a walk-in needs no redundancy
+            cap = base + extra
             have = sum(1 for uid in tf.unit_ids if _unit_kind(view, uid) is _ARMY)
             while have < cap and pool:
                 uid = pool.pop(0)
@@ -479,12 +483,25 @@ def _is_offensive(goal: Goal) -> bool:
     return isinstance(goal, (CaptureCityGoal, DenyContinentGoal))
 
 
+def _is_soft_grab(goal: CaptureCityGoal, view: WorldView) -> bool:
+    """An undefended capture — a neutral city with no artillery gauntlet — that
+    a lone army just walks into. No fist needed (massing there is waste, and it
+    would only starve the real fists). Under FortifiedCities every city has the
+    gauntlet, so there are no soft grabs (neutrals need the fist too)."""
+    if view.rules.city_artillery_range > 0:
+        return False
+    return any(c.id == goal.target_city_id for c in view.neutral_cities)
+
+
 def _required_composition(goal: Goal, view: WorldView) -> ForceComposition:
-    """The force a goal needs. Capture/deny forces size to the artillery fist
-    under FortifiedCities (concentrate to break the gauntlet), a single army
-    otherwise — so the operational layer's FORMING→EN_ROUTE gate becomes the
-    'mass before you commit' governor without the strategist vetoing attacks."""
+    """The force a goal needs. A defended capture (enemy city, or any city under
+    FortifiedCities) sizes to the artillery fist — concentrate to break the
+    gauntlet and survive the defenders — while an undefended neutral grab is a
+    single army that walks in. So the FORMING→EN_ROUTE gate masses force only
+    where mass is needed, and cheap walk-ins don't dilute the real fists."""
     if isinstance(goal, CaptureCityGoal):
+        if _is_soft_grab(goal, view):
+            return ForceComposition.of({_ARMY: 1})
         return ForceComposition.of({_ARMY: _fortified_fist(view.rules)})
     if isinstance(goal, DefendCityGoal):
         return ForceComposition.of({_ARMY: max(1, goal.garrison_size_needed)})

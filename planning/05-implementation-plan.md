@@ -987,11 +987,52 @@ see"); the discount is whether the home landmass still has a frontier
 the existing arena (measure idle armies/turn ↓ alongside win/unfinished); stub
 SECURED as the explicit hand-off to the naval phase.
 
-**Step 3 (later) — air + the SECURED/overseas branch.** Fighters win local air
-superiority (clear enemy AIR → ARMIES → SHIPPING) as an added FORMING→EN_ROUTE
-precondition; surprise inference (binary: any campaign unit provably spotted?);
-naval projection + multi-continent arena unlocks Step 2's SECURED branch. Target:
-FORTIFIED win-rate decisively > 50% vs the horde.
+**Concentration (prerequisite to Step 3, in progress).** Telemetry (the new
+`_telemetry` instrument) showed the real bottleneck is not air but that *the fist
+never forms*: ~75% of assaults launch as a single army, 74–90% deadline-forced,
+mean forming-time pinned at the 8-turn deadline. Front heuristic landed (the
+user's design): **soft grabs** (undefended neutrals — none under FortifiedCities)
+take 1 army and launch on sight, liberal count; **defended assaults** (enemy +
+all FortifiedCities cities) take the full fist, capped at `own_armies // fist`
+with NO `+1` (the spare front just starved and deadline-dribbled), nearest-first
++ coastal tiebreak; dropped the blunt `own_cities + 2` global trim; reverted the
+3a-1 fighter production (it stole ⅓ of output from already-thin fists). Result:
+front count fell (STANDARD 7.4→4.4, FORTIFIED 12.8→10.1 launches/game) but the
+trickle PERSISTS (FORTIFIED fists still ~1.8 armies, 82% deadline-forced) and
+win-rate is flat. New root cause: **production spreads** across every forming
+force (incl. soft grabs) + loss-replacement, so no one fist fills in 8 turns.
+Next: **focus production** — fund the top-priority fist to full before the next,
+and stop spending production on soft grabs (walk-ins use spare armies, not the
+factory); split telemetry by soft/defended to see fist sizes directly.
+
+**Step 3 (building) — combined arms (the win lever).** 100-game baseline after
+2a: STANDARD 28.7% win / 6% unfinished (clean losses), FORTIFIED 34.2% win /
+**27% unfinished** (fortified-city grind). Over-strength can't finish a defended
+city; the approach attrition is too high. Air is the breakthrough. Grounded in
+the engine (verified, see memory `project_combined_arms`):
+
+- **Artillery shoots ARMIES first** (`_artillery_danger`). Fighters can't bait or
+  soak the gauntlet — the gun always targets the army about to capture. So the
+  gauntlet stays solved by over-strength *concentration* (2a), not by air.
+- **BaselineAI is a pure army horde** (no fighters) — there is no enemy air to
+  "win superiority" over. Fighters' real jobs vs this opponent: **(1) kill the
+  enemy's mobile defenders** so the over-strength fist that survives the gauntlet
+  wins the melee at the city; **(2) scout** (speed 8, scan 5, fuel 20) the
+  approach and the wider map. Only armies capture.
+- **Limited production → slower combined-arms build** (one unit/city/turn). So
+  produced fighters must **scout immediately** (the "unsupported exploration
+  during the build window" the design hinges on), never idle waiting for the fist.
+
+Increments: **3a-1** coordinated fighter production (a fighter quota, not all
+armies) + route idle/forming fighters to fuel-safe scouting (`FighterScout`, not
+generic Hunt which ignores fuel) — gets air into the economy + recon during the
+build window. **3a-2** fighters join the capture force and strike the mobile
+defenders near the objective ahead of the army landing (the breakthrough; the
+core behavior rewrite — `FighterStrike` today just flies at the city and
+suicides into artillery). Measure win/unfinished on 100-game parallel samples
+after each. Enemy-air-superiority gating, surprise inference, and the
+SECURED/overseas naval branch remain later (no enemy air today; naval needs a
+multi-continent arena). Target: FORTIFIED win-rate decisively > 50%.
 
 ---
 

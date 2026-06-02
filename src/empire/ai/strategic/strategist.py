@@ -27,12 +27,18 @@ from empire.ai.strategic.goals import (
     ProjectPowerGoal,
     ResourceBudget,
 )
-from empire.ai.strategic.intel.report import IntelReport, OpportunityKind, TheaterState
+from empire.ai.strategic.intel.report import (
+    IntelReport,
+    Opportunity,
+    OpportunityKind,
+    TheaterState,
+)
 from empire.ai.strategic.memory import AIMemory
 from empire.ai.strategic.operational import ATTACK_FORCE_SIZE
 from empire.contracts.world_view import WorldView
 from empire.core.coord import Coord
 from empire.core.identity import CityId, GoalId
+from empire.core.tile import TerrainKind
 from empire.core.unit import UnitKind
 
 # Tuning knobs (v1; subject to playtest tuning).
@@ -76,9 +82,13 @@ class DeterministicStrategist(Strategist):
         # types still exist for the LLM strategist and future tuning.
 
         # Best value-per-turn first; ties broken on id for reproducibility.
+        # No blunt global cap any more: the per-class budgets in `_expand_goals`
+        # (defended fronts = fists we can fill, soft grabs by army pool) plus the
+        # threat-bounded defends already concentrate force. The old
+        # `own_cities + 2` trim cut deliberately-budgeted captures whenever we
+        # held few cities — exactly when we most needed to expand.
         goals.sort(key=lambda g: (-g.rank(), int(g.id)))
-        cap = max(3, len(view.own_cities) + 2)
-        return goals[:cap]
+        return goals
 
     # -- step 1: defend ------------------------------------------------------
 
@@ -160,50 +170,66 @@ class DeterministicStrategist(Strategist):
         goals: list[Goal],
         counter: _Counter,
     ) -> None:
+        """Expand onto reachable cities, splitting targets by whether they are
+        *defended* (Phase 15.7 concentration heuristic). Telemetry showed the old
+        single budget dribbled 1.5-army 'fists' at defended cities because it
+        opened one more front than it could crew (`+1`) and the deadline shoved
+        the starved ones out. Now:
+
+        * **Soft grabs** — an undefended neutral (no artillery): a lone army
+          walks in. Emitted liberally; they don't need a fist and operational
+          crews them from leftover idle after the real fists.
+        * **Defended assaults** — enemy cities, and *every* city under
+          FortifiedCities: need the full fist. Capped at the number of fists we
+          can actually fill (`own_armies // fist`, NO `+1`) and chosen
+          nearest-first (urgency), coastal as the tiebreak (future port value).
+        """
         anchors = [c.coord for c in view.own_cities] + [u.coord for u in view.own_units]
         if not anchors:
             return
-        # Budget offensive forces by the army pool, not the city count: only
-        # open as many fronts as we can actually crew (+1 forming), so force
-        # concentrates instead of fragmenting.
+        artillery = view.rules.city_artillery_range > 0
         own_armies = sum(1 for u in view.own_units if u.kind is _ARMY)
-        capture_cap = max(1, own_armies // ATTACK_FORCE_SIZE + 1)
-        captures = 0
+        defended_cap = max(1, own_armies // ATTACK_FORCE_SIZE)
+        soft_cap = max(3, own_armies)
+
+        soft: list[Opportunity] = []
+        defended: list[Opportunity] = []
         projected = False
         for opp in intel.opportunities:
-            if opp.kind not in (
+            if opp.target_city_id is None or opp.kind not in (
                 OpportunityKind.CAPTURE_NEUTRAL_CITY,
                 OpportunityKind.CAPTURE_ENEMY_CITY,
             ):
                 continue
-            if opp.target_city_id is None:
-                continue
             start = min(anchors, key=lambda a: a.chebyshev_to(opp.target))
-            duration = max(2, opp.distance + 1)  # army speed 1
-            by_turn = view.turn + duration
-
-            land_ok = self._oracle.can_assemble(
+            by_turn = view.turn + max(2, opp.distance + 1)  # army speed 1
+            reachable = self._oracle.can_assemble(
                 ForceComposition.of({_ARMY: 1}), by_turn, view
             ) and self._oracle.reachable(start, opp.target, _ARMY, by_turn, view)
-            if land_ok:
-                if captures >= capture_cap:
-                    continue
-                priority = min(1.0, opp.score / _CAPTURE_SCORE_NORM)
-                goals.append(
-                    CaptureCityGoal(
-                        id=counter.next(),
-                        priority=priority,
-                        estimated_duration=duration,
-                        budget=ResourceBudget(production_slots=1),
-                        target_city_id=opp.target_city_id,
-                        target_coord=opp.target,
-                    )
+            if not reachable:
+                if not projected:  # across water → one capped amphibious push
+                    projected = self._maybe_project(opp.target, view, goals, counter)
+                continue
+            is_soft = opp.kind is OpportunityKind.CAPTURE_NEUTRAL_CITY and not artillery
+            (soft if is_soft else defended).append(opp)
+
+        # Defended: nearest first (urgency), coastal as tiebreak, value last.
+        defended.sort(
+            key=lambda o: (o.distance, not _is_coastal(o.target, view), -o.score)
+        )
+        for opp in soft[:soft_cap] + defended[:defended_cap]:
+            if opp.target_city_id is None:  # filtered above; keeps the type tight
+                continue
+            goals.append(
+                CaptureCityGoal(
+                    id=counter.next(),
+                    priority=min(1.0, opp.score / _CAPTURE_SCORE_NORM),
+                    estimated_duration=max(2, opp.distance + 1),
+                    budget=ResourceBudget(production_slots=1),
+                    target_city_id=opp.target_city_id,
+                    target_coord=opp.target,
                 )
-                captures += 1
-            elif not projected:
-                # Not reachable by land — it's across water, so it needs a
-                # transport. Emit one (capped) amphibious projection toward it.
-                projected = self._maybe_project(opp.target, view, goals, counter)
+            )
 
     def _maybe_project(
         self, target: Coord, view: WorldView, goals: list[Goal], counter: _Counter
@@ -257,3 +283,13 @@ class _Counter:
 
 def _sorted_cells(cells: frozenset[Coord]) -> tuple[Coord, ...]:
     return tuple(sorted(cells, key=lambda c: (c.x, c.y)))
+
+
+def _is_coastal(coord: Coord, view: WorldView) -> bool:
+    """A city cell that touches water — a future port, worth more for naval
+    projection. Used only as a tiebreak between equidistant defended fronts."""
+    for n in coord.neighbors():
+        tile = view.terrain_at(n)
+        if tile is not None and tile.terrain is TerrainKind.WATER:
+            return True
+    return False

@@ -8,6 +8,7 @@ behavior for a single corrective step (see `03-ai-design.md` §1, §3.4).
 
 from __future__ import annotations
 
+from empire.ai.strategic.behaviors.air import FighterScoutBehavior
 from empire.ai.strategic.behaviors.base import HuntBehavior
 from empire.ai.strategic.behaviors.registry import DEFAULT_BEHAVIOR, behavior_for
 from empire.ai.strategic.operational import Role, TaskForce
@@ -15,7 +16,7 @@ from empire.contracts.surprise import Surprise
 from empire.contracts.turn_plan import UnitMove
 from empire.contracts.world_view import WorldView
 from empire.core.identity import UnitId
-from empire.core.unit import Unit
+from empire.core.unit import Unit, UnitKind
 
 
 class TacticalExecutor:
@@ -23,6 +24,7 @@ class TacticalExecutor:
 
     def __init__(self) -> None:
         self._hunt = HuntBehavior()
+        self._scout = FighterScoutBehavior()
 
     def plan_moves(
         self, forces: list[TaskForce], view: WorldView
@@ -34,9 +36,12 @@ class TacticalExecutor:
                 continue  # cargo rides its carrier; it isn't independently moved
             pair = assignment.get(unit.id)
             if pair is None:
-                # Unassigned → hunt mode (explore), not sentry: idling in a
-                # friendly city gets a unit disbanded (§5.4).
-                moves.append(self._hunt.next_move(unit, view, None))
+                # Unassigned → explore, not sentry: idling in a friendly city
+                # gets a land unit disbanded (§5.4). Fighters scout via the
+                # fuel-aware behavior (generic Hunt ignores fuel and would fly
+                # them to a crash); everyone else hunts the frontier.
+                idle = self._scout if unit.kind is UnitKind.FIGHTER else self._hunt
+                moves.append(idle.next_move(unit, view, None))
                 continue
             force, role = pair
             moves.append(behavior_for(unit.kind, role).next_move(unit, view, force))
