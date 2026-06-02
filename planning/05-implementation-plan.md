@@ -834,50 +834,131 @@ rationale in spec §4.7 and memory `project_city_artillery`.
 **Design (decided with the user, locked):** cities have **no HP**; the only
 defense is **ranged single-target artillery** — Chebyshev range 2, one shot per
 city per round, flat ~50% hit chance, a hit = 1 HP (instant kill vs army/
-fighter). **Owned cities fire on the owner's turn** (controlled, most-dangerous
-in-range target); **neutral cities fire reactively** during an approaching
-enemy's movement phase (no turn of their own). Capture is **deterministic on
-arrival** under this preset (the gauntlet was the cost). Ships as the
-`FORTIFIED_CITIES` ruleset preset; `Classic`/`STANDARD` stay inert. The
+fighter), and a ~50% chance to **pin** the target (land/air lose their move
+this round, naval halved). All cities — owned and neutral — fire once in an
+**opening barrage before any unit moves** (symmetric, so no first-mover edge),
+plus reactive overwatch on units that *enter* range mid-round. Capture is
+**deterministic on arrival** under this preset (the gauntlet was the cost).
+Ships as the `FORTIFIED_CITIES` preset; `Classic`/`STANDARD` stay inert. The
 one-shot/round cadence is the anti-horde invariant: trickle dies on the
 approach, a concentrated assault punches through.
 
-**Engine (committed work):** `RuleSet.city_artillery_range/_hit_prob` +
-`FORTIFIED_CITIES` preset; `City.artillery_ready` transient flag;
-`engine.execute_city_artillery` / `reactive_city_fire` / `reset_city_artillery`
-+ `ArtilleryOutcome`/`ArtilleryResult`; `CityFiredEvent`; `TurnManager`
-`_city_defense_phase` (proactive) + reactive hook in `_apply_turn_plan`;
-per-round re-arm in `run_round`. Arena gains a `--fortified` flag for the A/B.
+**Engine (committed b087e68):** `RuleSet.city_artillery_range/_hit_prob/
+_pin_prob` + `FORTIFIED_CITIES` preset; `City.artillery_ready` + `Unit.pinned`
+transient flags (`Unit.moves_this_turn` honors the pin); engine
+`execute_city_artillery` / `reactive_city_fire` / `_fire_artillery` /
+`reset_city_artillery` / `clear_movement_pins` + `ArtilleryOutcome`/
+`ArtilleryResult`; `CityFiredEvent`; `TurnManager._opening_barrage_phase` +
+reactive hook in `_apply_turn_plan`; per-round re-arm + pin-clear in
+`run_round`. Arena gains a `--fortified` flag. 16 unit tests.
 
-**Validation:** arena A/B with the *same* v2 AI, STANDARD vs FORTIFIED_CITIES —
-does the rule alone move the win-rate?
+**Final design (after measurement) — two balance refinements on the raw rule:**
+- **Opening barrage, not per-player proactive fire.** All cities (every player's
+  + neutral) fire once *before any unit moves*. Per-player proactive fire gave a
+  large first-mover edge (P1 win-rate 71%); the symmetric pre-move barrage
+  removes it. Reactive fire still covers units that *enter* range mid-round.
+- **Pinning, as a chance (`city_artillery_pin_prob`, default 0.5).** A fired-upon
+  unit is pinned with that probability (hit or miss): land/air lose their move
+  this round, naval halved. Absolute pinning made cities uncapturable (0
+  captures, every game stalled); 0.5 keeps them capturable while stalling an
+  unsupported attacker.
 
-**Result (40 games each, same v2 AI, 2026-05-30):**
+**Result (160-game arena A/B, same v2 AI, committed b087e68):**
 
-| ruleset | StrategicAI win-rate (decided) | p (better than baseline) | mean length |
-|---|---|---|---|
-| STANDARD (inert cities) — control | 35.9% (14/39) | 0.973 | 98 turns |
-| **FORTIFIED_CITIES** (artillery) | **27.8% (10/36)** | 0.998 | 96 turns |
+| metric | STANDARD (control) | FORTIFIED_CITIES |
+|---|---|---|
+| StrategicAI win-rate (decided) | 31.6% (24/76) | 20.0% (12/60) |
+| first-mover win-rate (fairness) | 38% | 52% |
+| unfinished (hit turn cap) | 5% | 25% |
 
-**The rule alone made the StrategicAI WORSE, by ~8 points (35.9 → 27.8).** The
-opposite of the design intent. Honest read of why: city artillery is symmetric
-and *defensive*, and against it what wins is **throwing enough bodies that some
-survive the gauntlet** — which is the horde's strength, not the strategist's.
-Two compounding reasons: (1) army speed is 1, so even a "concentrated" fist is
-strung out over the multi-turn approach and the city picks it off one army per
-round regardless — concentration doesn't actually arrive concentrated; (2) the
-current v2 AI does NOT yet use combined arms (no fighter-softening), which was
-the whole premise for the smart side exploiting the rule. So the rule was added
-without the AI capability meant to exploit it, and on the raw rule the
-volume-attacker benefits more. **The mechanism was added correctly; the
-hypothesis that "one-shot artillery rewards concentration over trickle" does not
-hold when the trickle has higher volume and everyone approaches at speed 1.**
+**Verdict ("it works"):** the horde no longer wins lopsided and the first-mover
+bias is solved (52% ≈ fair). But the StrategicAI still *loses* under FORTIFIED
+(20%) and 25% of games stall, because v2 has **no combined-arms capability** — it
+bounces lone armies off defended cities exactly like the horde does. The rule is
+feature-complete on *defense*; the *attack* side is Phase 15.7.
 
-**Decision point (for the user):** the rule is inert→worse with today's AI. Two
-honest paths: (a) build the combined-arms AI the rule was designed to reward
-(fighter-softening + coordinated assault) and re-measure — the rule may only pay
-off *with* that AI; or (b) treat artillery as not worth it and revert. Do not
-self-decide; this is a design call.
+---
+
+## Phase 15.7 — Combined-arms campaign AI (exploit FortifiedCities)
+
+**Why:** 15.6 made cities defensible; now the StrategicAI must learn to crack
+them, and the 25% unfinished games must collapse. Full doctrine in memory
+`project_campaign_doctrine`.
+
+**Design (locked with user):** one odds estimator —
+`P(success) = combat_odds × arrival_discount × trend_factor × surprise_bonus`,
+evaluated at force *arrival* time (formation time included). The decision is
+**not IF to attack, but WHERE and WHEN** — so the estimator governs the
+operational *launch* decision, NOT strategist goal-emission. The strategist
+stays greedy (emit every reachable enemy/neutral city, = v2); operational sizes
+the force and times the strike. Single continent only in v1.
+
+**False start (recorded for the lesson).** The first build put the estimator at
+strategist goal-emission — it gated each `CaptureCityGoal` behind `P ≥ 0.60`.
+Controlled diagnosis (same arena, only strategist code differs): v2 emits 1.33
+capture goals/plan (704 enemy-city assaults / 4 seeds); the gated version 0.77
+(268) — a **62% cut to attacking enemy cities, the move that wins**. Intel gives
+enemy cities a fixed 0.6 prior (`opportunities.py`); `arrival_discount` dragged
+that under 0.60, so the strategist stopped proposing enemy-city captures. In a
+war game that's fatal (measured: STANDARD 31.6%→21.8%, FORTIFIED 20%→16.4%). The
+estimator module + tests are sound; only the *call site* was wrong. Reverted the
+strategist to v2.
+
+**Key realisation:** v2 *already* concentrates — a `CaptureCityGoal` requisitions
+a fist (`ATTACK_FORCE_SIZE=3`) and the task force stays FORMING until full, only
+then promotes to EN_ROUTE and marches. "Mass before commit" is already v2. What
+the estimator genuinely *adds* at the launch gate: (1) a **commit deadline** (v2
+forms forever if it can't reach the fist — a stalemate source); (2) **abandon a
+hopeless objective** (free the force from a doomed siege); (3) **air-superiority
+gating** (step 2). All three live at FORMING→EN_ROUTE, none at goal-emission.
+
+**Step 1 — operational commitment loop (DONE, except sticky-swap deferred).**
+`_required_composition` made ruleset-aware via `_fortified_fist(rules)` =
+`range+1` armies under FortifiedCities (the city fires ≤`range` times on the
+approach, so `range+1` guarantees one lands), default `ATTACK_FORCE_SIZE`
+otherwise — a no-op at current values (range 2 → 3 = ATTACK_FORCE_SIZE) but
+makes the concentration target explicit and rule-driven. The commitment loop in
+operational (`_campaign_p` calls the estimator; capture goals only, everything
+else returns P=1.0):
+- **Launch gate (wired).** One unified gate in `_reinforce`: FORMING→EN_ROUTE
+  when *turns_forming ≥ PREP_DEADLINE (8)* OR *(full fist AND P ≥ 0.60)*. To put
+  every force through the same gate, `_assemble` now always births a force
+  FORMING — even a fresh full fist must clear the threshold (or the deadline)
+  the same turn before it marches. A full fist below threshold *holds* (the
+  board may improve) until the deadline forces it out. `field_odds` comes from
+  the canonical capture priors (neutral 1.0 / enemy 0.6) read off the view —
+  same number `Opportunity.success_probability` carries, no new intel coupling.
+- **Abandon + cooldown (wired).** `_abandon_hopeless` scraps any capture force
+  whose *best-case* P (full fist, `formation_turns=0`) `< ABANDON_FLOOR (0.20)`
+  — a property of target+board, independent of how this muster is going, so a
+  doomed siege is dropped no matter how it formed. The freed units redirect
+  (next turn, after the reap) and the target city is recorded in
+  `AIMemory.abandoned_targets`; while it sits in `ABANDON_COOLDOWN (6)` the
+  planner refuses to re-assemble a force for it, so the greedy strategist can't
+  thrash assemble→abandon. Absolute and challenger-independent.
+- **Sticky swap — DEFERRED (fast-follow).** The doctrine's anti-oscillation
+  margin (`swap_margin` in `campaign.py`, written + unit-tested) redirects an
+  assembled force between rival targets. But today the force↔goal binding is
+  *static* (signature-matched, one force per goal), so a force never switches
+  targets — there is nothing to oscillate yet. Swap only earns its keep once we
+  add dynamic retargeting, and the metric Step 1 must move (unfinished-rate) is
+  driven by the deadline + abandon, not swap. Held until the arena shows actual
+  target thrash. `swap_margin` stays in place, unused, for that follow-up.
+
+Constants live in `campaign.py`, arena-tuned. Surprise inference still deferred
+(`any_unit_spotted=True`, no bonus — conservative).
+
+**Step 1 measured (FORTIFIED, 20 games, cap 250).** S=4 B=12, **unfinished
+25%→20%** — the anti-stalemate metric moved as intended. Win-rate among decided
+still 25% (4/16): under FortifiedCities the smart AI is *expected* to lose until
+combined-arms air (step 2) clears the field — Step 1 is the launch-discipline
+prerequisite, not the win. Sample is small/noisy; treat as directional.
+
+**Step 2 (next) — air + coordinated production.** Fighters win local air
+superiority (clear enemy AIR → ARMIES → SHIPPING) as an added FORMING→EN_ROUTE
+precondition; coordinated production by city role; surprise inference (binary:
+any campaign unit provably spotted?). Target: FORTIFIED win-rate decisively
+> 50% vs the horde.
 
 ---
 

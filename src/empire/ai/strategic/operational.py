@@ -22,6 +22,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from empire.ai.strategic.campaign import (
+    ABANDON_COOLDOWN,
+    ABANDON_FLOOR,
+    COMMIT_THRESHOLD,
+    PREP_DEADLINE,
+    estimate_success,
+)
 from empire.ai.strategic.goals import (
     BuildForcesGoal,
     CaptureCityGoal,
@@ -34,6 +41,10 @@ from empire.ai.strategic.goals import (
     ProjectPowerGoal,
     goal_from_dict,
 )
+from empire.ai.strategic.intel.opportunities import (
+    ENEMY_CAPTURE_PROBABILITY,
+    NEUTRAL_CAPTURE_PROBABILITY,
+)
 from empire.contracts.turn_plan import ProductionOrder
 from empire.contracts.world_view import WorldView
 from empire.core.coord import Coord
@@ -45,11 +56,29 @@ if TYPE_CHECKING:
 
 # Terminal task forces linger one turn (debug/telemetry grace) before reaping.
 _REAP_GRACE = 1
-# How many armies an offensive (capture/deny) force wants — enough to take a
-# city AND survive the counter, given the §5.4 capture-disband tax. A v1 knob;
-# tuned against the land-brawl arena.
+# How many armies an offensive (capture/deny) force wants by default — enough to
+# take a city AND survive the counter, given the §5.4 capture-disband tax. A v1
+# knob; tuned against the land-brawl arena.
 ATTACK_FORCE_SIZE = 3
 _ARMY = UnitKind.ARMY
+
+
+def _fortified_fist(rules: object) -> int:
+    """Armies a capture force needs to run a city's artillery gauntlet (spec
+    §4.7). The city fires once per round over ~`range` approach rounds, so it
+    can stop at most `range` armies — `range + 1` guarantees one lands. With
+    the default range 2 that is 3, matching `ATTACK_FORCE_SIZE`. Reads the
+    optional `city_artillery_range` the RuleSet carries; 0 → no artillery, so
+    the default fist applies.
+
+    This is the concentration governor: a capture force stays FORMING (pulling
+    in armies, drawing production) until it reaches the fist, so force massES on
+    the objective instead of trickling in to be shot down. `rules` typed loosely
+    to avoid threading the concrete RuleSet through every composition call."""
+    artillery_range = getattr(rules, "city_artillery_range", 0)
+    if artillery_range > 0:
+        return max(ATTACK_FORCE_SIZE, artillery_range + 1)
+    return ATTACK_FORCE_SIZE
 _TRANSPORT = UnitKind.TRANSPORT
 _WARSHIPS = frozenset(
     {UnitKind.PATROL, UnitKind.DESTROYER, UnitKind.SUBMARINE, UnitKind.BATTLESHIP}
@@ -145,6 +174,9 @@ class OperationalPlanner:
         live_unit_ids = {u.id for u in view.own_units}
 
         survivors = self._reap_and_update(memory.task_forces, view, turn, live_unit_ids)
+        # Scrap forces whose objective is hopeless even at best case, freeing
+        # their units to redirect and putting the target in cooldown.
+        self._abandon_hopeless(survivors, view, turn, memory)
         # Match forces to goals by *content* signature, not the strategist's
         # per-turn goal id (which is reallocated each plan). A goal that already
         # has a live force just refreshes that force's goal reference.
@@ -155,6 +187,8 @@ class OperationalPlanner:
         idle = self._idle_pool(view, claimed)
 
         for goal in goals:
+            if self._in_cooldown(goal, turn, memory):
+                continue
             signature = _goal_signature(goal)
             existing = by_signature.get(signature)
             if existing is not None:
@@ -167,7 +201,7 @@ class OperationalPlanner:
         # Concentration: pour leftover idle units into the highest-priority
         # under-strength forces, so new production massES into one fist instead
         # of spawning scattered hunters.
-        self._reinforce(survivors, idle, view)
+        self._reinforce(survivors, idle, view, turn)
 
         memory.task_forces = survivors
         orders = self._production_requests(survivors, view)
@@ -208,6 +242,50 @@ class OperationalPlanner:
             survivors.append(tf)
         return survivors
 
+    def _abandon_hopeless(
+        self,
+        forces: list[TaskForce],
+        view: WorldView,
+        turn: int,
+        memory: AIMemory,
+    ) -> None:
+        """Scrap any capture force whose objective is doomed *even at best case*
+        — a full fist that had already arrived (`formation_turns=0`) still can't
+        clear `ABANDON_FLOOR`. Best-case so the test is a property of the target
+        and the board, not of how this particular muster is going: a hopeless
+        siege is hopeless no matter how it formed. Disbanding it frees the units
+        to redirect (next turn, after the reap) and cools the target down so the
+        greedy strategist can't re-propose it straight back into assembly.
+
+        Absolute and independent of any rival objective, so a sticky incumbent
+        can never suppress it and per-turn odds jitter can never trigger it."""
+        fist = _fortified_fist(view.rules)
+        for tf in forces:
+            if tf.is_terminal() or not isinstance(tf.goal, CaptureCityGoal):
+                continue
+            best_case = _campaign_p(
+                tf.goal, view, assault_size=fist, formation_turns=0
+            )
+            if best_case < ABANDON_FLOOR:
+                tf.state = TaskForceState.DISBANDED
+                tf.terminal_since = turn
+                memory.abandoned_targets[int(tf.goal.target_city_id)] = turn
+
+    def _in_cooldown(self, goal: Goal, turn: int, memory: AIMemory) -> bool:
+        """True while a just-abandoned capture target is still cooling down, so
+        the planner declines to re-assemble a force for it (anti-thrash). Expired
+        entries are pruned in passing so the map stays bounded."""
+        if not isinstance(goal, CaptureCityGoal):
+            return False
+        cid = int(goal.target_city_id)
+        since = memory.abandoned_targets.get(cid)
+        if since is None:
+            return False
+        if turn - since >= ABANDON_COOLDOWN:
+            del memory.abandoned_targets[cid]
+            return False
+        return True
+
     def _idle_pool(
         self, view: WorldView, claimed: set[UnitId]
     ) -> dict[UnitKind, list[UnitId]]:
@@ -228,7 +306,7 @@ class OperationalPlanner:
         turn: int,
         memory: AIMemory,
     ) -> TaskForce:
-        composition = _required_composition(goal)
+        composition = _required_composition(goal, view)
         unit_ids: list[UnitId] = []
         roles: dict[UnitId, Role] = {}
         short = False
@@ -242,15 +320,18 @@ class OperationalPlanner:
                 unit_ids.append(uid)
                 roles[uid] = _role_for(goal, kind)
 
-        full = not short
+        del short  # the launch gate (in `_reinforce`) decides promotion
         target = _goal_target(goal, view)
+        # Always born FORMING; `_reinforce` runs the single launch gate this
+        # same turn, so even a fully-crewed fist must clear the odds threshold
+        # (or hit the deadline) before it marches — no force bypasses the gate.
         tf = TaskForce(
             id=TaskForceId(memory.next_task_force_id),
             goal=goal,
             unit_ids=unit_ids,
             role_assignments=roles,
             target=target,
-            state=TaskForceState.EN_ROUTE if full else TaskForceState.FORMING,
+            state=TaskForceState.FORMING,
             created_turn=turn,
             rendezvous=_rendezvous(target, view),
         )
@@ -262,9 +343,24 @@ class OperationalPlanner:
         forces: list[TaskForce],
         idle: dict[UnitKind, list[UnitId]],
         view: WorldView,
+        turn: int,
     ) -> None:
         """Distribute leftover idle units into under-strength forces, highest
-        value-per-turn first, and promote a force to EN_ROUTE once crewed."""
+        value-per-turn first, then run the single FORMING→EN_ROUTE launch gate.
+
+        A force launches when EITHER:
+        * the prep deadline has passed and it has at least one unit to commit
+          (`PREP_DEADLINE`) — the 'go with what you have' anti-stalemate rule
+          that stops a force mustering forever; OR
+        * it is at full strength AND its odds clear `COMMIT_THRESHOLD` — the
+          combined-arms launch decision (Phase 15.7): mass the fist, then strike
+          only when `estimate_success` says the moment is good enough. A full
+          fist below threshold holds (waiting for the board to improve) until
+          the deadline forces its hand.
+
+        An empty force keeps forming; there is nothing to send. Non-combat goals
+        have `_campaign_p == 1.0`, so they launch the instant they are full,
+        exactly as before."""
         active = sorted(
             (tf for tf in forces if not tf.is_terminal()),
             key=lambda tf: tf.goal.rank(),
@@ -272,7 +368,7 @@ class OperationalPlanner:
         )
         for tf in active:
             short = False
-            for kind, needed in _required_composition(tf.goal).entries:
+            for kind, needed in _required_composition(tf.goal, view).entries:
                 have = sum(1 for uid in tf.unit_ids if _unit_kind(view, uid) is kind)
                 pool = idle.get(kind, [])
                 while have < needed and pool:
@@ -282,8 +378,23 @@ class OperationalPlanner:
                     have += 1
                 if have < needed:
                     short = True
-            if tf.state is TaskForceState.FORMING and not short:
-                tf.state = TaskForceState.EN_ROUTE
+            if tf.state is TaskForceState.FORMING:
+                formation_turns = turn - tf.created_turn
+                deadline_passed = formation_turns >= PREP_DEADLINE and bool(tf.unit_ids)
+                if deadline_passed:
+                    tf.state = TaskForceState.EN_ROUTE
+                elif not short:
+                    army_n = sum(
+                        1 for uid in tf.unit_ids if _unit_kind(view, uid) is _ARMY
+                    )
+                    p = _campaign_p(
+                        tf.goal,
+                        view,
+                        assault_size=army_n,
+                        formation_turns=formation_turns,
+                    )
+                    if p >= COMMIT_THRESHOLD:
+                        tf.state = TaskForceState.EN_ROUTE
 
     def _production_requests(
         self, task_forces: list[TaskForce], view: WorldView
@@ -297,7 +408,7 @@ class OperationalPlanner:
         for tf in task_forces:
             if tf.state is not TaskForceState.FORMING:
                 continue
-            for kind, needed in _required_composition(tf.goal).entries:
+            for kind, needed in _required_composition(tf.goal, view).entries:
                 owned = sum(1 for uid in tf.unit_ids if _unit_kind(view, uid) is kind)
                 wanted.extend([kind] * max(0, needed - owned))
 
@@ -320,9 +431,13 @@ def _goal_signature(goal: Goal) -> tuple[object, ...]:
     return (GoalKind.BUILD_FORCES,)  # at most one build-forces force
 
 
-def _required_composition(goal: Goal) -> ForceComposition:
+def _required_composition(goal: Goal, view: WorldView) -> ForceComposition:
+    """The force a goal needs. Capture/deny forces size to the artillery fist
+    under FortifiedCities (concentrate to break the gauntlet), a single army
+    otherwise — so the operational layer's FORMING→EN_ROUTE gate becomes the
+    'mass before you commit' governor without the strategist vetoing attacks."""
     if isinstance(goal, CaptureCityGoal):
-        return ForceComposition.of({_ARMY: ATTACK_FORCE_SIZE})
+        return ForceComposition.of({_ARMY: _fortified_fist(view.rules)})
     if isinstance(goal, DefendCityGoal):
         return ForceComposition.of({_ARMY: max(1, goal.garrison_size_needed)})
     if isinstance(goal, ProjectPowerGoal):
@@ -330,12 +445,45 @@ def _required_composition(goal: Goal) -> ForceComposition:
         counts[_TRANSPORT] = max(counts.get(_TRANSPORT, 0), goal.transport_count)
         return ForceComposition.of(counts)
     if isinstance(goal, DenyContinentGoal):
-        return ForceComposition.of({_ARMY: ATTACK_FORCE_SIZE})
+        return ForceComposition.of({_ARMY: _fortified_fist(view.rules)})
     if isinstance(goal, ExploreAreaGoal):
         return ForceComposition.of({_ARMY: 1})
     if isinstance(goal, BuildForcesGoal):
         return goal.force_composition_target
     return ForceComposition()
+
+
+def _field_odds(goal: CaptureCityGoal, view: WorldView) -> float:
+    """The intel-prior chance of beating a capture target's mobile defenders
+    (`Opportunity.success_probability`, derived here from the same canonical
+    priors): a neutral city always falls to an army that reaches it; an enemy
+    (or no-longer-visible) city carries the garrisoned prior. The artillery
+    gauntlet and time-pressure factors are layered on by `estimate_success`."""
+    cid = goal.target_city_id
+    if any(c.id == cid for c in view.neutral_cities):
+        return NEUTRAL_CAPTURE_PROBABILITY
+    return ENEMY_CAPTURE_PROBABILITY
+
+
+def _campaign_p(
+    goal: Goal, view: WorldView, *, assault_size: int, formation_turns: int
+) -> float:
+    """P(success) for a force's launch/abandon decision (Phase 15.7). Only a
+    city assault is gated on combat odds; every other goal returns 1.0 so the
+    launch gate reduces to 'full or deadline' for non-combat forces."""
+    if not isinstance(goal, CaptureCityGoal):
+        return 1.0
+    return estimate_success(
+        field_odds=_field_odds(goal, view),
+        assault_size=assault_size,
+        formation_turns=formation_turns,
+        my_city_count=len(view.own_cities),
+        enemy_city_count=len(view.known_enemy_cities),
+        # Surprise inference is deferred to Phase 15.7 step 2; assume spotted
+        # (no surprise bonus) — the conservative side.
+        any_unit_spotted=True,
+        rules=view.rules,
+    )
 
 
 def _role_for(goal: Goal, kind: UnitKind) -> Role:

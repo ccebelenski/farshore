@@ -24,6 +24,10 @@ def _no_task_forces() -> list[TaskForce]:
     return []
 
 
+def _no_abandoned_targets() -> dict[int, int]:
+    return {}
+
+
 @dataclass
 class AIMemory:
     """Persistent state the AI carries between turns."""
@@ -31,12 +35,18 @@ class AIMemory:
     last_goals: tuple[Goal, ...] = ()
     task_forces: list[TaskForce] = field(default_factory=_no_task_forces)
     next_task_force_id: int = 1
+    # City ids the operational layer abandoned as hopeless, mapped to the turn
+    # it scrapped the siege (Phase 15.7). While a target sits in cooldown the
+    # planner refuses to re-assemble a force for it, so the greedy strategist
+    # re-proposing the same doomed capture can't cause assemble/abandon thrash.
+    abandoned_targets: dict[int, int] = field(default_factory=_no_abandoned_targets)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "last_goals": [g.to_dict() for g in self.last_goals],
             "task_forces": [tf.to_dict() for tf in self.task_forces],
             "next_task_force_id": self.next_task_force_id,
+            "abandoned_targets": [[cid, t] for cid, t in self.abandoned_targets.items()],
         }
 
     @classmethod
@@ -49,4 +59,7 @@ class AIMemory:
             last_goals=tuple(goal_from_dict(g) for g in data.get("last_goals", [])),
             task_forces=[TaskForce.from_dict(tf) for tf in data.get("task_forces", [])],
             next_task_force_id=int(data.get("next_task_force_id", 1)),
+            abandoned_targets={
+                int(cid): int(t) for cid, t in data.get("abandoned_targets", [])
+            },
         )
