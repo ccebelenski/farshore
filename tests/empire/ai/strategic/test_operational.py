@@ -350,6 +350,29 @@ def test_hopeless_siege_is_abandoned_and_target_cooled_down() -> None:
     ]
 
 
+def test_surplus_armies_overstrength_the_fist_not_left_idle() -> None:
+    """Phase 15.7 step 2a: spare armies beyond the minimum fist pour into the
+    offensive force (up to fist + gauntlet redundancy) instead of wandering. The
+    glut the disband fix exposed gets spent thickening a real assault."""
+    p1 = player(1)
+    enemy = player(2)
+    mine = City(id=CityId(1), coord=Coord(0, 0), owner=p1)
+    foe = City(id=CityId(2), coord=Coord(2, 0), owner=enemy)
+    rmap = grid_map(["C.C........."], cities={Coord(0, 0): mine, Coord(2, 0): foe})
+    # Eight idle armies; the FORTIFIED fist is 3 and over-strength cap is 3+2=5.
+    armies = [place(rmap, Army(UnitId(10 + i), p1, Coord(3 + i, 0))) for i in range(8)]
+    goal = _capture_goal(1, 2, Coord(2, 0))
+    mem = AIMemory()
+
+    out = OperationalPlanner().plan([goal], _fortified_world(rmap, p1, turn=1), mem)
+
+    tf = next(tf for tf in out.task_forces if not tf.is_terminal())
+    assert len(tf.unit_ids) == 5, "fist filled to the over-strength cap (3+2)"
+    assigned = {int(u) for u in tf.unit_ids}
+    idle_left = [a for a in armies if int(a.id) not in assigned]
+    assert len(idle_left) == 3, "surplus beyond the cap stays for other uses"
+
+
 # --- serialization -----------------------------------------------------------
 
 

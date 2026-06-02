@@ -79,6 +79,15 @@ def _fortified_fist(rules: object) -> int:
     if artillery_range > 0:
         return max(ATTACK_FORCE_SIZE, artillery_range + 1)
     return ATTACK_FORCE_SIZE
+
+
+def _overstrength_extra(rules: object) -> int:
+    """Surplus armies an offensive fist may absorb *beyond* its minimum, for
+    gauntlet/counter-attack redundancy (Phase 15.7 step 2). Scales with the
+    artillery gauntlet — a city stops ≈`range` armies on the approach, so carry
+    that many spares to still land the fist — and is at least 1 otherwise (a
+    captured city's §5.4 disband tax + the inevitable counter cost a body)."""
+    return max(1, getattr(rules, "city_artillery_range", 0))
 _TRANSPORT = UnitKind.TRANSPORT
 _WARSHIPS = frozenset(
     {UnitKind.PATROL, UnitKind.DESTROYER, UnitKind.SUBMARINE, UnitKind.BATTLESHIP}
@@ -396,6 +405,38 @@ class OperationalPlanner:
                     if p >= COMMIT_THRESHOLD:
                         tf.state = TaskForceState.EN_ROUTE
 
+        self._overstrength(active, idle, view)
+
+    def _overstrength(
+        self,
+        active: list[TaskForce],
+        idle: dict[UnitKind, list[UnitId]],
+        view: WorldView,
+    ) -> None:
+        """Pour any *still*-idle armies into the offensive fists, highest rank
+        first, up to an over-strength cap (Phase 15.7 step 2). Runs only after
+        every force has its minimum, so it spends genuine surplus — muscle that
+        would otherwise wander in Hunt mode is far better spent thickening a real
+        assault: extra armies are gauntlet redundancy (lose some to city
+        artillery on the approach, still land the fist) and counter-attack
+        insurance. Bounded per force so force still *concentrates* rather than
+        all piling onto the single top front; the remainder is left for the
+        strategist's exploration outlet (step 2b) to claim."""
+        extra = _overstrength_extra(view.rules)
+        if extra <= 0:
+            return
+        pool = idle.get(_ARMY, [])
+        cap = _fortified_fist(view.rules) + extra
+        for tf in active:  # already rank-sorted, strongest objective first
+            if tf.is_terminal() or not _is_offensive(tf.goal):
+                continue
+            have = sum(1 for uid in tf.unit_ids if _unit_kind(view, uid) is _ARMY)
+            while have < cap and pool:
+                uid = pool.pop(0)
+                tf.unit_ids.append(uid)
+                tf.role_assignments[uid] = _role_for(tf.goal, _ARMY)
+                have += 1
+
     def _production_requests(
         self, task_forces: list[TaskForce], view: WorldView
     ) -> list[ProductionOrder]:
@@ -429,6 +470,13 @@ def _goal_signature(goal: Goal) -> tuple[object, ...]:
     if isinstance(goal, (ExploreAreaGoal, ProjectPowerGoal, DenyContinentGoal)):
         return (goal.kind, goal.target_region)
     return (GoalKind.BUILD_FORCES,)  # at most one build-forces force
+
+
+def _is_offensive(goal: Goal) -> bool:
+    """A goal whose fist is armies sent to take/clear a city — the kind that
+    benefits from over-strength redundancy. Capture and deny both size to
+    `_fortified_fist`; everything else has a fixed or composition-set need."""
+    return isinstance(goal, (CaptureCityGoal, DenyContinentGoal))
 
 
 def _required_composition(goal: Goal, view: WorldView) -> ForceComposition:

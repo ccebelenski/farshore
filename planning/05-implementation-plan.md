@@ -954,11 +954,44 @@ still 25% (4/16): under FortifiedCities the smart AI is *expected* to lose until
 combined-arms air (step 2) clears the field — Step 1 is the launch-discipline
 prerequisite, not the win. Sample is small/noisy; treat as directional.
 
-**Step 2 (next) — air + coordinated production.** Fighters win local air
+**Step 2 (building) — surplus employment by home-theater confidence.** Step 1
+stopped armies dying on cities (§5.4) but converted the waste: measured **13.4
+idle armies/turn, peak 35** in a losing FORTIFIED game (diagnostic, since
+deleted) — surplus that survives but only ad-hoc *Hunts*. Root cause is a
+demand/supply gap: the strategist emits only Defend + Capture goals (consolidate
+& explore are deliberately *off* — they scattered force, see `strategist.py`),
+front count is capped at `own_cities + 2`, and each capture force wants a fixed
+fist — so an army-rich / target-poor side has nowhere to put the surplus. The
+fix is a **situational surplus router** keyed off the *home theater's*
+confidence (the `Theater` containing our cities; intel already tags state +
+per-landmass city ids):
+
+- **CONTESTED** (known targets include real fights — not all high-P): soak
+  surplus into **over-strength fists** (extra armies = gauntlet redundancy: lose
+  some to artillery on the approach, still land the fist) and a **mobile reserve**
+  parked *adjacent* to held cities (not on them — §5.4). Raises per-front demand.
+- **THIN BUT FOGGY** (known target list short / all high-P, BUT the home landmass
+  still has a fog frontier): a **concentrated home-exploration campaign** toward
+  the frontier — NOT the old scatter-to-every-cell explore goal. Self-reinforcing:
+  exploring either turns up new cities (new campaigns → more demand) or earns the
+  confidence to look elsewhere. This is the key "at least something" floor.
+- **SECURED** (short/high-P list AND home landmass fully revealed — no frontier):
+  project overseas. **DEFERRED to a later phase** — needs working naval
+  projection (transports/escorts/amphibious) AND a *multi-continent* arena; the
+  land-brawl harness is single-continent by construction and cannot validate it.
+
+Confidence = (few known non-friendly targets, all high-P) **discounted by**
+unexplored area — a short *known* list is only provisional ("done with what we
+see"); the discount is whether the home landmass still has a frontier
+(`nearest_frontier`). Build + tune the CONTESTED and THIN-BUT-FOGGY branches in
+the existing arena (measure idle armies/turn ↓ alongside win/unfinished); stub
+SECURED as the explicit hand-off to the naval phase.
+
+**Step 3 (later) — air + the SECURED/overseas branch.** Fighters win local air
 superiority (clear enemy AIR → ARMIES → SHIPPING) as an added FORMING→EN_ROUTE
-precondition; coordinated production by city role; surprise inference (binary:
-any campaign unit provably spotted?). Target: FORTIFIED win-rate decisively
-> 50% vs the horde.
+precondition; surprise inference (binary: any campaign unit provably spotted?);
+naval projection + multi-continent arena unlocks Step 2's SECURED branch. Target:
+FORTIFIED win-rate decisively > 50% vs the horde.
 
 ---
 
