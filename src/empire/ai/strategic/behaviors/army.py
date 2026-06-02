@@ -9,7 +9,7 @@ from empire.ai.strategic.behaviors.base import (
     Behavior,
     advance_toward,
     force_target,
-    sentry,
+    idle_step,
 )
 from empire.contracts.turn_plan import UnitMove
 from empire.contracts.world_view import WorldView
@@ -27,7 +27,13 @@ class ArmyAssaultBehavior(Behavior):
     def next_move(
         self, unit: Unit, view: WorldView, force: TaskForce | None
     ) -> UnitMove:
-        return advance_toward(unit, force_target(force), view, ARMY_PROFILE)
+        target = force_target(force)
+        move = advance_toward(unit, target, view, ARMY_PROFILE)
+        # A no-progress sentry must not leave the army to rot on a friendly
+        # city (§5.4 disband). Step it off instead.
+        if not move.path:
+            return idle_step(unit, view)
+        return move
 
 
 class ArmyGarrisonBehavior(Behavior):
@@ -40,8 +46,9 @@ class ArmyGarrisonBehavior(Behavior):
     ) -> UnitMove:
         target = force_target(force)
         if target is None:
-            return sentry(unit)
-        # Already adjacent (or on it): hold station — repair / intercept.
+            return idle_step(unit, view)
+        # Already adjacent (or on it): hold station — repair / intercept — but
+        # not *on* a friendly city, where §5.4 would disband the garrison.
         if unit.coord.chebyshev_to(target) <= 1:
-            return sentry(unit)
+            return idle_step(unit, view)
         return advance_toward(unit, target, view, ARMY_PROFILE)

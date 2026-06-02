@@ -142,6 +142,57 @@ def test_army_garrison_holds_when_adjacent_to_city() -> None:
     assert move.path == ()  # holds station
 
 
+def test_idle_army_on_friendly_city_steps_off_to_avoid_disband() -> None:
+    """The dominant production leak: an idle army that sentries on its home city
+    is disbanded at turn-end (§5.4). idle_step must move it off the city."""
+    from empire.ai.strategic.behaviors.base import idle_step
+
+    p1 = player(1)
+    city = City(id=CityId(1), coord=Coord(2, 1), owner=p1)
+    rmap = grid_map(["......" for _ in range(3)], cities={Coord(2, 1): city})
+    army = place(rmap, Army(UnitId(1), p1, Coord(2, 1)))  # standing ON its city
+    reveal_all(p1, rmap)
+
+    move = idle_step(army, world(rmap, p1))
+
+    step = _first_step(move)
+    assert step is not None, "must step off, not sentry on the city"
+    assert step != Coord(2, 1)
+    # The destination is a real, enterable land cell, not another city.
+    assert step.chebyshev_to(Coord(2, 1)) == 1
+
+
+def test_idle_army_off_city_just_sentries() -> None:
+    """Off a friendly city there is nothing to flee — idle_step holds."""
+    from empire.ai.strategic.behaviors.base import idle_step
+
+    p1 = player(1)
+    city = City(id=CityId(1), coord=Coord(2, 1), owner=p1)
+    rmap = grid_map(["......" for _ in range(3)], cities={Coord(2, 1): city})
+    army = place(rmap, Army(UnitId(1), p1, Coord(0, 0)))  # not on the city
+    reveal_all(p1, rmap)
+
+    assert idle_step(army, world(rmap, p1)).path == ()
+
+
+def test_hunt_with_nothing_to_explore_steps_off_city() -> None:
+    """HuntBehavior's 'nothing to explore' fallback used to sentry on the city
+    (the leak). With everything revealed there is no frontier, so it must use
+    idle_step and vacate the city."""
+    from empire.ai.strategic.behaviors.base import HuntBehavior
+
+    p1 = player(1)
+    city = City(id=CityId(1), coord=Coord(2, 1), owner=p1)
+    rmap = grid_map(["......" for _ in range(3)], cities={Coord(2, 1): city})
+    army = place(rmap, Army(UnitId(1), p1, Coord(2, 1)))
+    reveal_all(p1, rmap)  # fully explored → nearest_frontier is None
+
+    move = HuntBehavior().next_move(army, world(rmap, p1), None)
+
+    assert move.path != (), "must vacate the city, not sentry on it"
+    assert _first_step(move) != Coord(2, 1)
+
+
 def test_transport_ferry_sails_toward_target() -> None:
     p1 = player(1)
     rmap = grid_map(["~~~~~~" for _ in range(3)])

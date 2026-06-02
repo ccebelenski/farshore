@@ -88,6 +88,40 @@ def sentry(unit: Unit) -> UnitMove:
     return UnitMove(unit_id=unit.id)
 
 
+def idle_step(unit: Unit, view: WorldView) -> UnitMove:
+    """The 'nothing better to do' fallback. A land unit must NEVER end its turn
+    on a friendly city — §5.4 disbands it at turn-end — so if it is sitting on
+    one, step off to any legal, unoccupied, non-friendly-city neighbour rather
+    than sentry. (This was the dominant production leak: idle/just-produced
+    armies sentrying on their home city and being disbanded — ~24% of all units
+    produced.) Off a city, or for a unit §5.4 doesn't disband, plain sentry."""
+    tile = view.terrain_at(unit.coord)
+    on_friendly_city = (
+        tile is not None
+        and tile.terrain is TerrainKind.CITY
+        and tile.city is not None
+        and tile.city.owner is view.own_player
+    )
+    if not on_friendly_city:
+        return sentry(unit)
+
+    legal = type(unit).legal_terrain
+    for nb in unit.coord.neighbors():
+        if not view.in_bounds(nb):
+            continue
+        nb_tile = view.terrain_at(nb)
+        if nb_tile is None or nb_tile.terrain not in legal:
+            continue
+        # Don't step onto another friendly city (same trap) or a friendly unit.
+        if nb_tile.terrain is TerrainKind.CITY:
+            continue
+        if any(u.owner is view.own_player for u in view.real_map().units_at(nb)):
+            continue
+        return UnitMove(unit_id=unit.id, path=((nb.x, nb.y),))
+    # Boxed in (every escape blocked) — sentry and accept the disband.
+    return sentry(unit)
+
+
 def advance_toward(
     unit: Unit, target: Coord | None, view: WorldView, profile: PathCostProfile
 ) -> UnitMove:
@@ -172,6 +206,10 @@ class HuntBehavior(Behavior):
     ) -> UnitMove:
         del force
         target = nearest_frontier(unit, view)
-        if target is None:
-            return sentry(unit)  # nothing left to explore from here
-        return advance_toward(unit, target, view, profile_for(unit))
+        if target is not None:
+            move = advance_toward(unit, target, view, profile_for(unit))
+            if move.path:
+                return move
+        # No frontier, or the advance made no progress (path blocked / recompute
+        # yielded nothing): don't rot on a friendly city — step off if on one.
+        return idle_step(unit, view)
