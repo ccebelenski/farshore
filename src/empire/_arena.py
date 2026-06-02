@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import random
 import time
 from dataclasses import dataclass
@@ -144,28 +145,58 @@ class ArenaResult:
 
 def run_arena(
     seeds: int, cap: int, profile: MapProfile = ARENA_PROFILE, verbose: bool = True,
-    rules: RuleSet = STANDARD,
+    rules: RuleSet = STANDARD, jobs: int = 1,
 ) -> ArenaResult:
-    """Each seed played twice (sides swapped) to cancel positional bias."""
+    """Each seed played twice (sides swapped) to cancel positional bias.
+
+    Every match is a pure function of (profile, seed, side, cap, rules) — map
+    gen and the game RNG are both seeded from `seed` — so playing them across
+    `jobs` processes is bit-identical to sequential, just faster. Matches are
+    CPU-bound (the GIL rules out threads) and tiny in memory, so the worker
+    count can safely be the core count. `jobs <= 1` keeps the in-process path.
+    """
     result = ArenaResult()
     turns: list[int] = []
     start = time.time()
-    for seed in range(seeds):
-        for strategic_first in (True, False):
-            outcome = play_match(profile, seed, strategic_first, cap, rules)
-            if outcome is None:
-                continue
-            label, played = outcome
-            setattr(result, label, getattr(result, label) + 1)
-            if label in ("strategic", "baseline"):
-                turns.append(played)
-        if verbose:
-            print(
-                f"  seed {seed}: S={result.strategic} B={result.baseline} "
-                f"draw={result.draw} unfin={result.unfinished} "
-                f"({time.time() - start:.0f}s)",
-                flush=True,
-            )
+
+    def consume(outcome: tuple[str, int] | None) -> None:
+        if outcome is None:
+            return
+        label, played = outcome
+        setattr(result, label, getattr(result, label) + 1)
+        if label in ("strategic", "baseline"):
+            turns.append(played)
+
+    specs = [(seed, sf) for seed in range(seeds) for sf in (True, False)]
+    if jobs <= 1:
+        for seed, sf in specs:
+            consume(play_match(profile, seed, sf, cap, rules))
+            if verbose and sf is False:  # both sides of this seed done
+                print(
+                    f"  seed {seed}: S={result.strategic} B={result.baseline} "
+                    f"draw={result.draw} unfin={result.unfinished} "
+                    f"({time.time() - start:.0f}s)",
+                    flush=True,
+                )
+    else:
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+
+        with ProcessPoolExecutor(max_workers=jobs) as ex:
+            futures = [
+                ex.submit(play_match, profile, seed, sf, cap, rules)
+                for seed, sf in specs
+            ]
+            step = max(1, len(futures) // 10)
+            for done, fut in enumerate(as_completed(futures), 1):
+                consume(fut.result())
+                if verbose and (done % step == 0 or done == len(futures)):
+                    print(
+                        f"  {done}/{len(futures)} games: S={result.strategic} "
+                        f"B={result.baseline} draw={result.draw} "
+                        f"unfin={result.unfinished} ({time.time() - start:.0f}s)",
+                        flush=True,
+                    )
+
     result.mean_turns = sum(turns) / len(turns) if turns else 0.0
     return result
 
@@ -178,11 +209,15 @@ def main() -> None:
         "--fortified", action="store_true",
         help="use the FORTIFIED_CITIES ruleset (city artillery) instead of STANDARD",
     )
+    parser.add_argument(
+        "--jobs", type=int, default=max(1, (os.cpu_count() or 1) - 1),
+        help="parallel worker processes (default: cores-1; 1 = sequential)",
+    )
     args = parser.parse_args()
 
     rules = FORTIFIED_CITIES if args.fortified else STANDARD
-    print(f"ruleset: {rules.name}")
-    r = run_arena(args.seeds, args.cap, rules=rules)
+    print(f"ruleset: {rules.name}  jobs: {args.jobs}")
+    r = run_arena(args.seeds, args.cap, rules=rules, jobs=args.jobs)
     print(f"\n{2 * args.seeds} games: S={r.strategic} B={r.baseline} "
           f"draw={r.draw} unfinished={r.unfinished}")
     if r.decided:
