@@ -5,10 +5,13 @@ candidate plans each turn, scoring each by cloning the game and simulating
 it forward against a model of the opponent. Design rationale:
 `planning/03-ai-design.md` §9.
 
-This package builds up in steps. Step 0 ships `PlayoutModel`, the forward
-model every later piece simulates through.
+Components: `PlayoutModel` (forward model), `Plan`/`PlanFollower`
+(candidate course of action + its executor), `Evaluator` (horizon scoring),
+`CandidateGenerator` (plan proposals), `BeliefBuilder` (fog-honest world),
+and `SearchAI` (the controller tying them together).
 """
 
+from empire.ai.search.ai import SearchAI
 from empire.ai.search.playout import PlayoutModel
 
-__all__ = ["PlayoutModel"]
+__all__ = ["PlayoutModel", "SearchAI"]

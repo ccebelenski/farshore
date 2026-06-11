@@ -93,18 +93,28 @@ def build_land_brawl(
     return None
 
 
+def _smart_ai(kind: str) -> AIController:
+    """The challenger under test: 'strategic' (Phase 15) or 'search' (15.8)."""
+    if kind == "search":
+        from empire.ai.search import SearchAI
+
+        return SearchAI()
+    return StrategicAI()
+
+
 def play_match(
     profile: MapProfile, seed: int, strategic_first: bool, cap: int,
-    rules: RuleSet = STANDARD,
+    rules: RuleSet = STANDARD, ai: str = "strategic",
 ) -> tuple[str, int] | None:
     """Run one game; return (outcome, turns). Outcome is
-    'strategic' | 'baseline' | 'draw' | 'unfinished'."""
+    'strategic' | 'baseline' | 'draw' | 'unfinished' ('strategic' = the
+    challenger named by `ai`, whichever implementation that is)."""
     built = build_land_brawl(profile, seed, rules)
     if built is None:
         return None
     game, players = built
     si = 0 if strategic_first else 1
-    strategic: AIController = StrategicAI()
+    strategic: AIController = _smart_ai(ai)
     baseline: AIController = BaselineAI()
     game.attach_controller(players[si].id, strategic)
     game.attach_controller(players[1 - si].id, baseline)
@@ -145,7 +155,7 @@ class ArenaResult:
 
 def run_arena(
     seeds: int, cap: int, profile: MapProfile = ARENA_PROFILE, verbose: bool = True,
-    rules: RuleSet = STANDARD, jobs: int = 1,
+    rules: RuleSet = STANDARD, jobs: int = 1, ai: str = "strategic",
 ) -> ArenaResult:
     """Each seed played twice (sides swapped) to cancel positional bias.
 
@@ -170,7 +180,7 @@ def run_arena(
     specs = [(seed, sf) for seed in range(seeds) for sf in (True, False)]
     if jobs <= 1:
         for seed, sf in specs:
-            consume(play_match(profile, seed, sf, cap, rules))
+            consume(play_match(profile, seed, sf, cap, rules, ai))
             if verbose and sf is False:  # both sides of this seed done
                 print(
                     f"  seed {seed}: S={result.strategic} B={result.baseline} "
@@ -183,7 +193,7 @@ def run_arena(
 
         with ProcessPoolExecutor(max_workers=jobs) as ex:
             futures = [
-                ex.submit(play_match, profile, seed, sf, cap, rules)
+                ex.submit(play_match, profile, seed, sf, cap, rules, ai)
                 for seed, sf in specs
             ]
             step = max(1, len(futures) // 10)
@@ -213,15 +223,19 @@ def main() -> None:
         "--jobs", type=int, default=max(1, (os.cpu_count() or 1) - 1),
         help="parallel worker processes (default: cores-1; 1 = sequential)",
     )
+    parser.add_argument(
+        "--ai", choices=("strategic", "search"), default="strategic",
+        help="the challenger to pit against BaselineAI",
+    )
     args = parser.parse_args()
 
     rules = FORTIFIED_CITIES if args.fortified else STANDARD
-    print(f"ruleset: {rules.name}  jobs: {args.jobs}")
-    r = run_arena(args.seeds, args.cap, rules=rules, jobs=args.jobs)
+    print(f"ruleset: {rules.name}  jobs: {args.jobs}  ai: {args.ai}")
+    r = run_arena(args.seeds, args.cap, rules=rules, jobs=args.jobs, ai=args.ai)
     print(f"\n{2 * args.seeds} games: S={r.strategic} B={r.baseline} "
           f"draw={r.draw} unfinished={r.unfinished}")
     if r.decided:
-        print(f"StrategicAI win-rate among decided: {r.strategic}/{r.decided} "
+        print(f"{args.ai} win-rate among decided: {r.strategic}/{r.decided} "
               f"= {r.strategic / r.decided:.1%}")
         print(f"one-sided binomial p (better than baseline): {r.binomial_p():.4f}")
     print(f"mean decided-game length: {r.mean_turns:.0f} turns")
