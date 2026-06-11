@@ -436,3 +436,112 @@ Suggested ordering, narrow-to-wide:
 6. `LLMAI` — drop in last; the deterministic baseline shows whether the LLM is actually helping.
 
 This order also defers the most uncertain work (LLM integration) to the end, when everything around it is stable.
+
+---
+
+## 9. `SearchAI` — plan-space lookahead (the decisive line)
+
+Decided with the user (2026-06-11), after the Phase 15.5–15.7 record showed the
+hand-doctrine line plateauing: every iteration hand-designs a doctrine
+(concentration, posture, launch gates, over-strength), runs the arena,
+discovers the counter-intuitive failure, and reverts. The decisive alternative,
+from the RTS-AI literature (**Puppet Search** — Barriga, Stanescu & Buro;
+Portfolio Greedy Search — Churchill & Buro): stop hand-designing the doctrine
+and **search over a space of plans at runtime**, scoring each candidate by
+cloning the game and simulating it forward against a model of the opponent.
+
+Two properties make this game an unusually good fit:
+
+1. **The opponent we must beat is a deterministic script we own.** Playouts run
+   the *literal* `BaselineAI` as the predicted opponent. Search players are
+   normally limited by opponent modeling; ours isn't. (Overfitting to the horde
+   is the *goal* while the gate is "beat BaselineAI"; a small opponent pool
+   restores robustness later.)
+2. **Turn-based with a generous per-turn budget.** Seconds per AI turn are
+   acceptable; this was never an option for real-time games and is the reason
+   the hand-doctrine line was chosen originally.
+
+### 9.1 Architecture
+
+```
+SearchAI(AIController)
+ ├── CandidateGenerator   — proposes K candidate Plans (heuristic, K ≈ 8–32)
+ ├── PlayoutModel         — clones the game (schema-v1 round-trip), wires a
+ │                          CombatResolver, attaches controllers
+ ├── PlanFollower         — executes a candidate Plan inside the playout,
+ │                          reusing the existing tactical Behaviors
+ ├── OpponentModel        — BaselineAI driving the enemy side of the playout
+ └── Evaluator            — static score at the horizon
+```
+
+Each turn (rolling horizon — re-plan from scratch every turn):
+
+1. Generate K candidate plans. A **Plan** is an assignment over choice points:
+   per known city → {assault now with N armies, mass at staging point, defend,
+   ignore}; per surplus group → {scout frontier, reserve}; production →
+   {armies, fighters, split}. The generator proposes *plausible* combinations
+   (anchored on nearest/highest-value targets), not the full cross-product.
+2. For each candidate: clone, play H turns forward (our side = `PlanFollower`
+   on the candidate, enemy = `OpponentModel`), score with `Evaluator`.
+3. Commit the argmax plan's first turn as the real `TurnPlan`.
+
+**The horizon is short by design** (H ≈ 10–20, tunable). Beyond that the
+simulation diverges from reality — fog, stochastic combat, and opponent-model
+error compound — so deep lookahead adds noise, not signal. The `Evaluator`
+carries the long-term judgment: city differential, production in flight,
+material weighted by concentration (Lanchester — massed armies are worth more
+than the sum of scattered ones), frontier/intel value.
+
+This dissolves the constants we kept hand-tuning: `PREP_DEADLINE`, P ≥ 0.60,
+fist size stop being guessed numbers — "launch now vs. wait two turns" is
+answered per-situation by simulating both against the real engine, the real
+artillery gauntlet, the real §5.4 tax.
+
+### 9.2 Fog discipline
+
+Playouts are built from the **searcher's own view**, not the real map: known
+tiles as seen, unknown territory treated as empty, enemy units at last-known
+positions projected forward with the opponent model. No cheating in v1. The
+existing `RuleSet.fog_cheat` flag doubles as a diagnostic: searching from the
+true state gives an upper bound, and the gap measures what honest
+determinization must recover (sampled enemy dispositions, later, only if the
+gap is large).
+
+### 9.3 Performance (measured 2026-06-11, mid-game arena state, FORTIFIED)
+
+- **Clone is free:** schema-v1 round-trip ≈ 1.0–1.5 ms. (Gap found:
+  `V1Serializer.from_dict` does not wire a `CombatResolver`; `PlayoutModel`
+  must.)
+- **The cost is the opponent model, not the engine:** 93% of playout time is
+  `BaselineAI._score_objective` running full A* per (army × objective) pair —
+  1,127 `find_path` calls in a 15-turn playout (~1.0 s mid-game, ~2.4 s late).
+- **The fix is behavior-preserving:** one BFS distance field per objective
+  (the arena map is 504 cells) replaces per-pair A*; expected ~10× on playouts
+  and it speeds the arena itself. Unit counts stay small (5–14 observed — §5.4
+  attrition keeps the board lean), so per-unit scaling is not the concern.
+- Budget arithmetic after the fix: ~100 ms per 15-turn playout → K=32
+  candidates ≈ 3 s/turn single-core; candidate evaluation is embarrassingly
+  parallel if needed. Restricting simulation to a spatial boundary around the
+  action is a recorded later optimization, not v1.
+
+### 9.4 What it replaces, what it keeps
+
+- **Replaces:** the strategist's goal-emission heuristics and operational's
+  launch/abandon/posture rules — the layers rewritten eight times in 15.5–15.7.
+  The remaining 15.7 increments (surplus router branches, 3a fighter doctrine,
+  sticky swap) are superseded.
+- **Keeps:** the tactical layer (`Behaviors`, pathfinding, `TaskForce`
+  mechanics) as the script library the `PlanFollower` composes;
+  `CombatEvaluator` and the Lanchester-style odds math inside the `Evaluator`;
+  `IntelService` as the view summarizer feeding the `CandidateGenerator`.
+- **`StrategicAI` stays** as a committed difficulty tier and arena opponent —
+  it is not deleted, it is frozen.
+
+### 9.5 LLM tie-in
+
+`SearchAI` gives the eventual `LLMAI` a better harness than goal emission: the
+LLM becomes a **plan proposer** — its candidates enter the same playout
+verification as the heuristic generator's, so a small local model's
+hallucinated plan loses in simulation instead of losing the game. Search also
+provides the difficulty ladder for free (candidate count, horizon, and eval
+noise as knobs, §5).

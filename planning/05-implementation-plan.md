@@ -1034,6 +1034,75 @@ after each. Enemy-air-superiority gating, surprise inference, and the
 SECURED/overseas naval branch remain later (no enemy air today; naval needs a
 multi-continent arena). Target: FORTIFIED win-rate decisively > 50%.
 
+**SUPERSEDED (2026-06-11).** Steps 2 (surplus router) and 3 (combined-arms air,
+3a-1/3a-2) and the deferred sticky swap are superseded by **Phase 15.8** — the
+user chose plan-space search over further hand-doctrine iteration. Committed
+work stands (launch gate, over-strength, front heuristic, telemetry);
+`StrategicAI` freezes as a difficulty tier and arena opponent.
+
+---
+
+## Phase 15.8 — `SearchAI`: plan-space lookahead (supersedes 15.7 Steps 2–3)
+
+**Why:** the 15.5–15.7 pattern — hand-design a doctrine, measure, discover the
+failure, revert — plateaued around 30% vs the horde. The decisive move (design
+rationale in `03-ai-design.md` §9, decided with the user): search over candidate
+*plans* at runtime, scoring each by cloning the game and simulating H turns
+forward with the **literal `BaselineAI` as the opponent model**. Turn-based
+budget makes it affordable; owning the opponent script makes it accurate.
+Horizon kept short (H ≈ 10–20) — deeper simulation diverges into noise; a
+static evaluator carries long-term judgment.
+
+**Measured feasibility (2026-06-11):** clone via schema-v1 round-trip ≈ 1 ms;
+93% of playout cost is `BaselineAI`'s per-(army×objective) A*; BFS distance
+fields make playouts ~10× cheaper, behavior-preserving. K=32 candidates × 15
+turns ≈ 3 s/turn single-core after the fix. Found: `from_dict` doesn't wire a
+`CombatResolver` — the playout clone helper must.
+
+**Step 0 — forward model + speed.**
+- `PlayoutModel`: clone (serializer round-trip), wire `CombatResolver`, attach
+  controllers. Unit test: cloned game plays N turns bit-identically to the
+  original under the same controllers/RNG.
+- BFS distance-field objective scoring in `BaselineAI` replacing per-pair A*
+  (same distances; path tie-breaks may differ). Re-run the 100-game arena
+  baseline to confirm win-rates are statistically unchanged — this also speeds
+  the arena itself.
+- Commit the forward-model benchmark as an instrument (alongside `_telemetry`).
+- Exit: mid-game 15-turn playout ≤ ~150 ms single-core.
+
+**Step 1 — evaluator + plan follower.**
+- `Evaluator`: city differential, production in flight, Lanchester-weighted
+  material (concentration counts), frontier/intel terms. Unit-test ordering on
+  hand-built positions (winning > drawn > losing; massed > scattered at equal
+  count).
+- `Plan` (typed, small) + `PlanFollower` executing a candidate inside a playout
+  by composing the existing tactical `Behaviors`. The follower is also the
+  real-turn executor (search commits the argmax plan's first turn).
+
+**Step 2 — `SearchAI` v1 (greedy plan search).**
+- `CandidateGenerator`: K ≈ 8–32 plausible plans over choice points — per-city
+  {assault-now-with-N, mass, defend, ignore}, surplus {scout, reserve},
+  production {armies, fighters, split}. Anchored heuristically, not a
+  cross-product.
+- Rolling horizon: re-plan each turn; evaluate candidates by playout from the
+  **searcher's view** (fog-honest: unknown = empty, enemy at last-known +
+  opponent-model projection); commit argmax.
+- Tune H and K against the arena. `fog_cheat` run as a diagnostic upper bound
+  only (never committed as the player-facing default).
+- **Exit gate:** beats `BaselineAI` with one-sided binomial p < 0.05 on BOTH
+  rulesets; target ≥ 60% decided win-rate on FORTIFIED (the original Phase 15
+  bar). Unfinished-rate at or below StrategicAI's.
+
+**Step 3 — widen + harden (only after the gate).**
+- More choice points (counterattack timing after a broken wave, fighter
+  employment), parallel candidate evaluation if budget demands, spatial
+  playout boundary if profiling ever shows unit-scaling pain (recorded
+  optimization, not v1).
+- Opponent pool (horde + frozen `StrategicAI` + mirror) to shed
+  single-opponent overfit; determinization sampling if the fog_cheat gap is
+  large.
+- Difficulty tiers from search knobs (K, H, eval noise).
+
 ---
 
 ## Phase 16 — Persistence hardening + schema v1 freeze (1-2 sessions)
