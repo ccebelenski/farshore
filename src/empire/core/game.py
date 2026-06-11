@@ -65,6 +65,7 @@ class Game:
         seed: int | None = None,
         event_bus: EventBusProtocol | None = None,
         combat_resolver: CombatResolverProtocol | None = None,
+        next_unit_id: int | None = None,
     ) -> None:
         self.rules: RuleSet = rules
         self.map: Map = real_map
@@ -76,11 +77,23 @@ class Game:
         self.combat_resolver: CombatResolverProtocol = (
             combat_resolver if combat_resolver is not None else _NullCombatResolver()
         )
-        # Monotonic counter for newly-produced unit IDs. Initialized below
-        # max existing unit ID so new units don't collide with loaded ones.
-        existing_ids = [int(u.id) for u in real_map.all_units()]
-        self._next_unit_id: int = (max(existing_ids) if existing_ids else 0) + 1
+        # Monotonic counter for newly-produced unit IDs. Loaders pass the
+        # saved counter (`next_unit_id`) verbatim so ids of *dead* units are
+        # never reissued — a reissued id could collide with `UnitSnapshot`
+        # refs in players' remembered intel — and so a loaded game replays
+        # exactly like the original. The max-derivation fallback covers
+        # fresh games and pre-counter saves.
+        if next_unit_id is not None:
+            self._next_unit_id: int = next_unit_id
+        else:
+            existing_ids = [int(u.id) for u in real_map.all_units()]
+            self._next_unit_id = (max(existing_ids) if existing_ids else 0) + 1
         self.turn_manager: TurnManager = TurnManager(self)
+
+    @property
+    def next_unit_id(self) -> int:
+        """The id the next produced unit will receive (persisted by saves)."""
+        return self._next_unit_id
 
     def allocate_unit_id(self) -> UnitId:
         """Return the next fresh `UnitId` for newly-produced units.

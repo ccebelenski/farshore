@@ -37,6 +37,7 @@ class V1Serializer:
         return {
             "schema_version": self.SCHEMA_VERSION,
             "turn": game.turn,
+            "next_unit_id": game.next_unit_id,
             "rng_state": _pack_rng_state(game.rng.getstate()),
             "rules": self._rules_to_dict(game.rules),
             "players": [self._player_to_dict(p) for p in game.players],
@@ -89,8 +90,16 @@ class V1Serializer:
             player = players_by_id[PlayerId(int(player_payload["id"]))]
             self._populate_view_map(player.view, player_payload["view"])
 
-        # 8. Game.
-        game = Game(rules=rules, real_map=real_map, players=players, seed=None)
+        # 8. Game. `next_unit_id` is optional for pre-counter saves; Game
+        # falls back to max-existing-id derivation when absent.
+        raw_next = payload.get("next_unit_id")
+        game = Game(
+            rules=rules,
+            real_map=real_map,
+            players=players,
+            seed=None,
+            next_unit_id=None if raw_next is None else int(raw_next),
+        )
         game.rng.setstate(_unpack_rng_state(payload["rng_state"]))
         game.turn = int(payload["turn"])
         return game
@@ -109,6 +118,9 @@ class V1Serializer:
             "asymmetric_combat_bonus": r.asymmetric_combat_bonus,
             "seven_terrain_types": r.seven_terrain_types,
             "transport_escort_required_for_unload": r.transport_escort_required_for_unload,
+            "city_artillery_range": r.city_artillery_range,
+            "city_artillery_hit_prob": r.city_artillery_hit_prob,
+            "city_artillery_pin_prob": r.city_artillery_pin_prob,
             "fog_cheat": r.fog_cheat,
         }
 
@@ -126,6 +138,11 @@ class V1Serializer:
             transport_escort_required_for_unload=bool(
                 d["transport_escort_required_for_unload"]
             ),
+            # Artillery fields landed in Phase 15.6, after early saves were
+            # written; default to the inert/classic values when absent.
+            city_artillery_range=int(d.get("city_artillery_range", 0)),
+            city_artillery_hit_prob=float(d.get("city_artillery_hit_prob", 0.5)),
+            city_artillery_pin_prob=float(d.get("city_artillery_pin_prob", 0.5)),
             fog_cheat=bool(d["fog_cheat"]),
         )
 

@@ -87,8 +87,15 @@ class ViewMap:
         """
         new_visible: set[Coord] = {c for c in scanned if real_map.in_bounds(c)}
 
-        # Cells leaving visibility: snapshot to remembered.
-        for c in self.visible - new_visible:
+        # Cells leaving visibility: snapshot to remembered — in canonical
+        # (y, x) order, NOT set-iteration order. `remembered` is an ordered
+        # dict whose insertion order leaks into `WorldView.known_enemy_units`
+        # and from there into AI tie-breaks; set iteration order depends on
+        # the set's memory history, which a save/clone round-trip cannot
+        # reproduce. Canonical order is what makes a loaded or cloned game
+        # replay the original bit-for-bit (a Phase-15.8 forward-model
+        # requirement; see tests/empire/ai/search/test_playout.py).
+        for c in sorted(self.visible - new_visible, key=lambda c: (c.y, c.x)):
             tile = real_map.tile(c)
             unit_snapshots: list[UnitSnapshot] = [
                 UnitSnapshot(

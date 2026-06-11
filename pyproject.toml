@@ -238,6 +238,12 @@ forbidden_modules = [
     "empire.persistence",
     "empire.tui",
 ]
+# SearchAI's forward model (Phase 15.8) clones games via the schema-v1
+# serializer round-trip — a read-only use of the save format, not a layering
+# inversion. Confined to this single edge.
+ignore_imports = [
+    "empire.ai.search.playout -> empire.persistence.schema_v1",
+]
 
 [[tool.importlinter.contracts]]
 name = "tui depends on core, contracts, ai, events, persistence only"

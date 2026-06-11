@@ -9,6 +9,14 @@ Phase 9 ships the ARMY decision in full. Other unit kinds fall through to
 `_sentry_decision` — BaselineAI's starting players only build Army, and
 adding Fighter/Patrol/etc. is a follow-up that doesn't require rewriting
 this scaffold.
+
+Performance shape (Phase 15.8 Step 0 — BaselineAI is also `SearchAI`'s
+opponent model, so its planning cost bounds every playout): one BFS
+`DistanceField` flood per unit answers all of that unit's objective
+distances at once, and the winner's path is reconstructed by descending the
+same field — no per-(unit, target) searches. Distances (hence scores and the
+chosen objective) are exactly what per-pair `find_path` produced; only ties
+between equal-length *routes* may break differently (arena-revalidated).
 """
 
 from __future__ import annotations
@@ -20,10 +28,8 @@ from empire.contracts.world_view import WorldView
 from empire.core.coord import Coord
 from empire.core.tile import TerrainKind
 from empire.core.unit import Unit, UnitKind
-from empire.pathfinding.bfs import BFSPathfinder
 from empire.pathfinding.cost import ARMY as ARMY_COST_PROFILE
-from empire.pathfinding.cost import PathCostProfile
-from empire.pathfinding.pathfinder import Path
+from empire.pathfinding.distance_field import DistanceField, PassabilityGrid
 
 # Weight tables (initial v1 — tuned by self-play). Scores are
 # `weight / (distance + 1)` so closer objectives outrank farther ones.
@@ -37,10 +43,21 @@ ARMY_EXPLORE_RADIUS = 8
 
 @dataclass(frozen=True, slots=True)
 class _Candidate:
-    """A scored objective with the path used to reach it."""
+    """A scored objective. The winner's path is reconstructed afterwards —
+    scoring needs only the distance, which the unit's field answers in O(1)."""
 
     score: float
-    path: Path
+    target: Coord
+
+
+@dataclass(frozen=True, slots=True)
+class _ViewContext:
+    """Per-planning-view shared state: the passability bitmap and the global
+    frontier set. Both depend only on (map, fog snapshot), so every unit
+    planned against the same `WorldView` shares one copy."""
+
+    grid: PassabilityGrid
+    frontier: frozenset[Coord]
 
 
 class BaselineTactical:
@@ -49,10 +66,15 @@ class BaselineTactical:
     `decide` returns the unit's planned `UnitMove` for the turn. The returned
     path includes at most `unit.moves_this_turn()` cells (the engine
     re-validates and will truncate, but we trim here to keep plans tidy).
+
+    A `_ViewContext` (passability grid + frontier set) is cached per planning
+    view — `WorldView` objects are constructed fresh per controller call, so
+    view identity scopes the cache to one consistent fog snapshot.
     """
 
     def __init__(self) -> None:
-        self._bfs = BFSPathfinder()
+        self._ctx_view: WorldView | None = None
+        self._ctx: _ViewContext | None = None
 
     def decide(self, unit: Unit, view: WorldView) -> UnitMove:
         if unit.kind is UnitKind.ARMY:
@@ -70,22 +92,19 @@ class BaselineTactical:
         always emits a 1-cell step (Army speed = 1), which keeps replanning
         responsive to fog-of-war updates from the next turn's scan.
         """
+        ctx = self._context_for(view)
+        field = DistanceField(unit.coord, ctx.grid)
         candidates: list[_Candidate] = []
-        profile = ARMY_COST_PROFILE
 
         # Enemy cities — highest weight, capture wins the game.
         for city in view.known_enemy_cities:
-            cand = self._score_objective(
-                unit, city.coord, view, profile, W_ARMY_ENEMY_CITY,
-            )
+            cand = self._score_objective(field, city.coord, W_ARMY_ENEMY_CITY)
             if cand is not None:
                 candidates.append(cand)
 
         # Neutral cities — production gain, slightly lower than enemy capture.
         for city in view.neutral_cities:
-            cand = self._score_objective(
-                unit, city.coord, view, profile, W_ARMY_NEUTRAL_CITY,
-            )
+            cand = self._score_objective(field, city.coord, W_ARMY_NEUTRAL_CITY)
             if cand is not None:
                 candidates.append(cand)
 
@@ -98,18 +117,14 @@ class BaselineTactical:
             terrain = self._terrain_for_view(view, enemy.snapshot.coord)
             if terrain is TerrainKind.WATER:
                 continue
-            cand = self._score_objective(
-                unit, enemy.snapshot.coord, view, profile, W_ARMY_ENEMY_UNIT,
-            )
+            cand = self._score_objective(field, enemy.snapshot.coord, W_ARMY_ENEMY_UNIT)
             if cand is not None:
                 candidates.append(cand)
 
         # Exploration: pick a small set of frontier coords (unseen cells
         # adjacent to a seen tile within reach) and score them weakly.
-        for frontier in self._frontier_candidates(unit, view):
-            cand = self._score_objective(
-                unit, frontier, view, profile, W_ARMY_EXPLORE,
-            )
+        for frontier in self._frontier_candidates(unit, ctx):
+            cand = self._score_objective(field, frontier, W_ARMY_EXPLORE)
             if cand is not None:
                 candidates.append(cand)
 
@@ -118,7 +133,12 @@ class BaselineTactical:
 
         candidates.sort(key=lambda c: c.score, reverse=True)
         best = candidates[0]
-        return self._step_along(unit, best.path)
+        # Reconstruct the winner's path from the unit's own field. The field
+        # scored the target reachable, so this cannot miss.
+        cells = field.path_to(best.target)
+        if cells is None or len(cells) < 2:
+            return self._sentry(unit)
+        return self._step_along(unit, cells)
 
     # ---- shared helpers ---------------------------------------------------
 
@@ -127,30 +147,35 @@ class BaselineTactical:
 
     def _score_objective(
         self,
-        unit: Unit,
+        field: DistanceField,
         target: Coord,
-        view: WorldView,
-        profile: PathCostProfile,
         weight: float,
     ) -> _Candidate | None:
-        """BFS from `unit.coord` to `target`; score by inverse path length."""
-        path = self._bfs.find_path(
-            start=unit.coord,
-            goal=target,
-            real_map=view.real_map(),
-            profile=profile,
-            view=view.own_player.view,
-        )
-        if path is None or path.steps == 0:
+        """Score `target` by inverse distance from the unit's field. Distances
+        equal `find_path(...).steps` exactly (uniform ARMY costs), so scores
+        match the per-pair search this replaced."""
+        steps = field.steps_to(target)
+        if steps is None or steps == 0:
             return None
-        score = weight / (path.steps + 1)
-        return _Candidate(score=score, path=path)
+        return _Candidate(score=weight / (steps + 1), target=target)
 
-    def _step_along(self, unit: Unit, path: Path) -> UnitMove:
-        """Emit the next `unit.moves_this_turn()` cells of `path` (excl. start)."""
+    def _context_for(self, view: WorldView) -> _ViewContext:
+        """The shared per-view context, rebuilt when the view object changes."""
+        if view is not self._ctx_view:
+            grid = PassabilityGrid(
+                view.real_map(), ARMY_COST_PROFILE, view.own_player.view,
+            )
+            self._ctx = _ViewContext(grid=grid, frontier=self._frontier_set(view))
+            self._ctx_view = view
+        ctx = self._ctx
+        assert ctx is not None  # set whenever _ctx_view is set
+        return ctx
+
+    def _step_along(self, unit: Unit, cells: tuple[Coord, ...]) -> UnitMove:
+        """Emit the next `unit.moves_this_turn()` cells of the path (excl. start)."""
         budget = unit.moves_this_turn()
-        # path.cells[0] == start; intended steps start at index 1.
-        steps = path.cells[1 : 1 + budget]
+        # cells[0] == start; intended steps start at index 1.
+        steps = cells[1 : 1 + budget]
         return UnitMove(
             unit_id=unit.id,
             path=tuple((c.x, c.y) for c in steps),
@@ -161,39 +186,42 @@ class BaselineTactical:
         tile = view.terrain_at(c)
         return tile.terrain if tile is not None else None
 
-    def _frontier_candidates(
-        self, unit: Unit, view: WorldView,
-    ) -> list[Coord]:
-        """Sample frontier coords near `unit` — seen-but-walkable cells whose
-        unseen neighbors invite exploration.
-
-        We pick the seen-cell side rather than the unseen-cell side so the
-        BFS goal is guaranteed reachable through known terrain. Sampling
-        stays small (cap at 12) to keep the per-unit cost bounded.
-        """
+    def _frontier_set(self, view: WorldView) -> frozenset[Coord]:
+        """All frontier cells on the board: seen, walkable, with at least one
+        unseen on-board 8-neighbor. One sweep per view, shared by every unit
+        (same predicates the old per-unit radius scan applied per cell)."""
         seen = view.own_player.view.seen
-        cap = 12
-        results: list[Coord] = []
-        radius = ARMY_EXPLORE_RADIUS
-        ux, uy = unit.coord.x, unit.coord.y
-        for dy in range(-radius, radius + 1):
-            for dx in range(-radius, radius + 1):
-                if len(results) >= cap:
-                    return results
-                c = Coord(ux + dx, uy + dy)
-                if not view.in_bounds(c):
-                    continue
+        real_map = view.real_map()
+        results: set[Coord] = set()
+        for y in range(real_map.height):
+            for x in range(real_map.width):
+                c = Coord(x, y)
                 if not seen(c):
                     continue
                 terrain = self._terrain_for_view(view, c)
                 if terrain is None or terrain is TerrainKind.WATER:
                     continue
-                # Frontier cell = at least one unseen on-board 8-neighbor.
-                has_unseen_neighbor = False
                 for n in c.neighbors():
                     if view.in_bounds(n) and not seen(n):
-                        has_unseen_neighbor = True
+                        results.add(c)
                         break
-                if has_unseen_neighbor:
+        return frozenset(results)
+
+    def _frontier_candidates(self, unit: Unit, ctx: _ViewContext) -> list[Coord]:
+        """Sample frontier coords near `unit`, capped at 12, in the same
+        box-scan order the original per-unit radius scan used (so the sample —
+        and therefore behavior — is unchanged; only the per-cell recompute
+        became a set lookup)."""
+        cap = 12
+        results: list[Coord] = []
+        radius = ARMY_EXPLORE_RADIUS
+        ux, uy = unit.coord.x, unit.coord.y
+        frontier = ctx.frontier
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                if len(results) >= cap:
+                    return results
+                c = Coord(ux + dx, uy + dy)
+                if c in frontier:
                     results.append(c)
         return results
