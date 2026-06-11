@@ -1105,6 +1105,36 @@ the arena itself now runs a 100-game sample in ~60s.
   rulesets; target ≥ 60% decided win-rate on FORTIFIED (the original Phase 15
   bar). Unfinished-rate at or below StrategicAI's.
 
+**Step 2 results (DONE — commits 59cf21e, fdf5ea5; validated 2026-06-11).**
+First full validation of untuned v1 (H=12, 3 samples, K≈4-12): STANDARD
+51.0% (p=0.46, 0 unfinished), FORTIFIED 45.1% (p=0.84, 18% unfinished) —
+both the best ever recorded (StrategicAI's best: 35.2% / 31.4%) but short
+of the gate. Event telemetry found the leak: **71% of armies killed by city
+artillery died with no friendly within 3 cells** — the v2 trickle, reborn
+inside `PlanFollower`; after staging alone was added, deaths moved to
+*transit* through other cities' rings (neutral cities fire at everyone).
+Three follower disciplines fixed it (fdf5ea5): hostile-ring masking in the
+movement grids (per-target grids keep the target's own ring open; raw-grid
+fallback), mass-at-the-ring, and storm-on-near-quorum with a latch so late
+joiners can't freeze a fist. Certified at 100 games per ruleset:
+
+| ruleset | SearchAI v2 | best StrategicAI ever | gate |
+|---|---|---|---|
+| FORTIFIED | **63.3%** (57-33), p=0.0074, 10% unfinished | 31.4% | **MET** (≥60%, p<0.05) |
+| STANDARD | 51.0% (51-49), p=0.46, 0% unfinished | 35.2% | parity; not significant |
+
+Reading: STANDARD's §5.4 capture-disband attrition race structurally favors
+the horde's tempo (the 15.5 rule matrix put ~52% as the apparent ceiling
+even with rule softening), so parity there plus decisive superiority under
+FORTIFIED — the design-forward ruleset — is the intended shape of the win.
+
+Open follow-ups out of Step 2: (1) **stall autopsy** — are the 10% FORTIFIED
+cap-outs genuinely dead mutual-fortress positions or unpressed winnable
+endgames? (2) **no-progress rule** as a future preset design question (a
+chess-style no-capture clock vs. material adjudication at the cap) — raised
+by the user as a musing, undecided, pairs with the autopsy's answer;
+(3) whether STANDARD stays a tuning target beyond parity.
+
 **Step 3 — widen + harden (only after the gate).**
 - More choice points (counterattack timing after a broken wave, fighter
   employment), parallel candidate evaluation if budget demands, spatial
