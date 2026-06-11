@@ -26,6 +26,7 @@ and reachability are identical; only equal-length route choice may differ.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Iterable
 
 from empire.core.coord import Coord, Direction
 from empire.core.map import Map, ViewMap
@@ -82,6 +83,23 @@ class PassabilityGrid:
         if not (0 <= c.x < self.width and 0 <= c.y < self.height):
             return False
         return self._flags[c.y * self.width + c.x]
+
+    def with_blocked(self, blocked: Iterable[Coord]) -> PassabilityGrid:
+        """A derived grid with `blocked` cells additionally impassable.
+
+        Used for danger-aware routing (e.g. treating hostile-city artillery
+        rings as no-go); the base grid is unchanged. Off-board coords in
+        `blocked` are ignored.
+        """
+        flags = list(self._flags)
+        for c in blocked:
+            if 0 <= c.x < self.width and 0 <= c.y < self.height:
+                flags[c.y * self.width + c.x] = False
+        derived = object.__new__(PassabilityGrid)
+        derived.width = self.width
+        derived.height = self.height
+        derived._flags = tuple(flags)
+        return derived
 
 
 class DistanceField:

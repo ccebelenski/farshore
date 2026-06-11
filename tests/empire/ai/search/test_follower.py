@@ -144,6 +144,37 @@ def test_idle_cities_get_production_orders() -> None:
     assert order.target is UnitKind.ARMY
 
 
+def test_assault_group_stages_outside_artillery_range_then_storms() -> None:
+    """Anti-trickle: under FortifiedCities, the lead army holds at the ring
+    (range+1) until the whole group is staged; once staged, all enter."""
+    from empire.core.ruleset import FORTIFIED_CITIES
+
+    game, p1, p2 = _flat_game(width=14)
+    game.rules = FORTIFIED_CITIES  # range 2 -> ring at 3
+    _see_all(game, p1)
+    _add_city(game, p2, Coord(13, 0), 1)  # enemy city = defended target
+    lead = _add_army(game, p1, Coord(10, 0), 1)  # at the ring already (cheb 3)
+    trail = _add_army(game, p1, Coord(2, 0), 2)  # far behind
+    follower = PlanFollower(
+        Plan(objectives=(Objective(Coord(13, 0), Role.ASSAULT, 2),))
+    )
+
+    moves = _moves_by_unit(follower, _view(game, p1))
+    # Lead holds outside range while the trail catches up...
+    assert int(lead.id) not in moves or all(
+        Coord(*c).chebyshev_to(Coord(13, 0)) > 2 for c in moves[int(lead.id)]
+    )
+    # ...and the trail advances.
+    assert int(trail.id) in moves
+
+    # Once both are staged, the storm begins: the lead enters artillery range.
+    game.map.move_unit(trail, Coord(9, 1))  # cheb 4 = staged
+    moves = _moves_by_unit(follower, _view(game, p1))
+    lead_path = moves.get(int(lead.id))
+    assert lead_path is not None
+    assert Coord(*lead_path[0]).chebyshev_to(Coord(13, 0)) <= 2
+
+
 def test_assignment_is_deterministic() -> None:
     game, p1, _ = _flat_game()
     _see_all(game, p1)
