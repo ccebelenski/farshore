@@ -1059,7 +1059,19 @@ fields make playouts ~10× cheaper, behavior-preserving. K=32 candidates × 15
 turns ≈ 3 s/turn single-core after the fix. Found: `from_dict` doesn't wire a
 `CombatResolver` — the playout clone helper must.
 
-**Step 0 — forward model + speed.**
+**Step 0 — forward model + speed (DONE, commit 2ab6bd8).** The bit-for-bit
+replay test flushed out three latent bugs: schema v1 never serialized the
+city-artillery rule fields (a FORTIFIED save silently loaded as STANDARD!),
+`Game._next_unit_id` was re-derived on load (reissuing dead units' ids,
+which can collide with remembered `UnitSnapshot` intel), and
+`ViewMap.update_from_scan` inserted remembered tiles in set-iteration order
+(memory-history-dependent — unreproducible by save/clone; now canonical
+(y, x)). BaselineAI planning rebuilt around one `DistanceField` flood per
+unit (distances provably equal `find_path` steps; equal-length route
+tie-breaks may differ). Measured: mid-game 15-turn playout 1075ms → 132ms
+(~8×); clone ~1ms. Arena re-baseline (100 games each): STANDARD 35.2%
+(recorded pre-change: 28.7%), FORTIFIED 31.4% (34.2%) — within noise, and
+the arena itself now runs a 100-game sample in ~60s.
 - `PlayoutModel`: clone (serializer round-trip), wire `CombatResolver`, attach
   controllers. Unit test: cloned game plays N turns bit-identically to the
   original under the same controllers/RNG.

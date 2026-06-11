@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from empire.ai.vision import frontier_cells, terrain_for_view
 from empire.contracts.turn_plan import UnitMove
 from empire.contracts.world_view import WorldView
 from empire.core.coord import Coord
@@ -165,7 +166,7 @@ class BaselineTactical:
             grid = PassabilityGrid(
                 view.real_map(), ARMY_COST_PROFILE, view.own_player.view,
             )
-            self._ctx = _ViewContext(grid=grid, frontier=self._frontier_set(view))
+            self._ctx = _ViewContext(grid=grid, frontier=frontier_cells(view))
             self._ctx_view = view
         ctx = self._ctx
         assert ctx is not None  # set whenever _ctx_view is set
@@ -182,30 +183,8 @@ class BaselineTactical:
         )
 
     def _terrain_for_view(self, view: WorldView, c: Coord) -> TerrainKind | None:
-        """Terrain at `c` from the player's view: visible→real, remembered→last seen."""
-        tile = view.terrain_at(c)
-        return tile.terrain if tile is not None else None
-
-    def _frontier_set(self, view: WorldView) -> frozenset[Coord]:
-        """All frontier cells on the board: seen, walkable, with at least one
-        unseen on-board 8-neighbor. One sweep per view, shared by every unit
-        (same predicates the old per-unit radius scan applied per cell)."""
-        seen = view.own_player.view.seen
-        real_map = view.real_map()
-        results: set[Coord] = set()
-        for y in range(real_map.height):
-            for x in range(real_map.width):
-                c = Coord(x, y)
-                if not seen(c):
-                    continue
-                terrain = self._terrain_for_view(view, c)
-                if terrain is None or terrain is TerrainKind.WATER:
-                    continue
-                for n in c.neighbors():
-                    if view.in_bounds(n) and not seen(n):
-                        results.add(c)
-                        break
-        return frozenset(results)
+        """Terrain at `c` from the player's view (shared helper re-export)."""
+        return terrain_for_view(view, c)
 
     def _frontier_candidates(self, unit: Unit, ctx: _ViewContext) -> list[Coord]:
         """Sample frontier coords near `unit`, capped at 12, in the same
