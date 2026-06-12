@@ -17,6 +17,7 @@ from textual.widgets import RichLog
 from empire.core.coord import Coord
 from empire.core.events import (
     CityCapturedEvent,
+    CityFiredEvent,
     GameEndedEvent,
     TurnAdvancedEvent,
     UnitDisbandedEvent,
@@ -138,6 +139,30 @@ class LogPanel(VerticalScroll):
                 # Either way it's a hostile development for us.
                 write(f"[magenta]{line}[/magenta]")
 
+        def on_city_fired(e: CityFiredEvent) -> None:
+            # Attribution for artillery losses ("why did my army just die?").
+            # Filter by the target's location: if you can see the shellfall,
+            # you learn about the shot.
+            if not seen(e.target_coord):
+                return
+            from empire.core.identity import CityId
+
+            city = real_map.city_by_id(CityId(int(e.city_id)))
+            where = (
+                f"city#{int(e.city_id)} ({city.coord.x},{city.coord.y})"
+                if city is not None
+                else f"city#{int(e.city_id)}"
+            )
+            target = (
+                f"unit#{int(e.target_id)} at ({e.target_coord.x},{e.target_coord.y})"
+            )
+            if e.destroyed:
+                write(f"  [magenta]{where} artillery DESTROYS {target}[/magenta]")
+            elif e.hit:
+                write(f"  [magenta]{where} artillery hits {target}[/magenta]")
+            else:
+                write(f"  {where} artillery fires at {target} — miss")
+
         def on_ended(e: GameEndedEvent) -> None:
             winner = "?" if e.winner_id is None else f"P#{int(e.winner_id)}"
             is_us = e.winner_id is not None and e.winner_id == viewer.id
@@ -150,4 +175,5 @@ class LogPanel(VerticalScroll):
         bus.subscribe(UnitRemovedEvent, on_removed)
         bus.subscribe(UnitDisbandedEvent, on_disbanded)
         bus.subscribe(CityCapturedEvent, on_captured)
+        bus.subscribe(CityFiredEvent, on_city_fired)
         bus.subscribe(GameEndedEvent, on_ended)

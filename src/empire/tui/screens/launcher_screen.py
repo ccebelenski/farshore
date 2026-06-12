@@ -86,8 +86,18 @@ class LauncherScreen(Screen[None]):
     LauncherScreen {
         align: center middle;
     }
+    /* Containers must size to content or the menu clips: a Vertical
+       defaults to fractional height inside Center, which swallowed rows. */
+    LauncherScreen Center {
+        height: auto;
+    }
+    LauncherScreen Vertical {
+        width: auto;
+        height: auto;
+    }
     #menu {
         width: auto;
+        height: auto;
         text-align: left;
     }
     #title {
@@ -174,8 +184,11 @@ class LauncherScreen(Screen[None]):
         self.query_one("#menu", Static).update("\n".join(lines))
         hints = {
             _Page.MAIN: "↑↓ move · enter select · q quit",
-            _Page.SETUP: "↑↓ move · ←/→/space change · tab pick from list · enter start",
-            _Page.LOAD: "↑↓ move · enter load · tab pick opponent · esc back",
+            _Page.SETUP: (
+                "↑↓ move · space/←/→ change · tab list · "
+                "enter = start/back only · esc back"
+            ),
+            _Page.LOAD: "↑↓ move · enter load · space/←/→ opponent · esc back",
         }
         hint = self._notice if self._notice else hints[self._page]
         self.query_one("#hint", Static).update(hint)
@@ -193,7 +206,7 @@ class LauncherScreen(Screen[None]):
             self._cursor = (self._cursor + 1) % len(rows)
         elif key in ("left", "right", "space"):
             delta = -1 if key == "left" else 1
-            self._cycle(row, delta)
+            self._cycle(row, delta, reroll=key == "space")
         elif key == "tab":
             self._open_choices(row)
         elif key == "enter":
@@ -215,18 +228,20 @@ class LauncherScreen(Screen[None]):
 
     # ---- row behaviors ----------------------------------------------------------
 
-    def _cycle(self, row: _Row, delta: int) -> None:
+    def _cycle(self, row: _Row, delta: int, *, reroll: bool = False) -> None:
         if row.key == "seed":
-            # left/right nudge; space rerolls wildly (an 8-bit "random").
-            if delta in (-1, 1):
+            # left/right nudge; space rerolls (an 8-bit "random").
+            if reroll:
+                import random as _random
+
+                self._config = self._config.with_(seed=_random.randrange(10_000))
+            else:
                 self._config = self._config.with_(
                     seed=max(0, self._config.seed + delta)
                 )
             return
         if not row.values:
-            if delta > 0:
-                self._activate(row)  # space on a button presses it
-            return
+            return  # buttons are enter-only; space never activates
         current = row.values.index(self._value_of(row))
         self._apply_choice(row, (current + delta) % len(row.values))
 
@@ -258,6 +273,8 @@ class LauncherScreen(Screen[None]):
             self._load_opponent = index
 
     def _activate(self, row: _Row) -> None:
+        """Enter means ACTIVATE — buttons only. Settings change with
+        space/arrows or via tab's pick list; one key, one meaning."""
         if row.key == "new":
             self._go(_Page.SETUP)
         elif row.key == "load":
@@ -268,14 +285,10 @@ class LauncherScreen(Screen[None]):
             self._go(_Page.MAIN)
         elif row.key == "start":
             self._start()
-        elif row.key == "seed":
-            import random as _random
-
-            self._config = self._config.with_(seed=_random.randrange(10_000))
         elif row.key.startswith("save:"):
             self._load(self._saves[int(row.key.split(":")[1])])
-        elif row.values:
-            self._open_choices(row)
+        elif row.values or row.key == "seed":
+            self._notice = "space/←/→ change · tab opens the list"
 
     # ---- handoff to the app -------------------------------------------------------
 

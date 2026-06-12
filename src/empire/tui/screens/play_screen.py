@@ -94,6 +94,7 @@ class PlayScreen(Screen[None]):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("question_mark", "help", "help"),
         Binding("e", "end_turn", "end turn"),
+        Binding("a", "toggle_auto", "auto-turn"),
         Binding("u", "select_unit", "select unit"),
         Binding("d", "set_heading", "set heading"),
         Binding("g", "go_to", "go-to"),
@@ -131,6 +132,7 @@ class PlayScreen(Screen[None]):
         human_controller: HumanController,
         event_bus: EventBus,
         opponent: str = "baseline",
+        auto_turn: bool = True,
     ) -> None:
         super().__init__()
         self._game = game
@@ -143,6 +145,9 @@ class PlayScreen(Screen[None]):
         # True while the engine is resolving a turn (the AI may think for
         # seconds); input is ignored and the status line says so.
         self._turn_running = False
+        # Auto-turn: when every unit has orders (or there are none yet), the
+        # turn ends itself after a short beat — no 'e' grind. 'a' toggles.
+        self._auto_turn = auto_turn
 
         # Cursor: starts at the human's capital (if they own one) else origin.
         own = [c for c in game.map.cities() if c.owner is human_player]
@@ -670,9 +675,51 @@ class PlayScreen(Screen[None]):
 
         self.app.push_screen(DefaultOrderModal(kind, current), _set_order)
 
+    def action_toggle_auto(self) -> None:
+        self._auto_turn = not self._auto_turn
+        self._hint = f"auto end-turn {'ON' if self._auto_turn else 'OFF'}"
+        self._refresh_view()
+
     def action_end_turn(self) -> None:
         if self._turn_running:
             return
+        # §5.4 tripwire: an army left in a friendly city disbands at the
+        # start of your next segment. Don't let that happen on a reflexive
+        # 'e' (or an auto-end) — confirm first.
+        doomed = self._doomed_garrison_units()
+        if doomed:
+            names = ", ".join(
+                f"{u.kind.value}#{int(u.id)} at ({u.coord.x},{u.coord.y})"
+                for u in doomed[:3]
+            )
+            more = "" if len(doomed) <= 3 else f" (+{len(doomed) - 3} more)"
+
+            def _on_answer(confirmed: bool | None) -> None:
+                if confirmed:
+                    self._begin_end_turn()
+                else:
+                    self._hint = "end turn cancelled — move or unload those units"
+                    self._refresh_view()
+
+            self.app.push_screen(
+                ConfirmModal(
+                    f"{names}{more} will DISBAND if left in the city. "
+                    "End turn anyway?"
+                ),
+                _on_answer,
+            )
+            return
+        self._begin_end_turn()
+
+    def _doomed_garrison_units(self) -> list[Unit]:
+        """Own units that §5.4 will disband if the turn ends now."""
+        return [
+            u
+            for u in self._game.map.board_units()
+            if u.owner is self._human and self._in_city_warning(u) is not None
+        ]
+
+    def _begin_end_turn(self) -> None:
         plan = self._build_plan()
         self._human_ctrl.set_plan(plan)
         # Reset per-turn state. Production stays committed in the city via
@@ -825,11 +872,16 @@ class PlayScreen(Screen[None]):
         candidates = self._units_needing_orders()
         if not candidates:
             self._selected_unit_id = None
-            self._hint = (
-                "all units handled — press 'e' to end turn"
-                if not initial
-                else f"turn {self._game.turn}: no units to order yet — 'e' to advance"
-            )
+            if self._auto_turn and not self._game.is_over():
+                self._hint = "all units handled — ending turn (auto; 'a' toggles)"
+                # A visible beat so the player sees the world before it moves.
+                self.set_timer(0.4, self._auto_end_turn)
+            else:
+                self._hint = (
+                    "all units handled — press 'e' to end turn"
+                    if not initial
+                    else f"turn {self._game.turn}: no units to order yet — 'e' to advance"
+                )
             return
         # Pick the lowest-id unit (or the next one after the current selection).
         current = self._selected_unit_id
@@ -853,6 +905,19 @@ class PlayScreen(Screen[None]):
                 f"{remaining} unit(s) need orders; direction keys queue path, "
                 f"'n' skip, '.' sentry"
             )
+
+    def _auto_end_turn(self) -> None:
+        """Timer callback for auto-turn. Re-checks the world — the player may
+        have toggled auto off, selected a unit, or ended the turn manually
+        while the timer was pending."""
+        if (
+            not self._auto_turn
+            or self._turn_running
+            or self._game.is_over()
+            or self._units_needing_orders()
+        ):
+            return
+        self.action_end_turn()
 
     def _select_and_center(self, unit: Unit) -> None:
         self._selected_unit_id = unit.id

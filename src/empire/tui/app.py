@@ -39,6 +39,7 @@ class EmpireApp(App[None]):
         event_bus: EventBus | None = None,
         auto_advance_seconds: float | None = None,
         opponent: str = "baseline",
+        auto_turn: bool = True,
     ) -> None:
         super().__init__()
         # Public-ish: the test suite reads `.game.turn` to verify the engine
@@ -50,6 +51,7 @@ class EmpireApp(App[None]):
         self._bus = event_bus
         self._auto = auto_advance_seconds
         self._opponent = opponent
+        self._auto_turn = auto_turn
 
     def on_mount(self) -> None:
         if self.game is None:
@@ -65,6 +67,9 @@ class EmpireApp(App[None]):
             human_controller=self._human_ctrl,
             event_bus=self._bus,
             opponent=self._opponent,
+            # Viewer mode paces turns with its own interval timer; the
+            # in-screen auto-turn would race it.
+            auto_turn=self._auto_turn and self._auto is None,
         )
         self.push_screen(screen)
         if self._auto is not None:

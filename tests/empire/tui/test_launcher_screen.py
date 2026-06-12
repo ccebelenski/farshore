@@ -94,3 +94,40 @@ async def test_load_page_lists_saves_and_restores(
         assert isinstance(app.screen, PlayScreen)
         assert app.game is not None
         assert app.game.turn == launched.game.turn
+
+
+async def test_enter_on_choice_row_does_not_change_or_open() -> None:
+    """Enter is activate-only: on a setting row it neither cycles the value
+    nor opens the chooser (tab does that)."""
+    app = EmpireApp()
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("enter")  # NEW GAME -> setup page (a button: fine)
+        screen = app.screen
+        assert isinstance(screen, LauncherScreen)
+        before = screen._config  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("enter")  # on the OPPONENT row: must be a no-op
+        assert isinstance(app.screen, LauncherScreen)  # no modal opened
+        assert screen._config == before  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_all_setup_rows_render() -> None:
+    """Every setup row appears in the menu text (regression: the menu used
+    to clip when its containers defaulted to fractional height)."""
+    from textual.widgets import Static
+
+    from empire.tui.screens.launcher_screen import (
+        _SETUP_ROWS,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    app = EmpireApp()
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("enter")  # setup page
+        await pilot.pause()
+        menu = app.screen.query_one("#menu", Static)
+        # The layout must grant the menu one line per row — when the
+        # containers defaulted to fractional height, rows were swallowed.
+        assert menu.size.height >= len(_SETUP_ROWS), (
+            f"menu clipped: {menu.size.height} lines for {len(_SETUP_ROWS)} rows"
+        )
