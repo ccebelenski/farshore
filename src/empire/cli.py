@@ -237,23 +237,77 @@ def play_game(
 from empire.core.coord import Coord as _Coord  # noqa: E402
 
 
-def _launch_tui(profile_name: str, seed: int, *, auto_advance: float | None) -> None:
-    """Build a game, attach controllers, and run `EmpireApp`."""
+def _make_opponent(kind: str):  # -> AIController; annotation avoids eager import
+    from empire.ai.baseline import BaselineAI
+
+    if kind == "search":
+        from empire.ai.search import SearchAI
+
+        return SearchAI()
+    if kind == "strategic":
+        from empire.ai.strategic.ai import StrategicAI
+
+        return StrategicAI()
+    return BaselineAI()
+
+
+def _launch_tui(
+    profile_name: str,
+    seed: int,
+    *,
+    auto_advance: float | None,
+    opponent: str = "baseline",
+    brawl: bool = False,
+    fortified: bool = False,
+) -> None:
+    """Build a game, attach controllers, and run `EmpireApp`.
+
+    `brawl` puts both capitals on one continent (the Phase-15.5 land-brawl
+    setup) — the meaningful way to playtest land-only AIs like `SearchAI`,
+    which cannot yet cross water to reach a separate-continent player.
+    `fortified` selects the FORTIFIED_CITIES ruleset (city artillery);
+    it requires `brawl` because `build_game` is classic-rules-only today.
+    """
     from empire.ai.baseline import BaselineAI
     from empire.core.engine import scan_set_for_player
     from empire.events.bus import EventBus
-    from empire.setup import build_game
     from empire.tui import EmpireApp, HumanController
 
-    profile = _PROFILES[profile_name]
     bus = EventBus()
-    # Build the game with the event bus wired in.
-    game, players = build_game(
-        profile,
-        seed,
-        p1_is_ai=auto_advance is not None,
-        p2_is_ai=True,
-    )
+    if profile_name == "BRAWL":
+        brawl = True  # the arena profile only makes sense as a brawl
+    if brawl:
+        from empire._arena import ARENA_PROFILE, build_land_brawl
+        from empire.core.ruleset import FORTIFIED_CITIES, STANDARD
+
+        # SMALL (the parser default) rarely yields a 5-city shared
+        # continent; the arena profile is the tuned brawl map.
+        profile = (
+            _PROFILES[profile_name]
+            if profile_name in ("STANDARD", "LARGE")
+            else ARENA_PROFILE
+        )
+        rules = FORTIFIED_CITIES if fortified else STANDARD
+        built = build_land_brawl(profile, seed, rules)
+        if built is None:
+            raise SystemExit(
+                f"no land-brawl map for profile={profile_name} seed={seed}; "
+                "try another seed"
+            )
+        game, players = built
+        players[0].is_ai = auto_advance is not None
+    else:
+        if fortified:
+            raise SystemExit("--fortified requires --brawl (classic setup is STANDARD)")
+        from empire.setup import build_game
+
+        profile = _PROFILES[profile_name]
+        game, players = build_game(
+            profile,
+            seed,
+            p1_is_ai=auto_advance is not None,
+            p2_is_ai=True,
+        )
     game.event_bus = bus
 
     human_player = players[0]
@@ -261,12 +315,12 @@ def _launch_tui(profile_name: str, seed: int, *, auto_advance: float | None) -> 
         human_ctrl = HumanController()
         game.attach_controller(human_player.id, human_ctrl)
     else:
-        # Viewer mode: BaselineAI on both sides. The "human" slot still
-        # owns the rendering perspective (P1's fog of war), but the
-        # HumanController is a stub that never receives a plan.
+        # Viewer mode: AI on both sides. The "human" slot still owns the
+        # rendering perspective (P1's fog of war), but the HumanController
+        # is a stub that never receives a plan.
         human_ctrl = HumanController()
         game.attach_controller(human_player.id, BaselineAI())
-    game.attach_controller(players[1].id, BaselineAI())
+    game.attach_controller(players[1].id, _make_opponent(opponent))
 
     # Initial scan for the rendered player so the opening view isn't blank.
     scanned = scan_set_for_player(human_player, game.map)
@@ -337,30 +391,64 @@ def _build_parser() -> argparse.ArgumentParser:
 
     play_tui = subs.add_parser(
         "play-tui",
-        help="Launch the Textual TUI: human vs BaselineAI",
+        help="Launch the Textual TUI: human vs an AI opponent",
     )
     play_tui.add_argument(
         "--profile",
-        choices=list(_PROFILES.keys()),
+        choices=[*_PROFILES.keys(), "BRAWL"],
         default="SMALL",
-        help="Map profile (default: SMALL)",
+        help="Map profile (default: SMALL; BRAWL = the 28x18 arena profile)",
     )
     play_tui.add_argument("--seed", type=int, default=0, help="RNG seed (default: 0)")
+    play_tui.add_argument(
+        "--opponent",
+        choices=("baseline", "strategic", "search"),
+        default="baseline",
+        help="AI opponent (default: baseline)",
+    )
+    play_tui.add_argument(
+        "--brawl",
+        action="store_true",
+        help="Shared-continent setup (required to actually fight a land-only "
+             "AI like 'search'; classic setup puts capitals on separate "
+             "continents)",
+    )
+    play_tui.add_argument(
+        "--fortified",
+        action="store_true",
+        help="FORTIFIED_CITIES ruleset (city artillery); requires --brawl",
+    )
 
     viewer = subs.add_parser(
         "viewer",
-        help="Watch BaselineAI vs BaselineAI in the TUI",
+        help="Watch BaselineAI vs an AI opponent in the TUI",
     )
     viewer.add_argument(
         "--profile",
-        choices=list(_PROFILES.keys()),
+        choices=[*_PROFILES.keys(), "BRAWL"],
         default="SMALL",
-        help="Map profile (default: SMALL)",
+        help="Map profile (default: SMALL; BRAWL = the 28x18 arena profile)",
     )
     viewer.add_argument("--seed", type=int, default=0, help="RNG seed (default: 0)")
     viewer.add_argument(
         "--delay", type=float, default=0.4,
         help="Seconds between auto-advanced turns (default: 0.4)",
+    )
+    viewer.add_argument(
+        "--opponent",
+        choices=("baseline", "strategic", "search"),
+        default="baseline",
+        help="AI in the P2 slot (default: baseline)",
+    )
+    viewer.add_argument(
+        "--brawl",
+        action="store_true",
+        help="Shared-continent setup",
+    )
+    viewer.add_argument(
+        "--fortified",
+        action="store_true",
+        help="FORTIFIED_CITIES ruleset; requires --brawl",
     )
 
     validate = subs.add_parser(
@@ -423,11 +511,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "play-tui":
-        _launch_tui(args.profile, args.seed, auto_advance=None)
+        _launch_tui(
+            args.profile, args.seed, auto_advance=None,
+            opponent=args.opponent, brawl=args.brawl, fortified=args.fortified,
+        )
         return 0
 
     if args.command == "viewer":
-        _launch_tui(args.profile, args.seed, auto_advance=args.delay)
+        _launch_tui(
+            args.profile, args.seed, auto_advance=args.delay,
+            opponent=args.opponent, brawl=args.brawl, fortified=args.fortified,
+        )
         return 0
 
     parser.print_help()
