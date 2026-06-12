@@ -21,6 +21,8 @@ from empire.core.ruleset import RuleSet
 
 # How many nearest targets get dedicated assault candidates.
 TARGET_FAN = 4
+# How many targets the all-out close-out candidate attacks simultaneously.
+ALL_OUT_FAN = 6
 # Garrison size per threatened home city in the defensive candidate.
 DEFEND_STRENGTH = 2
 # An enemy unit within this range of a home city marks it threatened.
@@ -57,6 +59,22 @@ class CandidateGenerator:
                     objectives=(
                         Objective(targets[0], Role.ASSAULT, fist),
                         Objective(targets[1], Role.ASSAULT, fist),
+                    ),
+                    surplus=SurplusPolicy.SCOUT,
+                )
+            )
+
+        # All-out: a fist at every known target at once. The close-out plan —
+        # the Phase 15.8 stall autopsy found cap-outs were mostly *crushing*
+        # endgames grinding targets one fist at a time while 20+ armies sat
+        # in reserve. Playouts price it: chosen when force is overwhelming,
+        # rejected when spreading thin would lose the fights.
+        if len(targets) >= 3:
+            plans.append(
+                Plan(
+                    objectives=tuple(
+                        Objective(t, Role.ASSAULT, fist)
+                        for t in targets[:ALL_OUT_FAN]
                     ),
                     surplus=SurplusPolicy.SCOUT,
                 )

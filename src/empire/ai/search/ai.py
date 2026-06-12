@@ -41,6 +41,11 @@ DEFAULT_HORIZON = 12
 DEFAULT_SAMPLES = 3
 # Decorrelates sample streams while keeping them deterministic.
 _SAMPLE_STRIDE = 104_729
+# A challenger must beat the incumbent plan's score by this much to displace
+# it (≈ one army's worth). Without it, sampling noise flips near-tied plans
+# every turn — the Phase 15.8 stall trace showed assault strength oscillating
+# 3↔5 each turn, reshuffling fist membership so no storm ever cohered.
+SWITCH_MARGIN = 10.0
 
 
 class SearchAI:
@@ -91,12 +96,25 @@ class SearchAI:
         belief = self._belief_builder.build(view)
         me = view.own_player.id
 
+        incumbent = self._committed.plan
         best_plan = candidates[0]
         best_score = float("-inf")
+        incumbent_score: float | None = None
         for plan in candidates:
             score = self._score(belief, plan, me)
             if score > best_score:
                 best_plan, best_score = plan, score
+            if plan == incumbent:
+                incumbent_score = score
+        # Hysteresis: stick with the incumbent unless the challenger clearly
+        # beats it (see SWITCH_MARGIN). Only applies when the incumbent is
+        # still on offer — a vanished target dissolves the commitment.
+        if (
+            incumbent_score is not None
+            and best_plan != incumbent
+            and best_score < incumbent_score + SWITCH_MARGIN
+        ):
+            return incumbent
         return best_plan
 
     def _score(self, belief: Game, plan: Plan, me: PlayerId) -> float:

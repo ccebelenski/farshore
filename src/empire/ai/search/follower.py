@@ -272,9 +272,58 @@ class PlanFollower:
         if target is not None:
             return self._advance(unit, target, field, view)
         target = self._nearest_frontier(raw_field, frontier)
-        if target is None:
+        if target is not None:
+            return self._advance(unit, target, raw_field, view)
+        # No frontier at all (late game, board explored): rally behind the
+        # nearest active assault instead of freezing in place — the Phase
+        # 15.8 stall trace showed unassigned armies standing as statues at
+        # distance 6 while 3-army fists ground themselves on the gauntlet.
+        # Reserves massed at the ring make the next re-assignment instant.
+        return self._rally_move(unit, field, raw_field, view)
+
+    def _rally_move(
+        self,
+        unit: Unit,
+        field: DistanceField,
+        raw_field: DistanceField,
+        view: WorldView,
+    ) -> UnitMove:
+        """Close to just outside the nearest assault objective's ring."""
+        assault_targets = [
+            o.target for o in self._plan.objectives if o.role is Role.ASSAULT
+        ]
+        if not assault_targets:
             return idle_step(unit, view)
-        return self._advance(unit, target, raw_field, view)
+        # Rank on the RAW field: a hostile target is always unreachable on
+        # the safe field (it sits inside its own masked ring).
+        ranked = sorted(
+            (
+                (steps, t.y, t.x, t)
+                for t in assault_targets
+                if (steps := raw_field.steps_to(t)) is not None
+            ),
+        )
+        if not ranked:
+            return idle_step(unit, view)
+        target = ranked[0][3]
+        artillery_range = view.rules.city_artillery_range
+        hold_at = artillery_range + 2 if artillery_range > 0 else 1
+        if unit.coord.chebyshev_to(target) <= hold_at:
+            return idle_step(unit, view)
+        # Raw path (the truncation below keeps us out of the target's own
+        # fire); the safe field can never path to a hostile target.
+        cells = raw_field.path_to(target)
+        if cells is None or len(cells) < 2:
+            return idle_step(unit, view)
+        budget = unit.moves_this_turn()
+        steps: list[Coord] = []
+        for cell in cells[1 : 1 + budget]:
+            if cell.chebyshev_to(target) < hold_at:
+                break
+            steps.append(cell)
+        if not steps:
+            return idle_step(unit, view)
+        return UnitMove(unit_id=unit.id, path=tuple((c.x, c.y) for c in steps))
 
     def _advance(
         self,
