@@ -274,12 +274,18 @@ class PlanFollower:
         target = self._nearest_frontier(raw_field, frontier)
         if target is not None:
             return self._advance(unit, target, raw_field, view)
-        # No frontier at all (late game, board explored): rally behind the
-        # nearest active assault instead of freezing in place — the Phase
-        # 15.8 stall trace showed unassigned armies standing as statues at
-        # distance 6 while 3-army fists ground themselves on the gauntlet.
-        # Reserves massed at the ring make the next re-assignment instant.
-        return self._rally_move(unit, field, raw_field, view)
+        # No frontier at all (late game, board explored): under artillery
+        # rules, rally behind the nearest active assault instead of freezing
+        # in place — the Phase 15.8 stall trace showed unassigned armies
+        # standing as statues at distance 6 while 3-army fists ground
+        # themselves on the gauntlet; reserves massed at the ring make the
+        # next re-assignment instant. WITHOUT artillery there is nothing to
+        # mass against — a reserve loitering beside an enemy city is pure
+        # wasted tempo (measured: STANDARD 51%->45.5% with the rally on) —
+        # so hold as before and let assignment pull units when needed.
+        if view.rules.city_artillery_range > 0:
+            return self._rally_move(unit, field, raw_field, view)
+        return idle_step(unit, view)
 
     def _rally_move(
         self,
