@@ -49,9 +49,12 @@ async def test_end_turn_advances_engine() -> None:
     app, _, _ = _build_app()
     async with app.run_test(size=(60, 40)) as pilot:
         await pilot.pause()
+        assert app.game is not None
         before = app.game.turn
         await pilot.press("e")
-        await pilot.pause()
+        # End-turn paints "thinking…" first and runs the engine on a short
+        # timer (so the status line shows during synchronous AI turns).
+        await pilot.pause(0.2)
         after = app.game.turn
     assert after == before + 1, f"turn did not advance: {before} -> {after}"
 

@@ -237,20 +237,6 @@ def play_game(
 from empire.core.coord import Coord as _Coord  # noqa: E402
 
 
-def _make_opponent(kind: str):  # -> AIController; annotation avoids eager import
-    from empire.ai.baseline import BaselineAI
-
-    if kind == "search":
-        from empire.ai.search import SearchAI
-
-        return SearchAI()
-    if kind == "strategic":
-        from empire.ai.strategic.ai import StrategicAI
-
-        return StrategicAI()
-    return BaselineAI()
-
-
 def _launch_tui(
     profile_name: str,
     seed: int,
@@ -260,67 +246,45 @@ def _launch_tui(
     brawl: bool = False,
     fortified: bool = False,
 ) -> None:
-    """Build a game, attach controllers, and run `EmpireApp`.
+    """Build a game per the flags, attach controllers, run `EmpireApp`.
 
     `brawl` puts both capitals on one continent (the Phase-15.5 land-brawl
     setup) — the meaningful way to playtest land-only AIs like `SearchAI`,
     which cannot yet cross water to reach a separate-continent player.
-    `fortified` selects the FORTIFIED_CITIES ruleset (city artillery);
-    it requires `brawl` because `build_game` is classic-rules-only today.
     """
     from empire.ai.baseline import BaselineAI
     from empire.core.engine import scan_set_for_player
     from empire.events.bus import EventBus
     from empire.tui import EmpireApp, HumanController
+    from empire.tui.launching import GameConfig, GameLauncher
 
-    bus = EventBus()
     if profile_name == "BRAWL":
         brawl = True  # the arena profile only makes sense as a brawl
-    if brawl:
-        from empire._arena import ARENA_PROFILE, build_land_brawl
-        from empire.core.ruleset import FORTIFIED_CITIES, STANDARD
+        profile_name = "SMALL"  # launcher maps non-STANDARD/LARGE brawls to arena
+    config = GameConfig(
+        opponent=opponent,
+        fortified=fortified,
+        brawl=brawl,
+        profile_name=profile_name,
+        seed=seed,
+    )
+    try:
+        launched = GameLauncher().build(config)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
+    game, human_player = launched.game, launched.human
 
-        # SMALL (the parser default) rarely yields a 5-city shared
-        # continent; the arena profile is the tuned brawl map.
-        profile = (
-            _PROFILES[profile_name]
-            if profile_name in ("STANDARD", "LARGE")
-            else ARENA_PROFILE
-        )
-        rules = FORTIFIED_CITIES if fortified else STANDARD
-        built = build_land_brawl(profile, seed, rules)
-        if built is None:
-            raise SystemExit(
-                f"no land-brawl map for profile={profile_name} seed={seed}; "
-                "try another seed"
-            )
-        game, players = built
-        players[0].is_ai = auto_advance is not None
-    else:
-        if fortified:
-            raise SystemExit("--fortified requires --brawl (classic setup is STANDARD)")
-        from empire.setup import build_game
-
-        profile = _PROFILES[profile_name]
-        game, players = build_game(
-            profile,
-            seed,
-            p1_is_ai=auto_advance is not None,
-            p2_is_ai=True,
-        )
+    bus = EventBus()
     game.event_bus = bus
-
-    human_player = players[0]
+    human_ctrl = HumanController()
     if auto_advance is None:
-        human_ctrl = HumanController()
         game.attach_controller(human_player.id, human_ctrl)
     else:
         # Viewer mode: AI on both sides. The "human" slot still owns the
         # rendering perspective (P1's fog of war), but the HumanController
         # is a stub that never receives a plan.
-        human_ctrl = HumanController()
+        human_player.is_ai = True
         game.attach_controller(human_player.id, BaselineAI())
-    game.attach_controller(players[1].id, _make_opponent(opponent))
 
     # Initial scan for the rendered player so the opening view isn't blank.
     scanned = scan_set_for_player(human_player, game.map)
@@ -332,6 +296,7 @@ def _launch_tui(
         human_controller=human_ctrl,
         event_bus=bus,
         auto_advance_seconds=auto_advance,
+        opponent=opponent,
     )
     app.run()
 
@@ -389,9 +354,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="AI controller for both players (default: null)",
     )
 
+    subs.add_parser(
+        "tui",
+        help="Launch the game via the menu screen (new game / load / options)",
+    )
+
     play_tui = subs.add_parser(
         "play-tui",
-        help="Launch the Textual TUI: human vs an AI opponent",
+        help="Launch the Textual TUI directly into a game (flag-driven)",
     )
     play_tui.add_argument(
         "--profile",
@@ -508,6 +478,12 @@ def main(argv: list[str] | None = None) -> int:
             turn_cap=args.turn_cap,
             base_seed=args.base_seed,
         ))
+        return 0
+
+    if args.command == "tui":
+        from empire.tui import EmpireApp
+
+        EmpireApp().run()
         return 0
 
     if args.command == "play-tui":

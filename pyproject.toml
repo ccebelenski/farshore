@@ -246,15 +246,16 @@ ignore_imports = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "tui depends on core, contracts, ai, events, persistence only"
+name = "tui may not import the dev-only validation harness"
 type = "forbidden"
 source_modules = ["empire.tui"]
 forbidden_modules = [
-    "empire.combat",
-    "empire.mapgen",
+    "empire._validation",
 ]
-# TUI legitimately reaches pathfinding *transitively* via AI (BaselineAI
-# uses BFS internally); the import-linter follows the chain, so we can't
-# forbid pathfinding here without forbidding AI as well. Persistence is
-# allowed directly so the TUI can offer Save/Load hotkeys without a
-# callback-indirection layer (that abstraction lands with Phase 17).
+# The TUI's dependency surface widened with the launcher screen: it builds
+# games itself (empire.setup / empire._arena for the land-brawl mode), which
+# transitively reaches mapgen and combat — so those can no longer be
+# forbidden, same as pathfinding (always reached transitively via AI).
+# Persistence is allowed directly for the Save/Load hotkeys and the
+# launcher's restore flow. What remains forbidden is the dev-only
+# validation harness, which has no business in the shipped UI.

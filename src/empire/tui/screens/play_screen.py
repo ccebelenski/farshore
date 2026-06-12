@@ -130,12 +130,19 @@ class PlayScreen(Screen[None]):
         human_player: Player,
         human_controller: HumanController,
         event_bus: EventBus,
+        opponent: str = "baseline",
     ) -> None:
         super().__init__()
         self._game = game
         self._human = human_player
         self._human_ctrl = human_controller
         self._bus = event_bus
+        # Which AI personality fills the non-human seats (used to reattach
+        # controllers after F3 load — saves don't persist controllers).
+        self._opponent = opponent
+        # True while the engine is resolving a turn (the AI may think for
+        # seconds); input is ignored and the status line says so.
+        self._turn_running = False
 
         # Cursor: starts at the human's capital (if they own one) else origin.
         own = [c for c in game.map.cities() if c.owner is human_player]
@@ -664,6 +671,8 @@ class PlayScreen(Screen[None]):
         self.app.push_screen(DefaultOrderModal(kind, current), _set_order)
 
     def action_end_turn(self) -> None:
+        if self._turn_running:
+            return
         plan = self._build_plan()
         self._human_ctrl.set_plan(plan)
         # Reset per-turn state. Production stays committed in the city via
@@ -676,16 +685,35 @@ class PlayScreen(Screen[None]):
         self._awaiting_goto_target = False
         self._awaiting_unload = False
         self._awaiting_city_order_target = None
-        self._game.run_turn()
+        # Paint the status line FIRST, then run the (synchronous) engine
+        # turn on the next tick: a search AI can think for seconds, and the
+        # screen is allowed to sit static under this banner meanwhile.
+        self._turn_running = True
+        self._hint = f"{self._opponent} is thinking…"
+        self._refresh_view()
+        self.set_timer(0.05, self._finish_end_turn)
+
+    def _finish_end_turn(self) -> None:
+        try:
+            self._game.run_turn()
+        finally:
+            self._turn_running = False
         if self._game.is_over():
             winner = self._game.winner()
             self._hint = (
                 f"game over — winner: {winner.name if winner else 'draw'}"
             )
         else:
+            self._hint = "press ? for help"
             # Set up the next turn: pick the first unit that needs orders.
             self._advance_to_next_unit(initial=True)
         self._refresh_view()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Freeze the keyboard while the engine resolves a turn (the screen
+        is deliberately static during AI thinking; see action_end_turn)."""
+        del parameters
+        return not (self._turn_running and action not in ("help", "quit"))
 
     def action_save(self) -> None:
         path = Path("empire-save.json")
@@ -711,13 +739,15 @@ class PlayScreen(Screen[None]):
             return
         self._human = human_player
         self._game.attach_controller(self._human.id, self._human_ctrl)
-        # The other player(s) get a fresh BaselineAI.
-        from empire.ai.baseline import BaselineAI
+        # The other player(s) get a fresh controller of the session's
+        # configured opponent kind (saves don't persist controllers).
+        from empire.tui.launching import GameLauncher
 
+        launcher = GameLauncher()
         for p in self._game.players:
             if p.id == self._human.id:
                 continue
-            self._game.attach_controller(p.id, BaselineAI())
+            self._game.attach_controller(p.id, launcher.make_opponent(self._opponent))
         # Reset transient selection/cursor state to the loaded game — the old
         # cursor may be out of bounds for a differently-shaped map.
         self._selected_unit_id = None

@@ -29,7 +29,7 @@ from empire.core.game import Game
 from empire.core.identity import PlayerId
 from empire.core.map import Map, ViewMap
 from empire.core.player import Player
-from empire.core.ruleset import STANDARD, MapProfile
+from empire.core.ruleset import STANDARD, MapProfile, RuleSet
 from empire.core.tile import LAND_TERRAINS, TerrainKind
 from empire.core.unit import UnitKind
 from empire.mapgen.height_field import HeightFieldMapGenerator
@@ -49,6 +49,7 @@ def build_game(
     p2_name: str = "P2",
     p1_is_ai: bool = False,
     p2_is_ai: bool = True,
+    rules: RuleSet = STANDARD,
 ) -> tuple[Game, list[Player]]:
     """Generate a map, assign capitals on eligible continents, return the game.
 
@@ -75,7 +76,7 @@ def build_game(
         if len(eligible) >= len(players):
             _assign_capitals(eligible, cities, players)
             game = Game(
-                rules=STANDARD,
+                rules=rules,
                 real_map=real_map,
                 players=players,
                 seed=seed,
