@@ -304,9 +304,9 @@ class PlanFollower:
         # the safe field (it sits inside its own masked ring).
         ranked = sorted(
             (
-                (steps, t.y, t.x, t)
+                (dist, t.y, t.x, t)
                 for t in assault_targets
-                if (steps := raw_field.steps_to(t)) is not None
+                if (dist := raw_field.steps_to(t)) is not None
             ),
         )
         if not ranked:
