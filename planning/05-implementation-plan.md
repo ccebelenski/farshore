@@ -1135,6 +1135,36 @@ chess-style no-capture clock vs. material adjudication at the cap) — raised
 by the user as a musing, undecided, pairs with the autopsy's answer;
 (3) whether STANDARD stays a tuning target beyond parity.
 
+**Close-out pass (FINAL — commits 625698f, 7d9ef16; certified 2026-06-12).**
+The stall autopsy answered (1): 3 of 4 cap-outs were *crushing endgames that
+never finished*, not dead positions. A plan trace found three compounding
+causes, each fixed: surplus armies froze as statues once the board was
+explored (no frontier → idle; now they rally to the active assault's ring —
+artillery rulesets only, a loitering reserve is wasted tempo without a
+gauntlet, measured -5.5pp on STANDARD); near-tied playout scores flipped
+assault strength 3↔5 every turn, reshuffling fist membership (SearchAI now
+keeps the incumbent plan unless a challenger wins by SWITCH_MARGIN); and
+the generator lacked an overwhelming-force close-out (new all-out candidate:
+a fist per known target). Same-seed autopsy: 18 wins / 3 unfinished (was
+16/5), with a 165-turn losing turtle converting to a win at t113.
+
+**Final certified results (100 games per sample):**
+
+| ruleset | SearchAI (final) | best StrategicAI ever | gate |
+|---|---|---|---|
+| FORTIFIED | **64.1%** (59-33), p=0.0044, 8% unfinished | 31.4% | **MET** |
+| STANDARD | 49.5% (49-50), ≤1% unfinished | 35.2% | parity |
+
+STANDARD across three certified samples (51.0 / 45.5 / 49.5, n≈100 each)
+pools to 48.7% — statistical parity with the horde; per the noise protocol,
+±3pp differences between samples are not chased. **Phase 15.8's decisive
+question is answered: plan-space search beats the horde where the rules
+reward thought (FORTIFIED, the design-forward ruleset) and matches it in
+the pure attrition race.** Next per the user: self-play (SearchAI vs
+SearchAI — needs nothing new mechanically; the arena generalizes), then
+human play (TUI integration as an opponent option + difficulty tiers from
+search knobs: K, H, samples, SWITCH_MARGIN).
+
 **Step 3 — widen + harden (only after the gate).**
 - More choice points (counterattack timing after a broken wave, fighter
   employment), parallel candidate evaluation if budget demands, spatial
