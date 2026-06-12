@@ -1165,6 +1165,23 @@ SearchAI — needs nothing new mechanically; the arena generalizes), then
 human play (TUI integration as an opponent option + difficulty tiers from
 search knobs: K, H, samples, SWITCH_MARGIN).
 
+**Self-play feel check (12 games, FORTIFIED, 2026-06-12).** Pacing healthy:
+lengths 89-250, 1/12 stalled, long probing standoffs then a decisive break;
+comebacks rare (2/11) — snowbally but genre-consistent. Found: (1)
+**capital position — not turn order — decided 3/5 tested maps** (same
+capital won every replay across seat swaps and re-seeded dice); an
+access-balancing capital-pair criterion FAILED to fix it (far pairs are
+extremity cities; and one dominant capital was the access-poorer one —
+the cause is deeper map structure) and was reverted. The arena's
+side-swap protocol already cancels this for measurement; it is a *game
+design* question: measured balance at setup (mirror playouts on candidate
+pairs) vs accepting start asymmetry as variance. (2) **Hot-potato cities**:
+§5.4 + artillery lets a frontier city trade hands ~30 times in one game
+(conqueror disbands → city empty behind its guns → counter-fist walks in).
+Both AIs value the flips correctly; the *feel* is the question. Both forks
++ the no-progress rule are recorded for the user's judgment before the
+human-play phase.
+
 **Step 3 — widen + harden (only after the gate).**
 - More choice points (counterattack timing after a broken wave, fighter
   employment), parallel candidate evaluation if budget demands, spatial
