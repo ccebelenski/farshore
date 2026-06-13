@@ -312,9 +312,12 @@ class PlayScreen(Screen[None]):
                 ),
             )
         if outcome.last_outcome is StepOutcome.CAPTURED:
-            # The conqueror disbanded into the city at capture (§4.5).
+            # The conqueror disbanded into the city at capture (§4.5). It
+            # never physically entered the cell, so report the CITY as the
+            # disband site, not the square it attacked from — the from-square
+            # version read like the army was still standing there.
             self._bus.publish(
-                UnitDisbandedEvent(unit_id=unit.id, last_coord=unit.coord),
+                UnitDisbandedEvent(unit_id=unit.id, last_coord=target),
             )
 
         # Update fog: a step may have revealed (or hidden) tiles.
