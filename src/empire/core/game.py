@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from empire.core.map import Map
     from empire.core.player import Player
     from empire.core.ruleset import RuleSet
+    from empire.core.unit import Unit
 
 
 class Game:
@@ -207,11 +208,16 @@ class TurnManager:
         # sitting adjacent *before* it can step onto the city to capture it.
         self._opening_barrage_phase()
         for player in self.game.players:
-            self._disband_phase(player)
-            self._production_phase(player)
+            produced = self._production_phase(player)
             self._standing_orders_phase(player)
             self._movement_phase(player)
             self._scan_phase(player)
+            # Turn-end (spec §5.4): the disband runs at the END of the
+            # owner's own segment, so a conquering army is never still
+            # standing when the opponent moves. Units produced this very
+            # segment are exempt — they were born after their owner's plan
+            # was made and get until next turn-end to march out.
+            self._disband_phase(player, exempt=frozenset(u.id for u in produced))
         self._end_of_round()
 
     def _opening_barrage_phase(self) -> None:
@@ -252,22 +258,25 @@ class TurnManager:
                     UnitRemovedEvent(unit_id=result.target_id, last_coord=tcoord)
                 )
 
-    def _disband_phase(self, player: Player) -> None:
-        """Resolve the end of `player`'s previous turn: disband units left in a
-        friendly city beyond its support limit (spec §5.4).
+    def _disband_phase(
+        self, player: Player, exempt: frozenset[UnitId] = frozenset()
+    ) -> None:
+        """Turn-end for `player`: disband units left in a friendly city beyond
+        its support limit (spec §5.4).
 
-        Runs *before* production so it never touches a unit produced this
-        segment — that unit must survive to be commanded this turn. It catches
-        last turn's un-moved army, an army that just conquered a city (now its
-        abstract defence), and over-capacity ships/fighters. Placing it at the
-        segment start is what makes the timing uniform for the human (whose
-        moves happen between `e` presses, outside `run_round`) and the AI.
+        Runs at the END of the player's own segment — a conquering army
+        disbands into the city it just took before any opponent acts (it
+        used to survive a full enemy turn as a corpse-shield, and the TUI
+        would even offer it orders that then evaporated; playtest bug,
+        2026-06-12). `exempt` carries this segment's freshly-produced units:
+        their owner plans before production runs, so they get until next
+        turn-end to march out.
         """
         from empire.core.events import UnitDisbandedEvent
 
         # Snapshot coords before removal so the event carries a real location.
         coords = {u.id: u.coord for u in self.game.map.all_units()}
-        for uid in disband_overcrowded_city_units(player, self.game.map):
+        for uid in disband_overcrowded_city_units(player, self.game.map, exempt):
             self.game.event_bus.publish(
                 UnitDisbandedEvent(unit_id=uid, last_coord=coords[uid])
             )
@@ -311,7 +320,7 @@ class TurnManager:
                     UnitMovedEvent(unit_id=uid, from_=start, to=unit.coord)
                 )
 
-    def _production_phase(self, player: Player) -> None:
+    def _production_phase(self, player: Player) -> list[Unit]:
         produced = run_production_tick(
             player=player,
             real_map=self.game.map,
@@ -324,6 +333,7 @@ class TurnManager:
 
         for u in produced:
             self.game.event_bus.publish(UnitPlacedEvent(unit_id=u.id, at=u.coord))
+        return produced
 
     def _movement_phase(self, player: Player) -> None:
         controller = self.game.controllers.get(player.id)

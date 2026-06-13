@@ -907,16 +907,24 @@ def _city_support_category(kind: UnitKind) -> str | None:
     return None  # SATELLITE
 
 
-def disband_overcrowded_city_units(player: Player, real_map: Map) -> tuple[UnitId, ...]:
+def disband_overcrowded_city_units(
+    player: Player, real_map: Map, exempt: frozenset[UnitId] = frozenset()
+) -> tuple[UnitId, ...]:
     """Disband `player`'s units that exceed a city's per-category support limit.
 
-    Run at each player's turn-end. For every category over its limit on a
-    friendly city cell the excess is removed; loaded ships keep their berth
-    and, among equals, the oldest (lowest id) units keep their slots — so the
-    unit scrapped is the empty, freshly-produced one. Armies have a limit of
-    0, so any army resting on a friendly city is disbanded — a produced army
-    that never marched out, or one that just conquered the city and is now its
-    abstract defence.
+    Run at each player's turn-end (spec §5.4). For every category over its
+    limit on a friendly city cell the excess is removed; loaded ships keep
+    their berth and, among equals, the oldest (lowest id) units keep their
+    slots — so the unit scrapped is the empty, freshly-produced one. Armies
+    have a limit of 0, so any army resting on a friendly city is disbanded —
+    one that never marched out, or one that just conquered the city and is
+    now its abstract defence (a conqueror dies at its OWN turn-end; it must
+    never still be standing when the opponent moves).
+
+    `exempt` holds units produced this very segment: they were born after
+    their owner's plan was made, so they get until *next* turn-end to march
+    out — without this grace, every human-produced army would die unseen the
+    round it was built.
 
     A disband must never drown cargo: `Map.remove_unit` sinks a carrier's hold
     (that is the combat-loss path, spec §4.5), so we deliberately scrap empty
@@ -932,7 +940,7 @@ def disband_overcrowded_city_units(player: Player, real_map: Map) -> tuple[UnitI
             continue
         by_category: dict[str, list[Unit]] = {}
         for unit in real_map.units_at(city.coord):
-            if unit.owner is not player:
+            if unit.owner is not player or unit.id in exempt:
                 continue
             category = _city_support_category(unit.kind)
             if category is None:

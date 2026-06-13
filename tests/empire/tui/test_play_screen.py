@@ -115,3 +115,30 @@ async def test_end_turn_with_doomed_army_asks_confirmation() -> None:
         await pilot.press("escape")
         await pilot.pause(0.3)
         assert game.turn == before
+
+
+async def test_declining_disband_confirm_selects_the_doomed_army() -> None:
+    """Declining the §5.4 confirm should put the player ON the unit at risk."""
+    from empire.core.identity import UnitId
+    from empire.core.unit import Army
+    from empire.tui.modals import ConfirmModal
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app()
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    capital = next(c for c in game.map.cities() if c.owner is human)
+    army = Army(UnitId(901), human, capital.coord)
+    game.map.place_unit(army, capital.coord)
+
+    async with app.run_test(size=(60, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("n", "e")  # skip the army, try to end the turn
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmModal)
+        await pilot.press("escape")  # decline
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        assert screen._selected_unit_id == army.id  # pyright: ignore[reportPrivateUsage]

@@ -148,6 +148,10 @@ class PlayScreen(Screen[None]):
         # Auto-turn: when every unit has orders (or there are none yet), the
         # turn ends itself after a short beat — no 'e' grind. 'a' toggles.
         self._auto_turn = auto_turn
+        # Units that captured a city this turn: they stand on an own city
+        # legitimately and disband into its garrison at turn-end (§5.4) —
+        # the end-turn confirm must not nag about them.
+        self._captured_this_turn: set[UnitId] = set()
 
         # Cursor: starts at the human's capital (if they own one) else origin.
         own = [c for c in game.map.cities() if c.owner is human_player]
@@ -295,6 +299,10 @@ class PlayScreen(Screen[None]):
         for uid in outcome.units_destroyed:
             self._bus.publish(UnitRemovedEvent(unit_id=uid, last_coord=start))
         for cid in outcome.cities_captured:
+            # The conqueror now legitimately stands on an own city; it will
+            # disband into the garrison at turn-end (§5.4) and there is
+            # nothing to do about it — exempt it from the end-turn confirm.
+            self._captured_this_turn.add(unit.id)
             self._bus.publish(
                 CityCapturedEvent(
                     city_id=cid,
@@ -698,7 +706,18 @@ class PlayScreen(Screen[None]):
                 if confirmed:
                     self._begin_end_turn()
                 else:
-                    self._hint = "end turn cancelled — move or unload those units"
+                    # Put the player straight onto the unit they declined to
+                    # lose — no hunting for it (playtest note, 2026-06-12).
+                    # Refund a skip's forfeited budget: 'n' is a UI gesture,
+                    # not a physical act, and they just changed their mind.
+                    rescued = doomed[0]
+                    self._handled.discard(rescued.id)
+                    self._moves_used.pop(rescued.id, None)
+                    self._select_and_center(rescued)
+                    self._hint = (
+                        f"{rescued.kind.value}#{int(rescued.id)} selected — "
+                        "move it off the city (or sentry to accept the disband)"
+                    )
                     self._refresh_view()
 
             self.app.push_screen(
@@ -712,11 +731,15 @@ class PlayScreen(Screen[None]):
         self._begin_end_turn()
 
     def _doomed_garrison_units(self) -> list[Unit]:
-        """Own units that §5.4 will disband if the turn ends now."""
+        """Own units that §5.4 will disband at this turn's end AND whose loss
+        is still avoidable. A conqueror standing on the city it just took is
+        past saving (it disbands into the garrison by design) — no nagging."""
         return [
             u
             for u in self._game.map.board_units()
-            if u.owner is self._human and self._in_city_warning(u) is not None
+            if u.owner is self._human
+            and self._in_city_warning(u) is not None
+            and u.id not in self._captured_this_turn
         ]
 
     def _begin_end_turn(self) -> None:
@@ -726,6 +749,7 @@ class PlayScreen(Screen[None]):
         # the engine; we just clear our scratch dicts.
         self._pending_production.clear()
         self._moves_used.clear()
+        self._captured_this_turn.clear()
         self._selected_unit_id = None
         self._handled.clear()
         self._awaiting_heading = False

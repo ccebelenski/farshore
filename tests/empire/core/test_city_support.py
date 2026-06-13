@@ -12,6 +12,9 @@ from dataclasses import replace
 import pytest
 
 from empire.combat.resolver import CombatResolver
+from empire.contracts.surprise import Surprise
+from empire.contracts.turn_plan import TurnPlan, UnitMove
+from empire.contracts.world_view import WorldView
 from empire.core.city import City
 from empire.core.coord import Coord
 from empire.core.engine import (
@@ -20,6 +23,7 @@ from empire.core.engine import (
     execute_unit_path,
     execute_unload,
 )
+from empire.core.game import Game
 from empire.core.identity import CityId, PlayerId, UnitId
 from empire.core.map import Map, ViewMap
 from empire.core.player import Player
@@ -255,3 +259,86 @@ def test_transport_in_dry_dock_cannot_unload(p1: Player) -> None:
     assert outcome.last_outcome is StepOutcome.ILLEGAL
     assert army.is_aboard()  # stayed aboard
     assert transport.cargo == [army.id]
+
+
+# --- §5.4 disband timing (turn-end of the OWNER's segment) --------------------
+
+
+class _ScriptedController:
+    """Plays one fixed TurnPlan, then nothing."""
+
+    def __init__(self, plan: TurnPlan) -> None:
+        self._plan = plan
+
+    def name(self) -> str:
+        return "Scripted"
+
+    def plan_turn(self, view: WorldView) -> TurnPlan:
+        del view
+        plan, self._plan = self._plan, TurnPlan()
+        return plan
+
+    def revise_move(
+        self, unit_id: UnitId, surprise: Surprise, view: WorldView
+    ) -> UnitMove:
+        del surprise, view
+        return UnitMove(unit_id=unit_id)
+
+
+def _two_player_game(p1: Player, p2: Player) -> tuple[Game, City]:
+    """P1 army next to a neutral city; P2 owns a far city (keeps game alive)."""
+    target = City(id=CityId(1), coord=Coord(2, 0), owner=None)
+    p2_city = City(id=CityId(2), coord=Coord(5, 2), owner=p2)
+    p1_city = City(id=CityId(3), coord=Coord(0, 2), owner=p1)
+    m = _map(
+        ["LLLLLL"] * 3,
+        cities={target.coord: target, p2_city.coord: p2_city, p1_city.coord: p1_city},
+    )
+    rules = replace(STANDARD, army_capture_city_deterministic=True)
+    game = Game(
+        rules=rules, real_map=m, players=[p1, p2], seed=1,
+        combat_resolver=CombatResolver(),
+    )
+    return game, target
+
+
+def test_conqueror_disbands_at_its_own_turn_end(p1: Player, p2: Player) -> None:
+    """An army that captures a city must be GONE before the opponent moves —
+    and certainly by the end of the round (playtest bug: it survived a full
+    enemy turn as a corpse-shield and even took doomed orders)."""
+    from empire.contracts.turn_plan import TurnPlan, UnitMove
+
+    game, target = _two_player_game(p1, p2)
+    army = _place(game.map, Army(UnitId(10), p1, Coord(1, 0)))
+    plan = TurnPlan(moves=(UnitMove(unit_id=army.id, path=((2, 0),)),))
+    game.attach_controller(p1.id, _ScriptedController(plan))
+
+    game.run_turn()
+
+    assert target.owner is p1, "capture should have succeeded"
+    assert game.map.unit_by_id(army.id) is None, (
+        "conqueror must disband at its owner's turn-end, not survive the round"
+    )
+
+
+def test_produced_unit_survives_its_birth_round(p1: Player, p2: Player) -> None:
+    """A unit produced this segment gets until NEXT turn-end to march out —
+    its owner planned before it existed (no exemption = every human-produced
+    army dies unseen)."""
+    from empire.core.unit import UnitKind
+
+    game, _ = _two_player_game(p1, p2)
+    own_city = next(c for c in game.map.cities() if c.owner is p1)
+    own_city.production.building = UnitKind.ARMY
+    own_city.production.work = 4  # one tick from completion (army = 5)
+
+    game.run_turn()
+    produced = [
+        u for u in game.map.units_at(own_city.coord) if u.owner is p1
+    ]
+    assert produced, "the fresh army survives its birth round on the city"
+
+    game.run_turn()  # no orders: its grace is spent
+    assert not [
+        u for u in game.map.units_at(own_city.coord) if u.owner is p1
+    ], "unmoved produced army disbands at its next turn-end"

@@ -473,21 +473,21 @@ def test_integration_production_movement_combat_capture(
 
     g.run_turn()
 
-    # 1. Production: capital emitted a new ARMY (Army#2 or higher).
+    # 1. Production: capital emitted a new ARMY (Army#2 or higher); it gets
+    # the birth-round §5.4 grace and survives on the capital.
     own_units = [u for u in m.all_units() if u.owner is p1]
-    assert len(own_units) == 2, [u.id for u in own_units]
-    assert any(u.coord == Coord(0, 0) for u in own_units), \
+    assert len(own_units) == 1, [u.id for u in own_units]
+    assert own_units[0].coord == Coord(0, 0), \
         "expected newly-produced unit at the capital"
+    assert own_units[0].id != UnitId(1)
 
-    # 2. Movement: the original army left (1,0).
-    army_now = m.unit_by_id(UnitId(1))
-    assert army_now is not None
-    assert army_now.coord == Coord(2, 0)
-
-    # 3. Capture: target city is now owned by p1.
+    # 2. Capture: target city is now owned by p1 — and the conqueror
+    # disbanded into it at p1's turn-end (spec §5.4: an army never survives
+    # its own capture into the opponent's turn).
     assert target_city.owner is p1
+    assert m.unit_by_id(UnitId(1)) is None
 
-    # 4. Scan: p1 has visibility on (2,0) (the army's new position).
+    # 3. Scan: p1 has visibility on (2,0) (scanned before the disband).
     assert Coord(2, 0) in p1.view.visible
 
 
