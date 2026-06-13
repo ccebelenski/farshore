@@ -66,6 +66,11 @@ _STYLE_BORDER = Style(color="bright_black")
 _STYLE_OWN_UNIT = Style(color="cyan", bold=True)
 _STYLE_ENEMY_UNIT = Style(color="red", bold=True)
 
+# Hostile-artillery danger overlay: a dark-red background tinge on visible
+# cells inside a discovered hostile city's gun range (playtest request —
+# the player needs to see the gauntlet to plan the storm).
+_STYLE_DANGER_BG = Style(bgcolor="#4A1212")
+
 # Cursor tint by mode. Reverse-video so the underlying char stays readable.
 _STYLE_CURSOR_FREE = Style(color="yellow", bold=True, reverse=True)
 _STYLE_CURSOR_ACTIVE = Style(color="cyan", bold=True, reverse=True)
@@ -139,20 +144,12 @@ class MapWidget(Static):
 
         # Visible: live state. Render units first (they overlay terrain).
         if is_visible:
-            units = mv.real_map.units_at(c)
-            if units:
-                unit = units[0]
-                style = _STYLE_OWN_UNIT if unit.owner is mv.viewer else _STYLE_ENEMY_UNIT
-                return unit.symbol, style
-            if tile.terrain is TerrainKind.CITY and tile.city is not None:
-                if tile.city.owner is None:
-                    return _CITY, _STYLE_CITY_NEUTRAL
-                if tile.city.owner is mv.viewer:
-                    return _CITY, _STYLE_CITY_OWN
-                return _CITY, _STYLE_CITY_ENEMY
-            if tile.terrain is TerrainKind.WATER:
-                return _WATER, _STYLE_WATER_VISIBLE
-            return _LAND, _STYLE_LAND_VISIBLE
+            char, style = self._visible_char_and_style(mv, c)
+            if c in mv.danger_cells:
+                # Hostile artillery covers this square (only ever shown on
+                # currently visible cells — fog hides the threat picture).
+                style = style + _STYLE_DANGER_BG
+            return char, style
 
         # Remembered only: stale state from RememberedTile.
         remembered = mv.viewer.view.remembered[c]
@@ -161,6 +158,23 @@ class MapWidget(Static):
         if remembered.terrain is TerrainKind.WATER:
             return _WATER, _STYLE_WATER_REMEMBERED
         return _LAND, _STYLE_LAND_REMEMBERED
+
+    def _visible_char_and_style(self, mv: MapView, c: Coord) -> tuple[str, Style]:
+        units = mv.real_map.units_at(c)
+        if units:
+            unit = units[0]
+            style = _STYLE_OWN_UNIT if unit.owner is mv.viewer else _STYLE_ENEMY_UNIT
+            return unit.symbol, style
+        live_tile = mv.real_map.tile(c)
+        if live_tile.terrain is TerrainKind.CITY and live_tile.city is not None:
+            if live_tile.city.owner is None:
+                return _CITY, _STYLE_CITY_NEUTRAL
+            if live_tile.city.owner is mv.viewer:
+                return _CITY, _STYLE_CITY_OWN
+            return _CITY, _STYLE_CITY_ENEMY
+        if live_tile.terrain is TerrainKind.WATER:
+            return _WATER, _STYLE_WATER_VISIBLE
+        return _LAND, _STYLE_LAND_VISIBLE
 
 
 class MapView:
@@ -171,6 +185,31 @@ class MapView:
     `WorldView` deliberately filters away.
     """
 
-    def __init__(self, real_map: Map, viewer: Player) -> None:
+    def __init__(
+        self, real_map: Map, viewer: Player, artillery_range: int = 0
+    ) -> None:
         self.real_map: Map = real_map
         self.viewer: Player = viewer
+        self.danger_cells: frozenset[Coord] = self._hostile_artillery_cells(
+            artillery_range
+        )
+
+    def _hostile_artillery_cells(self, artillery_range: int) -> frozenset[Coord]:
+        """Every cell covered by a *discovered* hostile city's guns.
+
+        Hostile = enemy-owned or neutral (neutral cities fire at everyone,
+        spec §4.7); discovered = the city's coord is visible or remembered.
+        The widget further restricts the tinge to currently visible cells,
+        so the threat picture never paints over fog.
+        """
+        if artillery_range <= 0:
+            return frozenset()
+        seen = self.viewer.view.seen
+        cells: set[Coord] = set()
+        for city in self.real_map.cities():
+            if city.owner is self.viewer or not seen(city.coord):
+                continue
+            for dx in range(-artillery_range, artillery_range + 1):
+                for dy in range(-artillery_range, artillery_range + 1):
+                    cells.add(Coord(city.coord.x + dx, city.coord.y + dy))
+        return frozenset(cells)

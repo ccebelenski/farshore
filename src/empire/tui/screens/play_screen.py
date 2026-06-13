@@ -209,7 +209,11 @@ class PlayScreen(Screen[None]):
     # ---- provider callbacks for widgets -----------------------------------
 
     def _map_view(self) -> MapView | None:
-        return MapView(real_map=self._game.map, viewer=self._human)
+        return MapView(
+            real_map=self._game.map,
+            viewer=self._human,
+            artillery_range=self._game.rules.city_artillery_range,
+        )
 
     def _status_state(self) -> StatusState | None:
         unit = self._selected_unit()

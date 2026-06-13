@@ -46,9 +46,14 @@ to unload — a unit can't unload the same turn it loaded.
 
 Turn flow:
   e                end turn (run AI, advance)
+  a                toggle auto end-turn (on by default)
   F2               save game (writes empire-save.json)
   F3               load game
   q                quit
+
+Map reading: a red-tinged square is covered by a discovered hostile
+city's artillery (Fortified Cities rules). One shot per city per round —
+mass outside the red, storm together.
 
 Help:
   ?                this overlay (any key to close)
