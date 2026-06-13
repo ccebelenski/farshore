@@ -255,3 +255,89 @@ async def test_setting_heading_steps_immediately_then_walks_next_round() -> None
         await pilot.pause(0.3)
         # Next round: the heading walks it.
         assert army.coord == c
+
+
+async def test_capturing_a_city_prompts_for_production() -> None:
+    """Walking an army onto a neutral city captures it and immediately opens
+    the production picker for the new city (playtest request)."""
+    import dataclasses
+
+    from empire.core.city import City
+    from empire.core.coord import Coord
+    from empire.core.identity import CityId, UnitId
+    from empire.core.tile import TerrainKind, Tile
+    from empire.core.unit import Army
+    from empire.tui.modals import ProductionModal
+
+    app, _, _ = _build_app()
+    assert app.game is not None
+    game = app.game
+    game.rules = dataclasses.replace(
+        game.rules, army_capture_city_deterministic=True
+    )
+    human = next(p for p in game.players if not p.is_ai)
+    capital = next(c for c in game.map.cities() if c.owner is human)
+
+    # An adjacent land pair: army on `a`, neutral city on `b` (east of a).
+    spot = None
+    for dx in range(-5, 6):
+        for dy in range(-5, 6):
+            a = Coord(capital.coord.x + dx, capital.coord.y + dy)
+            b = Coord(a.x + 1, a.y)
+            if (
+                game.map.in_bounds(a)
+                and game.map.in_bounds(b)
+                and game.map.terrain_at(a) is TerrainKind.LAND
+                and game.map.terrain_at(b) is TerrainKind.LAND
+                and not game.map.units_at(a)
+                and not game.map.units_at(b)
+            ):
+                spot = (a, b)
+                break
+        if spot:
+            break
+    assert spot is not None
+    a, b = spot
+    city = City(id=CityId(77), coord=b, owner=None)
+    game.map._tiles[b] = Tile(  # pyright: ignore[reportPrivateUsage]
+        coord=b, terrain=TerrainKind.CITY, city=city
+    )
+    army = Army(UnitId(905), human, a)
+    game.map.place_unit(army, a)
+
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        from empire.tui.screens.play_screen import PlayScreen
+
+        assert isinstance(screen, PlayScreen)
+        screen._cursor = a  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("u", "6")  # select; step east onto the city
+        await pilot.pause()
+        assert city.owner is human  # captured
+        assert isinstance(app.screen, ProductionModal)  # picker opened
+        # Pick an army to build there.
+        await pilot.press("enter")  # ProductionModal: first button = army
+        await pilot.pause()
+        assert isinstance(app.screen, PlayScreen)
+
+
+async def test_free_cursor_hint_names_city_actions() -> None:
+    """Parking the free cursor on an own city advertises p/k in the hint."""
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app()
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    capital = next(c for c in game.map.cities() if c.owner is human)
+
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        # Drop to free cursor and place it on the capital.
+        await pilot.press("escape")
+        screen._cursor = capital.coord  # pyright: ignore[reportPrivateUsage]
+        hint = screen._cursor_context_hint()  # pyright: ignore[reportPrivateUsage]
+        assert "'p'" in hint and "production" in hint

@@ -266,6 +266,7 @@ class PlayScreen(Screen[None]):
             new = self._cursor.step(d)
             if self._game.map.in_bounds(new):
                 self._cursor = new
+            self._hint = self._cursor_context_hint()
             self._refresh_view()
             return
 
@@ -305,6 +306,20 @@ class PlayScreen(Screen[None]):
             unit.standing_order = None
             if had_order:
                 self._hint = "standing order cleared (manual move)"
+
+        # Capture: the army was consumed (§4.5) but this is a win, not a
+        # loss — prompt for the new city's production right away rather than
+        # letting it sit on a silent default.
+        if outcome.last_outcome is StepOutcome.CAPTURED and outcome.cities_captured:
+            self._selected_unit_id = None
+            self._handled.add(unit.id)
+            captured = self._game.map.city_by_id(outcome.cities_captured[-1])
+            if captured is not None:
+                self._prompt_capture_production(captured)
+            else:
+                self._advance_to_next_unit()
+            self._refresh_view()
+            return
 
         if unit_died:
             self._selected_unit_id = None
@@ -546,7 +561,7 @@ class PlayScreen(Screen[None]):
             self._refresh_view()
             return
         self._selected_unit_id = None
-        self._hint = "deselected — direction keys move the cursor"
+        self._hint = self._cursor_context_hint()
         self._refresh_view()
 
     def action_sentry(self) -> None:
@@ -743,7 +758,9 @@ class PlayScreen(Screen[None]):
             self._hint = "no own city here"
             self._refresh_view()
             return
+        self._open_production(city)
 
+    def _open_production(self, city: City) -> None:
         current = self._pending_production.get(city.id, city.production.building)
 
         def _set_target(result: UnitKind | None) -> None:
@@ -752,6 +769,24 @@ class PlayScreen(Screen[None]):
             self._refresh_view()
 
         self.app.push_screen(ProductionModal(current), _set_target)
+
+    def _prompt_capture_production(self, city: City) -> None:
+        """Open the production picker for a just-captured city, and only
+        advance to the next unit (or auto-end) once it's dismissed — so an
+        auto-turn beat can't fire the turn out from under the open modal."""
+        current = self._pending_production.get(city.id, city.production.building)
+
+        def _done(result: UnitKind | None) -> None:
+            self._pending_production[city.id] = result
+            self._hint = (
+                f"new city building {result.value}"
+                if result is not None
+                else "new city left idle"
+            )
+            self._advance_to_next_unit()
+            self._refresh_view()
+
+        self.app.push_screen(ProductionModal(current), _done)
 
     def action_city_orders(self) -> None:
         """Set the default order applied to units this city produces (spec §5.3)."""
@@ -969,6 +1004,20 @@ class PlayScreen(Screen[None]):
         tile = self._game.map.tile(self._cursor)
         return tile.city
 
+    def _cursor_context_hint(self) -> str:
+        """The free-cursor hint, contextual to what's under the cursor —
+        makes city interaction discoverable without the help screen."""
+        city = self._city_at_cursor()
+        if city is not None and city.owner is self._human:
+            return "your city — 'p' set production, 'k' default order"
+        unit = next(
+            (u for u in self._game.map.units_at(self._cursor) if u.owner is self._human),
+            None,
+        )
+        if unit is not None:
+            return "your unit here — 'u' to take control"
+        return "cursor — direction keys move; 'u' select unit, 'p' city build"
+
     def _units_needing_orders(self, *, include_handled: bool = False) -> list[Unit]:
         """Own units with moves remaining; by default skips already-handled.
 
@@ -1027,8 +1076,8 @@ class PlayScreen(Screen[None]):
             self._hint = warning
         else:
             self._hint = (
-                f"{remaining} unit(s) need orders; direction keys queue path, "
-                f"'n' skip, '.' sentry"
+                f"{remaining} unit(s) need orders; direction keys move it, "
+                f"'n' skip, '.' sentry, Esc → free cursor"
             )
 
     def _auto_end_turn(self) -> None:
