@@ -50,9 +50,13 @@ _UNSEEN = " "
 
 
 # Style table — single-color foreground, no background fanciness for now.
-_STYLE_LAND_VISIBLE = Style(color="green")
+# Terrain uses explicit truecolor, NOT named ANSI colors: terminal themes
+# remap ANSI freely ("blue" often renders violet, "green" teal), which made
+# water/land ambiguous to the eye. Water = unmistakable sea blue, land =
+# light sandy brown (user playtest note, 2026-06-12).
+_STYLE_LAND_VISIBLE = Style(color="#C8A96E")
 _STYLE_LAND_REMEMBERED = Style(color="bright_black")
-_STYLE_WATER_VISIBLE = Style(color="blue")
+_STYLE_WATER_VISIBLE = Style(color="#2E86E8")
 _STYLE_WATER_REMEMBERED = Style(color="bright_black")
 _STYLE_CITY_NEUTRAL = Style(color="white", bold=True)
 _STYLE_CITY_OWN = Style(color="cyan", bold=True)
