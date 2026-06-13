@@ -35,6 +35,7 @@ from empire.core.engine import (
     execute_unit_path,
     execute_unload,
     scan_set_for_player,
+    step_would_attack,
 )
 from empire.core.events import (
     CityCapturedEvent,
@@ -437,29 +438,37 @@ class PlayScreen(Screen[None]):
         self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)
         return outcome, unit_died
 
-    def _order_first_step(self, unit: Unit, target: Coord) -> tuple[bool, bool]:
+    def _order_first_step(
+        self, unit: Unit, target: Coord
+    ) -> tuple[bool, bool, bool]:
         """Setting a movement order moves the unit immediately (player
         expectation: 'setting the heading moves the unit'). Executes the
         order's first step now if budget remains. The order itself is NOT
         live yet — the caller queues it via the TurnPlan's set_orders, which
         the engine applies AFTER this round's standing-orders phase (the
         designed mechanism that prevents the same-round double step).
-        Returns (stepped, unit_alive)."""
+
+        Returns (stepped, unit_alive, attack_blocked). A move order never
+        auto-attacks: if the first step would resolve as combat or a city
+        capture, it is refused (attack_blocked=True) — engaging is a
+        deliberate manual step, never an order side effect."""
         used = self._moves_used.get(unit.id, 0)
         if used >= unit.moves_this_turn():
-            return False, True  # out of moves; the order starts next round
+            return False, True, False  # out of moves; the order starts next round
         if not self._game.map.in_bounds(target):
-            return False, True
+            return False, True, False
+        if step_would_attack(unit, target, self._game.map):
+            return False, True, True
         outcome, unit_died = self._execute_step(unit, target)
         if unit_died:
             self._selected_unit_id = None
             self._handled.add(unit.id)
-            return outcome.steps_taken > 0, False
+            return outcome.steps_taken > 0, False, False
         if outcome.steps_taken > 0:
             self._moves_used[unit.id] = used + outcome.steps_taken
             self._cursor = unit.coord
-            return True, True
-        return False, True
+            return True, True, False
+        return False, True, False
 
     def action_select_unit(self) -> None:
         """Manual free-select: take the own unit under the cursor.
@@ -723,10 +732,16 @@ class PlayScreen(Screen[None]):
             self._hint = "no path to that cell"
             self._refresh_view()
             return
-        self._handled.add(unit.id)
         # Step the first cell now; the REMAINDER goes live via the plan's
         # set_orders so the engine walks it from the next round onward.
-        stepped, alive = self._order_first_step(unit, path[0])
+        stepped, alive, blocked = self._order_first_step(unit, path[0])
+        if blocked:
+            # The route starts into an enemy/city: a go-to never auto-attacks.
+            # Leave the unit selected so the player can step in deliberately.
+            self._hint = "go-to blocked by an enemy ahead — step in to attack"
+            self._refresh_view()
+            return
+        self._handled.add(unit.id)
         if not alive:
             self._hint = "unit lost on the first go-to step"
         else:
@@ -1143,11 +1158,16 @@ class PlayScreen(Screen[None]):
         if unit is None:
             self._awaiting_heading = False
             return
-        self._handled.add(unit_id)
         self._awaiting_heading = False
         # Step now; the heading goes live via the plan's set_orders so the
         # engine walks it from the NEXT round (not again this round).
-        stepped, alive = self._order_first_step(unit, unit.coord.step(d))
+        stepped, alive, blocked = self._order_first_step(unit, unit.coord.step(d))
+        if blocked:
+            # A heading never auto-attacks: enemy/city ahead → engage manually.
+            self._hint = f"enemy {d.name} — step in to attack (heading not set)"
+            self._refresh_view()
+            return
+        self._handled.add(unit_id)
         if alive:
             self._pending_orders[unit.id] = Heading(direction=d)
             self._hint = f"heading set: {d.name}" + (" (stepped)" if stepped else "")

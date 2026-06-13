@@ -323,3 +323,48 @@ def test_no_wake_when_the_city_was_already_seen(
     assert army.coord == Coord(5, 1)
     assert army.standing_order is not None  # no news, no wake
     assert army.id in result.moved_unit_ids
+
+
+# --- never auto-attack on an order ---------------------------------------------
+
+
+def test_heading_wakes_instead_of_attacking_an_enemy(
+    p1: Player, p2: Player, resolver: CombatResolver
+) -> None:
+    """A heading must not walk into combat — it wakes one cell short, with
+    the enemy intact (engaging is a deliberate manual step)."""
+    m = _land_map(6, 1)
+    mover = Army(UnitId(1), p1, Coord(0, 0))
+    enemy = Army(UnitId(2), p2, Coord(1, 0))  # directly in the path
+    m.place_unit(mover, Coord(0, 0))
+    m.place_unit(enemy, Coord(1, 0))
+    mover.standing_order = Heading(direction=Direction.E)
+
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+
+    assert mover.coord == Coord(0, 0)  # did not step
+    assert mover.standing_order is None  # woke
+    assert m.unit_by_id(enemy.id) is not None  # enemy untouched — no auto-attack
+    assert UnitId(1) in result.interrupted_unit_ids
+
+
+def test_goto_wakes_instead_of_capturing_a_city(
+    p1: Player, p2: Player, resolver: CombatResolver
+) -> None:
+    """A go-to onto an enemy city must wake rather than auto-capture."""
+    m = _land_map(6, 1)
+    enemy_city = City(id=CityId(1), coord=Coord(1, 0), owner=p2)
+    m._tiles[Coord(1, 0)] = Tile(  # pyright: ignore[reportPrivateUsage]
+        coord=Coord(1, 0), terrain=TerrainKind.CITY, city=enemy_city
+    )
+    mover = Army(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(mover, Coord(0, 0))
+    mover.standing_order = PatrolPath.new((Coord(1, 0),), reverse_on_end=False)
+    deterministic = replace(STANDARD, army_capture_city_deterministic=True)
+
+    result = apply_standing_orders(p1, m, deterministic, resolver, random.Random(0))
+
+    assert mover.coord == Coord(0, 0)  # did not step in
+    assert enemy_city.owner is p2  # not captured by the order
+    assert mover.standing_order is None  # woke
+    assert UnitId(1) in result.interrupted_unit_ids

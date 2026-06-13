@@ -1023,6 +1023,21 @@ def in_hostile_artillery_zone(unit: Unit, real_map: Map, rules: RuleSet) -> bool
     return False
 
 
+def step_would_attack(unit: Unit, target: Coord, real_map: Map) -> bool:
+    """True if `unit` entering `target` would resolve as an attack — a
+    hostile unit occupies the cell, or it is a non-friendly city (a capture
+    attempt, which is combat). Used to keep order-driven movement from
+    auto-attacking: combat is always a deliberate human action, never
+    something a heading / go-to / patrol sleepwalks into."""
+    if any(
+        o.owner is not unit.owner and not _is_intangible(o)
+        for o in real_map.units_at(target)
+    ):
+        return True
+    city = real_map.tile(target).city
+    return city is not None and city.owner is not unit.owner
+
+
 def unseen_city_in_scan(unit: Unit, real_map: Map) -> bool:
     """True if `unit`'s scan disc holds a city its owner has never seen —
     i.e. this step is a discovery. A wake trigger for autonomous moves:
@@ -1090,6 +1105,15 @@ def apply_standing_orders(
             next_order_on_success = order.after_step()
 
         if not is_legal_step(unit, target, real_map, rules):
+            unit.standing_order = None
+            interrupted.append(unit.id)
+            continue
+
+        # Never auto-attack: a unit on an order wakes BEFORE a step that
+        # would resolve as combat (enemy in the way) or a city capture.
+        # Engaging is always the human's deliberate call (a manual step),
+        # never something a heading / go-to / patrol walks into on its own.
+        if step_would_attack(unit, target, real_map):
             unit.standing_order = None
             interrupted.append(unit.id)
             continue
