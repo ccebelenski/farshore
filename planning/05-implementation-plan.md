@@ -1157,7 +1157,13 @@ a fist per known target). Same-seed autopsy: 18 wins / 3 unfinished (was
 
 STANDARD across three certified samples (51.0 / 45.5 / 49.5, n≈100 each)
 pools to 48.7% — statistical parity with the horde; per the noise protocol,
-±3pp differences between samples are not chased. **Phase 15.8's decisive
+±3pp differences between samples are not chased.
+
+*(Post-certification rules change, 2026-06-12: capture now consumes the
+conquering army at capture time — spec §4.5 rewrite during playtesting,
+commits 4942a33 + a56eee0 — removing the corpse-shield a captured city
+briefly enjoyed. 40-game FORTIFIED check: 65.7%, p=0.045, 12.5% unfinished —
+indistinguishable from the certified 64.1%; balance-neutral, stands.)* **Phase 15.8's decisive
 question is answered: plan-space search beats the horde where the rules
 reward thought (FORTIFIED, the design-forward ruleset) and matches it in
 the pure attrition race.** Next per the user: self-play (SearchAI vs
