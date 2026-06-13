@@ -112,22 +112,23 @@ async def test_enter_on_choice_row_does_not_change_or_open() -> None:
 
 
 async def test_all_setup_rows_render() -> None:
-    """Every setup row appears in the menu text (regression: the menu used
-    to clip when its containers defaulted to fractional height)."""
-    from textual.widgets import Static
+    """Every setup row appears in the RENDERED screen text.
 
-    from empire.tui.screens.launcher_screen import (
-        _SETUP_ROWS,  # pyright: ignore[reportPrivateUsage]
-    )
-
+    Two regressions live here: containers defaulting to fractional height
+    clipped rows, and Rich markup ate the bracket-labelled buttons
+    ("[ START GAME ]" parsed as a markup tag and vanished). Only reading
+    the compositor's actual output catches both."""
     app = EmpireApp()
-    async with app.run_test(size=(80, 30)) as pilot:
+    async with app.run_test(size=(80, 34)) as pilot:
         await pilot.pause()
         await pilot.press("enter")  # setup page
         await pilot.pause()
-        menu = app.screen.query_one("#menu", Static)
-        # The layout must grant the menu one line per row — when the
-        # containers defaulted to fractional height, rows were swallowed.
-        assert menu.size.height >= len(_SETUP_ROWS), (
-            f"menu clipped: {menu.size.height} lines for {len(_SETUP_ROWS)} rows"
+        strips = app.screen._compositor.render_strips()  # pyright: ignore[reportPrivateUsage]
+        text = "\n".join(
+            "".join(segment.text for segment in strip) for strip in strips
         )
+        for label in (
+            "OPPONENT", "RULESET", "MAP", "SIZE", "SEED",
+            "[ START GAME ]", "[ BACK ]",
+        ):
+            assert label in text, f"menu row not rendered: {label}"

@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 from textual import events
 from textual.app import ComposeResult
-from textual.containers import Center, Vertical
+from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import Static
 
@@ -82,23 +82,26 @@ _SETUP_ROWS: tuple[_Row, ...] = (
 class LauncherScreen(Screen[None]):
     """Title + menus; builds a `GameConfig` and asks the app to launch it."""
 
+    # Layout lesson (two bugs in a row): a fractional-height Vertical
+    # swallows menu rows, and a width:auto Vertical collapses its
+    # fraction-width children into a sliver. Fixed width + auto height +
+    # full-width children is the stable combination; the screen's own
+    # `align` centers the block. test_launcher_layout asserts both axes.
     CSS = """
     LauncherScreen {
         align: center middle;
     }
-    /* Containers must size to content or the menu clips: a Vertical
-       defaults to fractional height inside Center, which swallowed rows. */
-    LauncherScreen Center {
+    LauncherScreen Vertical {
+        width: 64;
         height: auto;
     }
-    LauncherScreen Vertical {
-        width: auto;
+    #title, #subtitle, #menu, #hint {
+        width: 100%;
         height: auto;
     }
     #menu {
-        width: auto;
-        height: auto;
         text-align: left;
+        padding-left: 6;
     }
     #title {
         color: $accent;
@@ -124,11 +127,13 @@ class LauncherScreen(Screen[None]):
     # ---- composition --------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        with Center(), Vertical():
+        with Vertical():
             yield Static(_TITLE, id="title")
             yield Static(_SUBTITLE, id="subtitle")
-            yield Static("", id="menu")
-            yield Static("", id="hint")
+            # markup=False: row labels like "[ START GAME ]" are literal
+            # text, not Rich markup tags (which silently swallow the line).
+            yield Static("", id="menu", markup=False)
+            yield Static("", id="hint", markup=False)
 
     def on_mount(self) -> None:
         self._repaint()
