@@ -38,6 +38,7 @@ from empire.core.engine import (
 )
 from empire.core.events import (
     CityCapturedEvent,
+    CityFiredEvent,
     UnitDisbandedEvent,
     UnitMovedEvent,
     UnitRemovedEvent,
@@ -387,6 +388,34 @@ class PlayScreen(Screen[None]):
             self._bus.publish(
                 UnitDisbandedEvent(unit_id=unit.id, last_coord=target),
             )
+
+        # Overwatch (spec §4.7): entering a hostile city's gun range
+        # mid-round draws reactive fire — the human's immediate steps are
+        # not exempt (they previously were: a free entry the AI never got).
+        if not unit_died:
+            from empire.core.engine import ArtilleryOutcome, reactive_city_fire
+
+            for city_id, shot in reactive_city_fire(
+                unit, self._game.map, self._game.rules, self._game.rng
+            ):
+                if shot.target_id is None:
+                    continue
+                destroyed = shot.outcome is ArtilleryOutcome.TARGET_DESTROYED
+                hit = destroyed or shot.outcome is ArtilleryOutcome.TARGET_DAMAGED
+                self._bus.publish(
+                    CityFiredEvent(
+                        city_id=city_id,
+                        target_id=shot.target_id,
+                        target_coord=unit.coord,
+                        hit=hit,
+                        destroyed=destroyed,
+                    )
+                )
+                if destroyed:
+                    self._bus.publish(
+                        UnitRemovedEvent(unit_id=shot.target_id, last_coord=unit.coord)
+                    )
+            unit_died = self._game.map.unit_by_id(unit.id) is None
 
         # Update fog: a step may have revealed (or hidden) tiles.
         scanned = scan_set_for_player(self._human, self._game.map)

@@ -311,6 +311,29 @@ class TurnManager:
             combat_resolver=self.game.combat_resolver,
             rng=self.game.rng,
         )
+        # Overwatch drawn by order-driven movement (spec §4.7).
+        if result.reactive_fire:
+            from empire.core.engine import ArtilleryOutcome
+            from empire.core.events import CityFiredEvent, UnitRemovedEvent
+
+            for city_id, shot, at in result.reactive_fire:
+                if shot.target_id is None:
+                    continue
+                destroyed = shot.outcome is ArtilleryOutcome.TARGET_DESTROYED
+                hit = destroyed or shot.outcome is ArtilleryOutcome.TARGET_DAMAGED
+                self.game.event_bus.publish(
+                    CityFiredEvent(
+                        city_id=city_id,
+                        target_id=shot.target_id,
+                        target_coord=at,
+                        hit=hit,
+                        destroyed=destroyed,
+                    )
+                )
+                if destroyed:
+                    self.game.event_bus.publish(
+                        UnitRemovedEvent(unit_id=shot.target_id, last_coord=at)
+                    )
         for uid in result.moved_unit_ids:
             unit = self.game.map.unit_by_id(uid)
             if unit is None:

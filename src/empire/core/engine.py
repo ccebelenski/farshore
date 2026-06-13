@@ -986,6 +986,9 @@ class StandingOrderResult:
     moved_unit_ids: tuple[UnitId, ...]
     interrupted_unit_ids: tuple[UnitId, ...]
     woken_sentry_ids: tuple[UnitId, ...]
+    # Reactive overwatch shots drawn by order-driven movement, for event
+    # publishing: (city_id, result, target_coord-at-fire-time).
+    reactive_fire: tuple[tuple[CityId, ArtilleryResult, Coord], ...] = ()
 
 
 def enemy_in_scan_range(unit: Unit, real_map: Map) -> bool:
@@ -999,6 +1002,35 @@ def enemy_in_scan_range(unit: Unit, real_map: Map) -> bool:
         if other.owner is unit.owner:
             continue
         if unit.coord.chebyshev_to(other.coord) <= radius:
+            return True
+    return False
+
+
+def in_hostile_artillery_zone(unit: Unit, real_map: Map, rules: RuleSet) -> bool:
+    """True if `unit`'s cell is covered by ANY hostile city's guns (enemy or
+    neutral — both fire, spec §4.7). Any unit kind: armies, fighters, ships.
+
+    A wake/interruption trigger for autonomous moves: walking into the red
+    zone is a decision the player must make, not one an old order may
+    sleepwalk through."""
+    if rules.city_artillery_range <= 0:
+        return False
+    for city in real_map.cities():
+        if city.owner is unit.owner:
+            continue
+        if unit.coord.chebyshev_to(city.coord) <= rules.city_artillery_range:
+            return True
+    return False
+
+
+def unseen_city_in_scan(unit: Unit, real_map: Map) -> bool:
+    """True if `unit`'s scan disc holds a city its owner has never seen —
+    i.e. this step is a discovery. A wake trigger for autonomous moves:
+    finding a city is exactly the news the player set out for."""
+    radius = type(unit).scan_range
+    seen = unit.owner.view.seen
+    for city in real_map.cities():
+        if unit.coord.chebyshev_to(city.coord) <= radius and not seen(city.coord):
             return True
     return False
 
@@ -1031,6 +1063,7 @@ def apply_standing_orders(
     moved: list[UnitId] = []
     interrupted: list[UnitId] = []
     sentried: list[UnitId] = []
+    fired: list[tuple[CityId, ArtilleryResult, Coord]] = []
 
     # Snapshot the list so removals during iteration don't trip us up.
     own_units = [u for u in real_map.board_units() if u.owner is player]
@@ -1072,6 +1105,7 @@ def apply_standing_orders(
             interrupted.append(unit.id)
             continue
 
+        was_in_zone = in_hostile_artillery_zone(unit, real_map, rules)
         outcome = execute_unit_path(
             unit=unit,
             path=((target.x, target.y),),
@@ -1089,8 +1123,27 @@ def apply_standing_orders(
             interrupted.append(unit.id)
             continue
 
-        # Step succeeded. Check post-step interruption: enemy now in scan.
-        if enemy_in_scan_range(unit, real_map):
+        # Overwatch (spec §4.7): entering a hostile city's gun range
+        # mid-round draws reactive fire — order-driven movement included.
+        for city_id, shot in reactive_city_fire(unit, real_map, rules, rng):
+            fired.append((city_id, shot, unit.coord))
+        if real_map.unit_by_id(unit.id) is None:
+            interrupted.append(unit.id)
+            moved.append(unit.id)
+            continue
+
+        # Step succeeded. Post-step wake triggers — autonomous movement
+        # stops on news the player must react to: an enemy in scan, the
+        # unit ENTERING a hostile artillery zone, or discovering a city.
+        # Applies to every unit kind (armies, fighters, ships alike).
+        entered_zone = (
+            not was_in_zone and in_hostile_artillery_zone(unit, real_map, rules)
+        )
+        if (
+            enemy_in_scan_range(unit, real_map)
+            or entered_zone
+            or unseen_city_in_scan(unit, real_map)
+        ):
             unit.standing_order = None
             interrupted.append(unit.id)
             moved.append(unit.id)
@@ -1106,6 +1159,7 @@ def apply_standing_orders(
         moved_unit_ids=tuple(moved),
         interrupted_unit_ids=tuple(interrupted),
         woken_sentry_ids=(),
+        reactive_fire=tuple(fired),
     )
 
 

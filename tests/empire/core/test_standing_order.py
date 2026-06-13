@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import random
+from dataclasses import replace
 
 import pytest
 
 from empire.combat.resolver import CombatResolver
+from empire.core.city import City
 from empire.core.coord import Coord, Direction
 from empire.core.engine import (
     apply_standing_orders,
     enemy_in_scan_range,
     wake_sentried_units,
 )
-from empire.core.identity import PlayerId, UnitId
+from empire.core.identity import CityId, PlayerId, UnitId
 from empire.core.map import Map, ViewMap
 from empire.core.player import Player
 from empire.core.ruleset import STANDARD
@@ -232,3 +234,92 @@ def test_enemy_in_scan_range_uses_unit_scan(p1: Player, p2: Player) -> None:
     m.place_unit(own, Coord(0, 0))
     m.place_unit(enemy, Coord(3, 0))
     assert enemy_in_scan_range(own, m) is True
+
+
+# --- wake triggers: artillery zones + city discovery (any unit kind) -----------
+
+
+def _city_at(m: Map, coord: Coord, owner: Player | None, cid: int) -> City:
+    city = City(id=CityId(cid), coord=coord, owner=owner)
+    m._tiles[coord] = Tile(  # pyright: ignore[reportPrivateUsage]
+        coord=coord, terrain=TerrainKind.CITY, city=city
+    )
+    return city
+
+
+def test_heading_wakes_on_entering_hostile_artillery_zone(
+    p1: Player, p2: Player, resolver: CombatResolver
+) -> None:
+    """A unit on auto-move stops the moment it ENTERS a hostile city's gun
+    range under artillery rules — the player decides about the red zone."""
+    m = _land_map(10, 3)
+    _city_at(m, Coord(7, 1), p2, 1)
+    # Owner has seen the city (it's on the map view); the wake is real-map
+    # based either way, matching enemy_in_scan_range's convention.
+    p1.view.visible = {Coord(x, y) for x in range(10) for y in range(3)}
+    army = Army(UnitId(1), p1, Coord(3, 1))
+    m.place_unit(army, Coord(3, 1))
+    army.standing_order = Heading(direction=Direction.E)
+    fortified = replace(
+        STANDARD, city_artillery_range=2, city_artillery_hit_prob=0.0,
+        city_artillery_pin_prob=0.0,
+    )
+
+    # Step 1: (3,1)->(4,1), chebyshev 3 to city: outside, order persists.
+    result = apply_standing_orders(p1, m, fortified, resolver, random.Random(0))
+    assert army.coord == Coord(4, 1)
+    assert army.standing_order is not None
+    assert army.id in result.moved_unit_ids
+
+    # Step 2: (4,1)->(5,1), chebyshev 2: ENTERED the zone -> wake.
+    result = apply_standing_orders(p1, m, fortified, resolver, random.Random(0))
+    assert army.coord == Coord(5, 1)
+    assert army.standing_order is None
+    assert army.id in result.interrupted_unit_ids
+    # And entering range drew the overwatch shot (hit_prob 0: a miss).
+    assert result.reactive_fire, "entering range must draw reactive fire"
+
+
+def test_heading_wakes_on_discovering_a_city(
+    p1: Player, p2: Player, resolver: CombatResolver
+) -> None:
+    """Finding a city is news worth stopping for — classic rules included."""
+    del p2
+    m = _land_map(10, 3)
+    _city_at(m, Coord(7, 1), None, 1)  # a neutral city, never seen by p1
+    army = Army(UnitId(1), p1, Coord(2, 1))
+    m.place_unit(army, Coord(2, 1))
+    army.standing_order = Heading(direction=Direction.E)
+
+    # Step 1: to (3,1); city at chebyshev 4 > scan 2: keeps walking.
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert army.standing_order is not None
+
+    # Pretend the scan phase ran (nothing new seen yet).
+    # Step 2: to (4,1); chebyshev 3 > 2: still walking.
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert army.standing_order is not None
+
+    # Step 3: to (5,1); chebyshev 2 == scan range: discovery -> wake.
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert army.coord == Coord(5, 1)
+    assert army.standing_order is None
+    assert army.id in result.interrupted_unit_ids
+
+
+def test_no_wake_when_the_city_was_already_seen(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """A known city is not a discovery: classic-rules auto-moves walk on
+    past cities the player has already scouted."""
+    m = _land_map(10, 3)
+    _city_at(m, Coord(7, 1), None, 1)
+    p1.view.visible = {Coord(7, 1)}  # already on the player's map
+    army = Army(UnitId(1), p1, Coord(4, 1))
+    m.place_unit(army, Coord(4, 1))
+    army.standing_order = Heading(direction=Direction.E)
+
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert army.coord == Coord(5, 1)
+    assert army.standing_order is not None  # no news, no wake
+    assert army.id in result.moved_unit_ids
