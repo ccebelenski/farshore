@@ -35,7 +35,12 @@ from empire.core.engine import (
     execute_unload,
     scan_set_for_player,
 )
-from empire.core.events import CityCapturedEvent, UnitMovedEvent, UnitRemovedEvent
+from empire.core.events import (
+    CityCapturedEvent,
+    UnitDisbandedEvent,
+    UnitMovedEvent,
+    UnitRemovedEvent,
+)
 from empire.core.game import Game
 from empire.core.identity import CityId, UnitId
 from empire.core.player import Player
@@ -148,10 +153,6 @@ class PlayScreen(Screen[None]):
         # Auto-turn: when every unit has orders (or there are none yet), the
         # turn ends itself after a short beat — no 'e' grind. 'a' toggles.
         self._auto_turn = auto_turn
-        # Units that captured a city this turn: they stand on an own city
-        # legitimately and disband into its garrison at turn-end (§5.4) —
-        # the end-turn confirm must not nag about them.
-        self._captured_this_turn: set[UnitId] = set()
 
         # Cursor: starts at the human's capital (if they own one) else origin.
         own = [c for c in game.map.cities() if c.owner is human_player]
@@ -299,16 +300,17 @@ class PlayScreen(Screen[None]):
         for uid in outcome.units_destroyed:
             self._bus.publish(UnitRemovedEvent(unit_id=uid, last_coord=start))
         for cid in outcome.cities_captured:
-            # The conqueror now legitimately stands on an own city; it will
-            # disband into the garrison at turn-end (§5.4) and there is
-            # nothing to do about it — exempt it from the end-turn confirm.
-            self._captured_this_turn.add(unit.id)
             self._bus.publish(
                 CityCapturedEvent(
                     city_id=cid,
                     new_owner_id=self._human.id,
                     previous_owner_id=None,
                 ),
+            )
+        if outcome.last_outcome is StepOutcome.CAPTURED:
+            # The conqueror disbanded into the city at capture (§4.5).
+            self._bus.publish(
+                UnitDisbandedEvent(unit_id=unit.id, last_coord=unit.coord),
             )
 
         # Update fog: a step may have revealed (or hidden) tiles.
@@ -731,15 +733,13 @@ class PlayScreen(Screen[None]):
         self._begin_end_turn()
 
     def _doomed_garrison_units(self) -> list[Unit]:
-        """Own units that §5.4 will disband at this turn's end AND whose loss
-        is still avoidable. A conqueror standing on the city it just took is
-        past saving (it disbands into the garrison by design) — no nagging."""
+        """Own units that §5.4 will disband at this turn's end. (A conqueror
+        never appears here: it disbands into its city at capture time, §4.5 —
+        only produced-and-unmoved units can be standing on an own city.)"""
         return [
             u
             for u in self._game.map.board_units()
-            if u.owner is self._human
-            and self._in_city_warning(u) is not None
-            and u.id not in self._captured_this_turn
+            if u.owner is self._human and self._in_city_warning(u) is not None
         ]
 
     def _begin_end_turn(self) -> None:
@@ -749,7 +749,6 @@ class PlayScreen(Screen[None]):
         # the engine; we just clear our scratch dicts.
         self._pending_production.clear()
         self._moves_used.clear()
-        self._captured_this_turn.clear()
         self._selected_unit_id = None
         self._handled.clear()
         self._awaiting_heading = False

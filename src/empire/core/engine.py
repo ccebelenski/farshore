@@ -238,6 +238,9 @@ class StepOutcome(Enum):
     OUT_OF_MOVES = "out_of_moves"
     ATTACKER_DIED = "attacker_died"
     CAPTURE_FAILED = "capture_failed"
+    # City taken; the conquering army disbanded into it at capture time
+    # (spec §4.5 — the assault consumes the army, win or lose).
+    CAPTURED = "captured"
     LOADED = "loaded"  # unit boarded a friendly carrier; its path ends here
     NO_UNLOAD_YET = "no_unload_yet"  # cargo loaded this turn can't unload (spec §3.4)
 
@@ -325,7 +328,9 @@ def execute_unit_path(
         if entry is not StepOutcome.OK:
             return MoveOutcome(
                 last_outcome=entry,
-                steps_taken=steps_taken,
+                # A successful capture consumed this step (and the army);
+                # the other non-OK entries never left the previous cell.
+                steps_taken=steps_taken + (1 if entry is StepOutcome.CAPTURED else 0),
                 units_destroyed=tuple(units_destroyed),
                 cities_captured=tuple(cities_captured),
             )
@@ -384,7 +389,16 @@ def _resolve_entry(
             real_map.remove_unit(unit)
             destroyed.append(unit.id)
             return (StepOutcome.CAPTURE_FAILED, destroyed, captured)
+        # The assault consumes the army, win or lose (spec §4.5): on success
+        # it disbands into the city at capture time — its "abstract defence"
+        # — and never stands on the board again. (Only Army can get here;
+        # _try_capture_city fails for every other kind.) Callers see
+        # CAPTURED and must not place the unit; it is not in `destroyed`
+        # because this is a disband, not a combat loss — callers publish
+        # the disband event themselves.
         captured.append(target_tile.city.id)
+        real_map.remove_unit(unit)
+        return (StepOutcome.CAPTURED, destroyed, captured)
 
     return (StepOutcome.OK, destroyed, captured)
 

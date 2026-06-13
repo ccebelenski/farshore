@@ -248,7 +248,8 @@ def test_army_captures_neutral_city_with_deterministic_rules(p1: Player) -> None
     assert outcome.steps_taken == 1
     assert outcome.cities_captured == (CityId(1),)
     assert city.owner is p1
-    assert army.coord == Coord(1, 0)
+    # The assault consumes the army (§4.5): it disbanded into the city.
+    assert m.unit_by_id(army.id) is None
 
 
 class _FixedRandom(random.Random):
@@ -384,8 +385,9 @@ def test_capture_success_when_nondeterministic_roll_passes(p1: Player) -> None:
     )
     assert outcome.steps_taken == 1
     assert outcome.cities_captured == (CityId(1),)
-    assert outcome.units_destroyed == ()
+    assert outcome.units_destroyed == ()  # a disband, not a combat loss
     assert city.owner is p1
+    assert m.unit_by_id(army.id) is None  # consumed by the capture (§4.5)
 
 
 # --- end-to-end turn loop with controllers ----------------------------------

@@ -188,7 +188,7 @@ def test_army_cannot_step_into_friendly_city(p1: Player) -> None:
     assert army.coord == Coord(0, 0)  # did not move
 
 
-def test_army_capturing_enemy_city_succeeds_then_disbands_at_turn_end(
+def test_army_capturing_enemy_city_is_consumed_at_capture_time(
     p1: Player, p2: Player
 ) -> None:
     enemy_city = City(id=CityId(1), coord=Coord(1, 0), owner=p2)
@@ -205,14 +205,16 @@ def test_army_capturing_enemy_city_succeeds_then_disbands_at_turn_end(
         rng=random.Random(0),
     )
 
-    # Capture is unaffected by the friendly-city rule (city was enemy at move time).
+    # Capture is unaffected by the friendly-city rule (city was enemy at move
+    # time) — and the assault consumes the army at capture time (§4.5): it
+    # disbands into the city immediately, not at some later turn-end sweep.
     assert enemy_city.id in outcome.cities_captured
     assert enemy_city.owner is p1
-    assert army.coord == Coord(1, 0)
-
-    # Now it sits in a (newly) friendly city, out of moves → disbanded next turn-end.
-    assert disband_overcrowded_city_units(p1, m) == (army.id,)
     assert m.unit_by_id(army.id) is None
+    assert m.units_at(Coord(1, 0)) == ()
+
+    # Nothing left for the §5.4 sweep to do.
+    assert disband_overcrowded_city_units(p1, m) == ()
 
 
 # --- dock load/unload restriction --------------------------------------------

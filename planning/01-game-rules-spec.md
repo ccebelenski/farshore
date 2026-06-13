@@ -161,10 +161,10 @@ When an Army successfully moves into an enemy or neutral city's cell (combat res
 
 - The city's ownership transfers to the Army's player.
 - Any units stationed inside the city are destroyed.
-- The Army occupies the city cell.
+- **The Army is consumed by the capture**: it disbands into the city at capture time, becoming its abstract defence. It never occupies the cell as a board unit. (Decided 2026-06-12, replacing the earlier "occupies, then disbands at turn-end" wording — the assault consumes the army, win or lose.)
 - The new owner inherits the city's production state (the in-progress build continues; new owner may change target, paying the change penalty — see §5.2).
 
-Under `army_capture_city_deterministic = false` (the default), city capture succeeds on a probability check (50%) — even after defeating the defender, the city may "resist" and the Army is destroyed instead. With the rule on, capture is deterministic.
+Under `army_capture_city_deterministic = false` (the default), city capture succeeds on a probability check (50%) — even after defeating the defender, the city may "resist" and the Army is destroyed instead. With the rule on, capture is deterministic. Either way the Army is gone: success disbands it into the city; failure destroys it.
 
 ### 4.6 Ground bombardment
 
@@ -207,7 +207,7 @@ A city supports a limited number of friendly units resting on its cell, by categ
 
 | Category | Limit | Notes |
 |---|---|---|
-| Army (land) | **0** | Armies may never garrison a friendly city — a garrison would make the city effectively uncapturable. Consequently an army may **not move into an already-friendly city** (capturing an enemy/neutral city is still legal: it isn't friendly until taken). The only ways an army lands on a friendly city are production with nowhere to go, or having just conquered it (out of moves) — either way it is disbanded at turn-end, becoming the city's abstract defence. |
+| Army (land) | **0** | Armies may never garrison a friendly city — a garrison would make the city effectively uncapturable. Consequently an army may **not move into an already-friendly city** (capturing an enemy/neutral city is still legal: it isn't friendly until taken — and the conqueror disbands into the city at capture time, §4.5). The only way an army stands on a friendly city is production with nowhere to go; a freshly produced unit is exempt for its birth turn (its owner planned before it existed) and is disbanded at its **next** turn-end if it hasn't marched out. |
 | Fighter (air) | **8** | The city is an airbase, holding the same number of fighters as a Carrier. |
 | Sea | **1** | The city is a dry-dock: one ship may berth and repairs +1 HP/turn (§2.3). A ship in dry-dock can neither **load nor unload** cargo. |
 

@@ -246,10 +246,12 @@ def test_unload_storms_neutral_city(p1: Player, resolver: CombatResolver) -> Non
 
     outcome = execute_unload(army, Coord(2, 0), m, deterministic, resolver, random.Random(0))
 
-    assert outcome.last_outcome is StepOutcome.OK
+    assert outcome.last_outcome is StepOutcome.CAPTURED
     assert CityId(9) in outcome.cities_captured
     assert city.owner is p1
-    assert army.coord == Coord(2, 0)
+    # The amphibious assault consumes the army too (§4.5): it disbands into
+    # the city it stormed; the transport's hold is empty either way.
+    assert m.unit_by_id(army.id) is None
     assert transport.cargo == []
 
 
@@ -312,9 +314,11 @@ def test_ferry_across_water_captures_last_city_and_wins(
     assert _step(army, Coord(1, 0), m, resolver, rules).last_outcome is StepOutcome.LOADED
     army.loaded_this_turn = False  # next round arrives
 
-    # Turn 2: storm ashore onto the enemy city.
+    # Turn 2: storm ashore onto the enemy city. The army is consumed by the
+    # capture (§4.5) — the win stands on city ownership, not the unit.
     landing = execute_unload(army, Coord(2, 0), m, rules, resolver, random.Random(0))
-    assert landing.last_outcome is StepOutcome.OK
+    assert landing.last_outcome is StepOutcome.CAPTURED
     assert city2.owner is p1
+    assert m.unit_by_id(army.id) is None
     assert g.is_over()
     assert g.winner() is p1

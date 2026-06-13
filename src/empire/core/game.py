@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from empire.core.coord import Coord
 from empire.core.engine import (
     CombatResolverProtocol,
+    StepOutcome,
     advance_satellites,
     apply_standing_orders,
     crash_out_of_fuel_fighters,
@@ -454,6 +455,17 @@ class TurnManager:
                         city_id=cid,
                         new_owner_id=player.id,
                         previous_owner_id=None,  # not tracked at this layer
+                    )
+                )
+            if outcome.last_outcome is StepOutcome.CAPTURED:
+                # The conqueror disbanded into the city at capture (§4.5).
+                from empire.core.events import UnitDisbandedEvent
+
+                city = self.game.map.city_by_id(outcome.cities_captured[-1])
+                self.game.event_bus.publish(
+                    UnitDisbandedEvent(
+                        unit_id=move.unit_id,
+                        last_coord=city.coord if city is not None else start,
                     )
                 )
 
