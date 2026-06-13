@@ -28,8 +28,8 @@ Unit / city:
   p                set production for own city at cursor
   k                set a city's default order for the units it builds
   .                persistent sentry — wakes on enemy in scan range
-  d                set heading — next direction key walks every turn
-  g                go-to — move cursor to target, Enter to confirm
+  d                set heading — steps NOW, then walks every turn
+  g                go-to — cursor to target, Enter: steps NOW, walks on
   o                unload — next direction lands the carrier's cargo
   f                bombard — warship fires at the next direction's cell
   w                wake selected unit (clear standing order)

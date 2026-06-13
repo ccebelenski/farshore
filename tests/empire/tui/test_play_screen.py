@@ -184,9 +184,12 @@ async def test_manual_move_revokes_standing_order_no_double_step() -> None:
     game.map.place_unit(army, a)
     army.standing_order = Heading(direction=Direction.E)
 
+    from empire.tui.screens.play_screen import PlayScreen
+
     async with app.run_test(size=(80, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
+        assert isinstance(screen, PlayScreen)
         screen._cursor = a  # pyright: ignore[reportPrivateUsage]
         await pilot.press("u", "6")  # select; manual step east
         await pilot.pause()
@@ -196,3 +199,59 @@ async def test_manual_move_revokes_standing_order_no_double_step() -> None:
         await pilot.pause(0.3)
         # The engine round must not have stepped it again.
         assert army.coord == b
+
+
+async def test_setting_heading_steps_immediately_then_walks_next_round() -> None:
+    """User expectation: 'setting the heading moves the unit immediately.'
+    And it must not double-step in the round the order was set (the order
+    rides the plan's set_orders, activating after this round's SO phase)."""
+    from empire.core.coord import Coord
+    from empire.core.identity import UnitId
+    from empire.core.tile import TerrainKind
+    from empire.core.unit import Army
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app()
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    capital = next(c for c in game.map.cities() if c.owner is human)
+
+    spot = None
+    for dx in range(-6, 7):
+        for dy in range(-6, 7):
+            cells = [
+                Coord(capital.coord.x + dx + i, capital.coord.y + dy)
+                for i in range(4)
+            ]
+            if all(
+                game.map.in_bounds(c)
+                and game.map.terrain_at(c) is TerrainKind.LAND
+                and not game.map.units_at(c)
+                for c in cells
+            ):
+                spot = cells
+                break
+        if spot:
+            break
+    assert spot is not None
+    a, b, c, _d4 = spot
+    army = Army(UnitId(903), human, a)
+    game.map.place_unit(army, a)
+
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        screen._cursor = a  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("u", "d", "6")  # select; set heading east
+        await pilot.pause()
+        assert army.coord == b, "setting the heading must step immediately"
+        await pilot.press("e")
+        await pilot.pause(0.3)
+        # Same round: NOT stepped again (no free move).
+        assert army.coord == b
+        await pilot.press("e")
+        await pilot.pause(0.3)
+        # Next round: the heading walks it.
+        assert army.coord == c

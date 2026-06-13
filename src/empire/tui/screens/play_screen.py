@@ -23,11 +23,12 @@ from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import Footer
 
-from empire.contracts.turn_plan import ProductionOrder, TurnPlan
+from empire.contracts.turn_plan import ProductionOrder, SetOrder, TurnPlan
 from empire.core.city import City, DefaultOrder, OrderKind
 from empire.core.coord import Coord, Direction
 from empire.core.engine import (
     BombardmentOutcome,
+    MoveOutcome,
     StepOutcome,
     can_bombard,
     execute_bombardment,
@@ -44,7 +45,7 @@ from empire.core.events import (
 from empire.core.game import Game
 from empire.core.identity import CityId, UnitId
 from empire.core.player import Player
-from empire.core.standing_order import Heading, PatrolPath, Sentry
+from empire.core.standing_order import Heading, PatrolPath, Sentry, StandingOrder
 from empire.core.unit import Unit, UnitKind
 from empire.events.bus import EventBus
 from empire.pathfinding.bfs import BFSPathfinder
@@ -153,6 +154,11 @@ class PlayScreen(Screen[None]):
         # Auto-turn: when every unit has orders (or there are none yet), the
         # turn ends itself after a short beat — no 'e' grind. 'a' toggles.
         self._auto_turn = auto_turn
+        # Standing orders set this turn ('d' heading / 'g' go-to). They ride
+        # the TurnPlan's set_orders so the engine activates them AFTER this
+        # round's standing-orders phase — the unit already took its first
+        # step immediately at set time; activating now would double-move it.
+        self._pending_orders: dict[UnitId, StandingOrder] = {}
 
         # Cursor: starts at the human's capital (if they own one) else origin.
         own = [c for c in game.map.cities() if c.owner is human_player]
@@ -284,56 +290,20 @@ class PlayScreen(Screen[None]):
             return
 
         start = unit.coord
-        outcome = execute_unit_path(
-            unit=unit,
-            path=((target.x, target.y),),
-            real_map=self._game.map,
-            rules=self._game.rules,
-            combat_resolver=self._game.combat_resolver,
-            rng=self._game.rng,
-        )
+        outcome, unit_died = self._execute_step(unit, target)
 
-        # Publish the engine's outcome events on the bus so the log picks
-        # them up (engine.execute_unit_path doesn't publish; TurnManager
-        # is what normally does, and we're bypassing it for immediate moves).
-        unit_died = self._game.map.unit_by_id(unit.id) is None
-        if outcome.steps_taken > 0 and not unit_died:
-            self._bus.publish(
-                UnitMovedEvent(unit_id=unit.id, from_=start, to=unit.coord),
-            )
-        for uid in outcome.units_destroyed:
-            self._bus.publish(UnitRemovedEvent(unit_id=uid, last_coord=start))
-        for cid in outcome.cities_captured:
-            self._bus.publish(
-                CityCapturedEvent(
-                    city_id=cid,
-                    new_owner_id=self._human.id,
-                    previous_owner_id=None,
-                ),
-            )
-        if outcome.last_outcome is StepOutcome.CAPTURED:
-            # The conqueror disbanded into the city at capture (§4.5). It
-            # never physically entered the cell, so report the CITY as the
-            # disband site, not the square it attacked from — the from-square
-            # version read like the army was still standing there.
-            self._bus.publish(
-                UnitDisbandedEvent(unit_id=unit.id, last_coord=target),
-            )
-
-        # Taking direct control revokes a standing order: without this, a
+        # Taking direct control revokes a standing order — live (set on a
+        # previous turn) or pending (set this turn): without this, a
         # manually-stepped unit with a heading/go-to would move AGAIN in the
-        # engine's standing-orders phase this round (playtest: "free move!").
-        if (
-            outcome.steps_taken > 0
-            and not unit_died
-            and unit.standing_order is not None
-        ):
+        # engine's standing-orders phase (playtest: "free move!").
+        if outcome.steps_taken > 0 and not unit_died:
+            had_order = (
+                unit.standing_order is not None
+                or self._pending_orders.pop(unit.id, None) is not None
+            )
             unit.standing_order = None
-            self._hint = "standing order cleared (manual move)"
-
-        # Update fog: a step may have revealed (or hidden) tiles.
-        scanned = scan_set_for_player(self._human, self._game.map)
-        self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)
+            if had_order:
+                self._hint = "standing order cleared (manual move)"
 
         if unit_died:
             self._selected_unit_id = None
@@ -375,6 +345,77 @@ class PlayScreen(Screen[None]):
             remaining = budget - self._moves_used.get(unit.id, 0)
             self._hint = f"{remaining} move(s) left for this unit"
         self._refresh_view()
+
+    def _execute_step(self, unit: Unit, target: Coord) -> tuple[MoveOutcome, bool]:
+        """Run one engine step for `unit` toward `target`, publish the
+        outcome events, and update fog. Shared by manual steps and the
+        immediate first step of a freshly set movement order. Returns
+        (outcome, unit_died)."""
+        start = unit.coord
+        outcome = execute_unit_path(
+            unit=unit,
+            path=((target.x, target.y),),
+            real_map=self._game.map,
+            rules=self._game.rules,
+            combat_resolver=self._game.combat_resolver,
+            rng=self._game.rng,
+        )
+
+        # Publish the engine's outcome events on the bus so the log picks
+        # them up (engine.execute_unit_path doesn't publish; TurnManager
+        # is what normally does, and we're bypassing it for immediate moves).
+        unit_died = self._game.map.unit_by_id(unit.id) is None
+        if outcome.steps_taken > 0 and not unit_died:
+            self._bus.publish(
+                UnitMovedEvent(unit_id=unit.id, from_=start, to=unit.coord),
+            )
+        for uid in outcome.units_destroyed:
+            self._bus.publish(UnitRemovedEvent(unit_id=uid, last_coord=start))
+        for cid in outcome.cities_captured:
+            self._bus.publish(
+                CityCapturedEvent(
+                    city_id=cid,
+                    new_owner_id=self._human.id,
+                    previous_owner_id=None,
+                ),
+            )
+        if outcome.last_outcome is StepOutcome.CAPTURED:
+            # The conqueror disbanded into the city at capture (§4.5). It
+            # never physically entered the cell, so report the CITY as the
+            # disband site, not the square it attacked from — the from-square
+            # version read like the army was still standing there.
+            self._bus.publish(
+                UnitDisbandedEvent(unit_id=unit.id, last_coord=target),
+            )
+
+        # Update fog: a step may have revealed (or hidden) tiles.
+        scanned = scan_set_for_player(self._human, self._game.map)
+        self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)
+        return outcome, unit_died
+
+    def _order_first_step(self, unit: Unit, target: Coord) -> tuple[bool, bool]:
+        """Setting a movement order moves the unit immediately (player
+        expectation: 'setting the heading moves the unit'). Executes the
+        order's first step now if budget remains. The order itself is NOT
+        live yet — the caller queues it via the TurnPlan's set_orders, which
+        the engine applies AFTER this round's standing-orders phase (the
+        designed mechanism that prevents the same-round double step).
+        Returns (stepped, unit_alive)."""
+        used = self._moves_used.get(unit.id, 0)
+        if used >= unit.moves_this_turn():
+            return False, True  # out of moves; the order starts next round
+        if not self._game.map.in_bounds(target):
+            return False, True
+        outcome, unit_died = self._execute_step(unit, target)
+        if unit_died:
+            self._selected_unit_id = None
+            self._handled.add(unit.id)
+            return outcome.steps_taken > 0, False
+        if outcome.steps_taken > 0:
+            self._moves_used[unit.id] = used + outcome.steps_taken
+            self._cursor = unit.coord
+            return True, True
+        return False, True
 
     def action_select_unit(self) -> None:
         """Manual free-select: take the own unit under the cursor.
@@ -607,6 +648,7 @@ class PlayScreen(Screen[None]):
         unit = self._game.map.unit_by_id(uid)
         if unit is not None:
             unit.standing_order = None
+        self._pending_orders.pop(uid, None)  # also cancel an order set this turn
         self._handled.discard(uid)
         self._hint = "woke unit — standing order cleared"
         self._refresh_view()
@@ -637,10 +679,22 @@ class PlayScreen(Screen[None]):
             self._hint = "no path to that cell"
             self._refresh_view()
             return
-        order = PatrolPath.new(tuple(path), reverse_on_end=False)
-        unit.standing_order = order
         self._handled.add(unit.id)
-        self._hint = f"go-to set: {len(path)} cells queued"
+        # Step the first cell now; the REMAINDER goes live via the plan's
+        # set_orders so the engine walks it from the next round onward.
+        stepped, alive = self._order_first_step(unit, path[0])
+        if not alive:
+            self._hint = "unit lost on the first go-to step"
+        else:
+            tail = tuple(path[1:]) if stepped else tuple(path)
+            if tail:
+                self._pending_orders[unit.id] = PatrolPath.new(
+                    tail, reverse_on_end=False
+                )
+            self._hint = (
+                f"go-to set: {len(tail)} cells queued"
+                + (" (stepped)" if stepped else "")
+            )
         self._advance_to_next_unit()
         self._refresh_view()
 
@@ -766,6 +820,7 @@ class PlayScreen(Screen[None]):
         # Reset per-turn state. Production stays committed in the city via
         # the engine; we just clear our scratch dicts.
         self._pending_production.clear()
+        self._pending_orders.clear()  # now riding the plan's set_orders
         self._moves_used.clear()
         self._selected_unit_id = None
         self._handled.clear()
@@ -977,8 +1032,10 @@ class PlayScreen(Screen[None]):
     def _build_plan(self) -> TurnPlan:
         """Build the human's TurnPlan for end-of-turn.
 
-        Moves are already applied immediately on key press, so this only
-        carries production orders. Any own city without a build target
+        Moves are already applied immediately on key press, so this carries
+        production orders plus the standing orders set this turn (their
+        first step already happened; set_orders activates them after this
+        round's standing-orders phase). Any own city without a build target
         gets ARMY by default so captured cities don't sit silent.
         """
         production_orders: list[ProductionOrder] = []
@@ -995,18 +1052,29 @@ class PlayScreen(Screen[None]):
                     ProductionOrder(city_id=city.id, target=UnitKind.ARMY),
                 )
 
-        return TurnPlan(production_orders=tuple(production_orders))
+        set_orders = tuple(
+            SetOrder(unit_id=uid, order=order)
+            for uid, order in self._pending_orders.items()
+        )
+        return TurnPlan(
+            production_orders=tuple(production_orders), set_orders=set_orders
+        )
 
     def _set_heading(self, unit_id: UnitId, d: Direction) -> None:
         unit = self._game.map.unit_by_id(unit_id)
         if unit is None:
             self._awaiting_heading = False
             return
-        order = Heading(direction=d)
-        unit.standing_order = order
         self._handled.add(unit_id)
         self._awaiting_heading = False
-        self._hint = f"heading set: {d.name}"
+        # Step now; the heading goes live via the plan's set_orders so the
+        # engine walks it from the NEXT round (not again this round).
+        stepped, alive = self._order_first_step(unit, unit.coord.step(d))
+        if alive:
+            self._pending_orders[unit.id] = Heading(direction=d)
+            self._hint = f"heading set: {d.name}" + (" (stepped)" if stepped else "")
+        else:
+            self._hint = f"unit lost stepping {d.name}"
         self._advance_to_next_unit()
         self._refresh_view()
 
