@@ -320,6 +320,17 @@ class PlayScreen(Screen[None]):
                 UnitDisbandedEvent(unit_id=unit.id, last_coord=target),
             )
 
+        # Taking direct control revokes a standing order: without this, a
+        # manually-stepped unit with a heading/go-to would move AGAIN in the
+        # engine's standing-orders phase this round (playtest: "free move!").
+        if (
+            outcome.steps_taken > 0
+            and not unit_died
+            and unit.standing_order is not None
+        ):
+            unit.standing_order = None
+            self._hint = "standing order cleared (manual move)"
+
         # Update fog: a step may have revealed (or hidden) tiles.
         scanned = scan_set_for_player(self._human, self._game.map)
         self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)

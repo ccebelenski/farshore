@@ -38,7 +38,8 @@ Unit / city:
 Moves are immediate: with a unit selected, each direction key applies
 one step (combat + city capture resolve live). When the unit's move
 budget is spent, the next unit auto-selects. End the turn with `e`
-to let the AI play.
+to let the AI play. Manually moving a unit that has a standing order
+(heading / go-to) clears the order — direct control overrides it.
 
 Cargo: step an Army onto a friendly Transport (or a Fighter onto a
 Carrier) to load it. Select the carrier and press `o`, then a direction,
