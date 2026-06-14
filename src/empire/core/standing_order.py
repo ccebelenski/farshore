@@ -94,4 +94,17 @@ class Sentry:
     """The unit holds position and is skipped by auto-cycle."""
 
 
-StandingOrder = Heading | PatrolPath | Sentry
+@dataclass(frozen=True, slots=True)
+class Loading:
+    """A carrier (transport / carrier) holds position waiting to be loaded.
+
+    Like `Sentry` it doesn't move and is skipped by auto-cycle, but the
+    engine auto-wakes it the moment its hold is full (in addition to the
+    usual enemy-in-scan surprise wake). Cargo boards by moving onto the
+    carrier's cell as normal; the order only makes the carrier *wait* for
+    them. (Adjacent units are snapped aboard once, by the UI, at the moment
+    the order is given — not by this order.)
+    """
+
+
+StandingOrder = Heading | PatrolPath | Sentry | Loading

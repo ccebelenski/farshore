@@ -33,6 +33,7 @@ Unit / city:
   w                wake a sentried/skipped unit back into this turn
   d                set heading — steps NOW, then walks every turn
   g                go-to target — Enter steps now, then walks
+  l                load — carrier waits for cargo, wakes when full
   o                unload — next direction lands the carrier's cargo
   f                bombard — warship fires at the next direction's cell
   w                wake selected unit (clear standing order)
@@ -48,8 +49,10 @@ Standing orders never auto-attack: a unit on heading / go-to / patrol
 wakes one cell short of an enemy or a city — engage with a manual step.
 
 Cargo: step an Army onto a friendly Transport (or a Fighter onto a
-Carrier) to load it. Select the carrier and press `o`, then a direction,
-to unload — a unit can't unload the same turn it loaded.
+Carrier) to load it. Or select the carrier and press `l`: it snaps any
+adjacent cargo aboard and then waits in place, loading units that walk on,
+until full (then it wakes). Select the carrier and press `o`, then a
+direction, to unload — a unit can't unload the same turn it loaded.
 
 Turn flow:
   e                end turn (run AI, advance)

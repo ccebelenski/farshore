@@ -21,7 +21,13 @@ from empire.core.identity import CityId, PlayerId, UnitId
 from empire.core.map import Map, RememberedTile, UnitSnapshot, ViewMap
 from empire.core.player import Player
 from empire.core.ruleset import MapProfile, RuleSet
-from empire.core.standing_order import Heading, PatrolPath, Sentry, StandingOrder
+from empire.core.standing_order import (
+    Heading,
+    Loading,
+    PatrolPath,
+    Sentry,
+    StandingOrder,
+)
 from empire.core.tile import TerrainKind, Tile
 from empire.core.unit import UNIT_REGISTRY, Unit, UnitKind
 
@@ -406,7 +412,9 @@ class V1Serializer:
                 "original": [[c.x, c.y] for c in order.original],
                 "reverse_on_end": order.reverse_on_end,
             }
-        # Sentry — the only remaining variant after Heading/PatrolPath.
+        if isinstance(order, Loading):
+            return {"kind": "loading"}
+        # Sentry — the only remaining variant.
         return {"kind": "sentry"}
 
     def _standing_order_from_dict(
@@ -423,6 +431,8 @@ class V1Serializer:
                 original=tuple(Coord(int(c[0]), int(c[1])) for c in d["original"]),
                 reverse_on_end=bool(d.get("reverse_on_end", False)),
             )
+        if kind == "loading":
+            return Loading()
         if kind == "sentry":
             return Sentry()
         raise ValueError(f"Unknown StandingOrder kind in save: {kind!r}")

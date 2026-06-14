@@ -47,7 +47,13 @@ from empire.core.events import (
 from empire.core.game import Game
 from empire.core.identity import CityId, UnitId
 from empire.core.player import Player
-from empire.core.standing_order import Heading, PatrolPath, Sentry, StandingOrder
+from empire.core.standing_order import (
+    Heading,
+    Loading,
+    PatrolPath,
+    Sentry,
+    StandingOrder,
+)
 from empire.core.unit import Unit, UnitKind
 from empire.events.bus import EventBus
 from empire.pathfinding.bfs import BFSPathfinder
@@ -76,8 +82,9 @@ _DIR_KEYS: dict[str, Direction] = {
     "1": Direction.SW, "2": Direction.S,  "3": Direction.SE,
     "4": Direction.W,                       "6": Direction.E,
     "7": Direction.NW, "8": Direction.N,  "9": Direction.NE,
-    # Vi-keys
-    "h": Direction.W,  "j": Direction.S,  "k": Direction.N, "l": Direction.E,
+    # Vi-keys. 'k' (north) and 'l' (east) are given to command letters
+    # (city-orders, load); vi users reach those directions via numpad/arrows.
+    "h": Direction.W,  "j": Direction.S,
     "y": Direction.NW, "u_vi": Direction.NE,
     "b": Direction.SW, "n_vi": Direction.SE,
     # Arrow keys (Textual's "up"/"down"/"left"/"right")
@@ -107,6 +114,7 @@ class PlayScreen(Screen[None]):
         Binding("d", "set_heading", "set heading"),
         Binding("g", "go_to", "go-to"),
         Binding("o", "unload", "unload cargo"),
+        Binding("l", "loading", "load ship"),
         Binding("f", "bombard", "bombard"),
         Binding("w", "wake", "wake unit"),
         Binding("n", "next_unit", "next unit"),
@@ -122,9 +130,9 @@ class PlayScreen(Screen[None]):
         Binding("q", "quit", "quit"),
         # Numpad / number row covers all 8 directions cleanly.
         *[Binding(k, f"step('{k}')", show=False) for k in "12346789"],
-        # Vi cardinals (h/j/k/l). Diagonals (y/u/b/n) conflict with letter
-        # commands, so vi-users use numpad or arrows for diagonals.
-        *[Binding(k, f"step('{k}')", show=False) for k in "hjkl"],
+        # Vi cardinals h/j only — k (north) and l (east) are command letters
+        # (city-orders, load); diagonals also defer to numpad/arrows.
+        *[Binding(k, f"step('{k}')", show=False) for k in "hj"],
         # Arrow keys
         Binding("up", "step('up')", show=False),
         Binding("down", "step('down')", show=False),
@@ -352,6 +360,18 @@ class PlayScreen(Screen[None]):
             self._handled.add(unit.id)
             self._selected_unit_id = None
             self._hint = f"loaded onto {label} ({cargo_n}/{cap})"
+            # If this filled a carrier waiting in loading mode, wake it now
+            # (the engine also wakes full loaders at turn start; this gives
+            # immediate in-turn feedback).
+            if (
+                carrier is not None
+                and isinstance(carrier.standing_order, Loading)
+                and cargo_n >= cap
+            ):
+                carrier.standing_order = None
+                self._deferred.discard(carrier.id)
+                self._handled.discard(carrier.id)
+                self._hint = f"{label} fully loaded ({cargo_n}/{cap}) — woken"
             self._advance_to_next_unit()
             self._refresh_view()
             return
@@ -637,6 +657,63 @@ class PlayScreen(Screen[None]):
             f"toward the destination cell (Esc to cancel)"
         )
         self._refresh_view()
+
+    def action_loading(self) -> None:
+        """'l': put the selected carrier into loading mode.
+
+        Snaps any ADJACENT eligible cargo aboard immediately, then — if room
+        remains — holds position (a Loading sentry) waiting for more cargo to
+        walk/fly aboard on its own; the engine wakes it the moment it fills.
+        Units that aren't already adjacent are NOT pulled — they board by
+        moving onto the carrier as normal."""
+        if self._selected_unit_id is None:
+            self._hint = "select a carrier first ('u')"
+            self._refresh_view()
+            return
+        carrier = self._selected_unit()
+        if carrier is None or type(carrier).cargo_kind is None:
+            self._hint = "not a carrier — only transports/carriers can load"
+            self._refresh_view()
+            return
+
+        snapped = self._snap_adjacent_cargo(carrier)
+        cap = carrier.effective_capacity()
+        if len(carrier.cargo) >= cap:
+            self._hint = f"carrier full ({len(carrier.cargo)}/{cap})"
+            # Full now: no point waiting; leave it free to move/act.
+            self._advance_to_next_unit()
+            self._refresh_view()
+            return
+
+        carrier.standing_order = Loading()
+        self._handled.add(carrier.id)
+        self._deferred.add(carrier.id)  # waiting, not finished — holds the turn
+        note = f"loaded {snapped} adjacent, " if snapped else ""
+        self._hint = (
+            f"loading mode: {note}{len(carrier.cargo)}/{cap} aboard — "
+            "holds until full ('w' to wake)"
+        )
+        self._advance_to_next_unit()
+        self._refresh_view()
+
+    def _snap_adjacent_cargo(self, carrier: Unit) -> int:
+        """Load eligible own units on the 8 neighbor cells aboard `carrier`,
+        nearest registry-order first, until full. Returns how many boarded."""
+        loaded = 0
+        for nb in carrier.coord.neighbors():
+            if not self._game.map.in_bounds(nb):
+                continue
+            # Snapshot — load_cargo mutates the cell's occupant list.
+            for cargo in list(self._game.map.units_at(nb)):
+                if not carrier.can_carry(cargo):
+                    continue
+                self._game.map.load_cargo(carrier, cargo)
+                self._handled.discard(cargo.id)  # it's aboard now, off the cycle
+                self._deferred.discard(cargo.id)
+                loaded += 1
+                if len(carrier.cargo) >= carrier.effective_capacity():
+                    return loaded
+        return loaded
 
     def action_bombard(self) -> None:
         """Arm bombardment: the next direction key fires at that adjacent cell."""

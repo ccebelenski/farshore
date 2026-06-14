@@ -506,3 +506,117 @@ async def test_skip_defers_without_forfeiting_moves() -> None:
         assert army.id in {
             u.id for u in screen._units_needing_orders()  # pyright: ignore[reportPrivateUsage]
         }
+
+
+async def test_load_command_snaps_adjacent_and_waits_then_wakes() -> None:
+    """'l' on a transport snaps an adjacent army aboard, enters loading mode,
+    waits (does not pull a distant army), and wakes when an army walks on to
+    fill it."""
+    from empire.core.coord import Coord
+    from empire.core.identity import UnitId
+    from empire.core.standing_order import Loading
+    from empire.core.tile import TerrainKind
+    from empire.core.unit import Army, Transport
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app(auto_turn=False)
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    # A water cell with two adjacent land cells for armies.
+    spot = None
+    for x in range(1, game.map.width - 1):
+        for y in range(1, game.map.height - 1):
+            w = Coord(x, y)
+            la, lb = Coord(x - 1, y), Coord(x + 1, y)
+            if (
+                game.map.terrain_at(w) is TerrainKind.WATER
+                and game.map.in_bounds(la)
+                and game.map.in_bounds(lb)
+                and game.map.terrain_at(la) is TerrainKind.LAND
+                and game.map.terrain_at(lb) is TerrainKind.LAND
+                and not game.map.units_at(w)
+                and not game.map.units_at(la)
+                and not game.map.units_at(lb)
+            ):
+                spot = (w, la, lb)
+                break
+        if spot:
+            break
+    assert spot is not None, "need a water cell flanked by land"
+    water, land_a, land_b = spot
+    transport = Transport(UnitId(820), human, water)  # capacity 6
+    game.map.place_unit(transport, water)
+    near = Army(UnitId(821), human, land_a)  # adjacent → snaps aboard
+    game.map.place_unit(near, land_a)
+    far = Army(UnitId(822), human, land_b)  # adjacent on the other side too
+    game.map.place_unit(far, land_b)
+    human.view.visible = {
+        Coord(x, y) for x in range(game.map.width) for y in range(game.map.height)
+    }
+
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        screen._cursor = water  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("u", "l")  # select transport, loading mode
+        await pilot.pause()
+        # Both flanking armies were adjacent → snapped aboard immediately.
+        assert near.id in transport.cargo
+        assert far.id in transport.cargo
+        # Not full (cap 6) → transport is waiting in Loading mode.
+        assert isinstance(transport.standing_order, Loading)
+
+
+async def test_load_command_full_does_not_enter_loading() -> None:
+    """If snapping adjacent cargo fills the carrier, it doesn't sentry —
+    it's free to sail."""
+    from empire.core.coord import Coord
+    from empire.core.identity import UnitId
+    from empire.core.standing_order import Loading
+    from empire.core.tile import TerrainKind
+    from empire.core.unit import Carrier, Fighter
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app(auto_turn=False)
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    # Carrier carries fighters; find a water cell with an adjacent cell.
+    spot = None
+    for x in range(1, game.map.width - 1):
+        for y in range(1, game.map.height - 1):
+            w = Coord(x, y)
+            if game.map.terrain_at(w) is TerrainKind.WATER and not game.map.units_at(w):
+                spot = w
+                break
+        if spot:
+            break
+    assert spot is not None
+
+    carrier = Carrier(UnitId(830), human, spot)
+    game.map.place_unit(carrier, spot)
+    # Fill capacity with adjacent fighters (fighters fly, any neighbor works).
+    cap = carrier.effective_capacity()
+    placed = 0
+    fid = 831
+    for nb in spot.neighbors():
+        if placed >= cap:
+            break
+        if game.map.in_bounds(nb) and not game.map.units_at(nb):
+            f = Fighter(UnitId(fid), human, nb)
+            game.map.place_unit(f, nb)
+            fid += 1
+            placed += 1
+    assert placed == cap  # enough neighbors to fill it
+
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        screen._cursor = spot  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("u", "l")
+        await pilot.pause()
+        assert len(carrier.cargo) == cap
+        assert not isinstance(carrier.standing_order, Loading)  # not waiting

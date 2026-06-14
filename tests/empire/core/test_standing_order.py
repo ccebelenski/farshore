@@ -368,3 +368,64 @@ def test_goto_wakes_instead_of_capturing_a_city(
     assert enemy_city.owner is p2  # not captured by the order
     assert mover.standing_order is None  # woke
     assert UnitId(1) in result.interrupted_unit_ids
+
+
+# --- loading mode (carrier waits, wakes when full) ----------------------------
+
+
+def test_loading_carrier_wakes_when_full() -> None:
+    """A Loading carrier with no room left is woken at the top of the turn."""
+    from empire.core.standing_order import Loading
+    from empire.core.unit import Army, Transport
+
+    p1 = Player(id=PlayerId(1), name="P1", is_ai=False, view=ViewMap())
+    m = _land_map(3, 1)  # cells are land; carrier just needs to exist on the map
+    transport = Transport(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(transport, Coord(0, 0))
+    transport.standing_order = Loading()
+    # Fill the hold to capacity with aboard armies.
+    for i in range(transport.effective_capacity()):
+        cargo = Army(UnitId(100 + i), p1, Coord(0, 0))
+        m.add_aboard_unit(cargo)
+        cargo.carried_by = transport.id
+        transport.cargo.append(cargo.id)
+
+    woken = wake_sentried_units(p1, m)
+
+    assert UnitId(1) in woken
+    assert transport.standing_order is None
+
+
+def test_loading_carrier_with_room_keeps_waiting() -> None:
+    """A Loading carrier that isn't full (and sees no enemy) stays in mode."""
+    from empire.core.standing_order import Loading
+    from empire.core.unit import Transport
+
+    p1 = Player(id=PlayerId(1), name="P1", is_ai=False, view=ViewMap())
+    m = _land_map(3, 1)
+    transport = Transport(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(transport, Coord(0, 0))
+    transport.standing_order = Loading()  # empty hold
+
+    assert wake_sentried_units(p1, m) == ()
+    assert isinstance(transport.standing_order, Loading)
+
+
+def test_loading_order_round_trips_through_save() -> None:
+    from empire.core.game import Game
+    from empire.core.standing_order import Loading
+    from empire.core.unit import Transport
+    from empire.persistence.schema_v1 import V1Serializer
+
+    p1 = Player(id=PlayerId(1), name="P1", is_ai=False, view=ViewMap())
+    p2 = Player(id=PlayerId(2), name="P2", is_ai=True, view=ViewMap())
+    m = _mixed_map(["LWL"])
+    transport = Transport(UnitId(1), p1, Coord(1, 0))
+    m.place_unit(transport, Coord(1, 0))
+    transport.standing_order = Loading()
+    game = Game(rules=STANDARD, real_map=m, players=[p1, p2], seed=1)
+
+    loaded = V1Serializer().from_dict(V1Serializer().to_dict(game))
+    restored = loaded.map.unit_by_id(UnitId(1))
+    assert restored is not None
+    assert isinstance(restored.standing_order, Loading)

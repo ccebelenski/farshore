@@ -21,7 +21,7 @@ from empire.core.coord import Coord, Direction
 from empire.core.identity import CityId, UnitId
 from empire.core.map import Map
 from empire.core.ruleset import RuleSet
-from empire.core.standing_order import Heading, PatrolPath, Sentry
+from empire.core.standing_order import Heading, Loading, PatrolPath, Sentry
 from empire.core.tile import TerrainKind
 from empire.core.unit import UNIT_REGISTRY, Unit, UnitKind
 
@@ -1087,7 +1087,9 @@ def apply_standing_orders(
         order = unit.standing_order
         if order is None:
             continue
-        if isinstance(order, Sentry):
+        if isinstance(order, (Sentry, Loading)):
+            # Both hold position; neither steps. (Loading's wake-when-full is
+            # handled in wake_sentried_units, run just before this.)
             sentried.append(unit.id)
             continue
 
@@ -1188,22 +1190,26 @@ def apply_standing_orders(
 
 
 def wake_sentried_units(player: Player, real_map: Map) -> tuple[UnitId, ...]:
-    """Wake any sentried own unit with an enemy currently in scan range.
+    """Wake own units whose hold-position order should end this turn.
 
     Called at the top of `player`'s turn, before `apply_standing_orders`.
-    Returns the IDs of units that were woken (had their Sentry cleared).
-
-    Per spec, a surprise NEVER auto-sentries — it auto-WAKES. The
-    "adjacent combat" wake trigger is subsumed here because an enemy
-    fighting next to a unit is, by definition, within scan range.
+    Returns the IDs of units that were woken (order cleared). Triggers:
+    - a `Sentry` or `Loading` unit with an enemy in scan range (a surprise
+      always auto-WAKES, never auto-sentries — spec); and
+    - a `Loading` carrier whose hold is now full (its wait is over).
     """
     woken: list[UnitId] = []
     for unit in real_map.board_units():
         if unit.owner is not player:
             continue
-        if not isinstance(unit.standing_order, Sentry):
+        order = unit.standing_order
+        if not isinstance(order, (Sentry, Loading)):
             continue
-        if enemy_in_scan_range(unit, real_map):
+        full = (
+            isinstance(order, Loading)
+            and len(unit.cargo) >= unit.effective_capacity()
+        )
+        if full or enemy_in_scan_range(unit, real_map):
             unit.standing_order = None
             woken.append(unit.id)
     return tuple(woken)
