@@ -322,3 +322,41 @@ def test_ferry_across_water_captures_last_city_and_wins(
     assert m.unit_by_id(army.id) is None
     assert g.is_over()
     assert g.winner() is p1
+
+
+def test_ai_amphibious_landing_via_turn_plan(
+    p1: Player, p2: Player, resolver: CombatResolver
+) -> None:
+    """An AIController can now disembark cargo: a TurnPlan UnloadOrder lands
+    a loaded transport's army onto an adjacent enemy city, capturing it.
+    (Before, the plan vocabulary had no unload — AIs couldn't do amphibious
+    assault at all; Phase 15.9.)"""
+    from empire.contracts.turn_plan import UnitMove, UnloadOrder
+    from empire.core.game import Game
+
+    # Enemy island city at (2,0); transport on water at (1,0) with an army
+    # aboard; P1 also owns a home city so it isn't already lost.
+    home = City(id=CityId(3), coord=Coord(0, 0), owner=p1)
+    target = City(id=CityId(2), coord=Coord(2, 0), owner=p2)
+    m = _build_map(["CWC"], cities={Coord(0, 0): home, Coord(2, 0): target})
+    transport = Transport(UnitId(1), p1, Coord(1, 0))
+    army = Army(UnitId(2), p1, Coord(1, 0))
+    m.place_unit(transport, Coord(1, 0))
+    m.place_unit(army, Coord(1, 0))
+    m.load_cargo(transport, army)
+    army.loaded_this_turn = False  # loaded on a prior turn
+    rules = dataclasses.replace(STANDARD, army_capture_city_deterministic=True)
+    game = Game(rules=rules, real_map=m, players=[p1, p2], seed=0, combat_resolver=resolver)
+
+    # Drive P1's turn via a plan carrying an UnloadOrder onto the enemy city.
+    class _Plan:
+        production_orders = ()
+        moves: tuple[UnitMove, ...] = ()
+        unloads = (UnloadOrder(cargo_id=UnitId(2), to=(2, 0)),)
+        set_orders = ()
+
+    game.turn_manager._apply_turn_plan(p1, _Plan())  # pyright: ignore[reportPrivateUsage]
+
+    assert target.owner is p1  # captured by the amphibious assault
+    assert m.unit_by_id(UnitId(2)) is None  # army consumed by the capture (§4.5)
+    assert transport.cargo == []  # hold emptied

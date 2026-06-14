@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from empire.core.coord import Coord
 from empire.core.engine import (
     CombatResolverProtocol,
+    MoveOutcome,
     StepOutcome,
     advance_satellites,
     apply_standing_orders,
@@ -386,11 +387,6 @@ class TurnManager:
         `empire.contracts.turn_plan`; we duck-type the fields we need.
         Caller wires up a real `TurnPlan` per `empire.contracts`.
         """
-        from empire.core.events import (
-            CityCapturedEvent,
-            UnitMovedEvent,
-            UnitRemovedEvent,
-        )
 
         # Production orders first (so any subsequent production accounting
         # uses the new target).
@@ -431,66 +427,88 @@ class TurnManager:
                 combat_resolver=self.game.combat_resolver,
                 rng=self.game.rng,
             )
-            # Emit events. Simplified: one moved event if the unit moved at
-            # all, one removed event per destroyed unit, one captured event
-            # per captured city.
-            if outcome.steps_taken > 0 and self.game.map.unit_by_id(unit.id) is not None:
-                self.game.event_bus.publish(
-                    UnitMovedEvent(unit_id=unit.id, from_=start, to=unit.coord)
-                )
-            # Reactive city artillery (spec §4.7): hostile or neutral cities the
-            # mover ended within range of get their overwatch shot at it.
-            if (
-                self.game.rules.city_artillery_range > 0
-                and self.game.map.unit_by_id(unit.id) is not None
+            self._publish_move_outcome(player, move.unit_id, start, outcome)
+
+        # Amphibious landings, after moves so a carrier can sail adjacent to
+        # the target this turn and then disembark.
+        from empire.core.engine import execute_unload
+
+        for unload in getattr(plan, "unloads", ()):
+            cargo = self.game.map.unit_by_id(unload.cargo_id)
+            if cargo is None or cargo.owner is not player:
+                continue
+            carrier = (
+                self.game.map.unit_by_id(cargo.carried_by)
+                if cargo.carried_by is not None
+                else None
+            )
+            start = carrier.coord if carrier is not None else cargo.coord
+            outcome = execute_unload(
+                cargo=cargo,
+                to=Coord(unload.to[0], unload.to[1]),
+                real_map=self.game.map,
+                rules=self.game.rules,
+                combat_resolver=self.game.combat_resolver,
+                rng=self.game.rng,
+            )
+            self._publish_move_outcome(player, unload.cargo_id, start, outcome)
+
+    def _publish_move_outcome(
+        self, player: Player, unit_id: UnitId, start: Coord, outcome: MoveOutcome
+    ) -> None:
+        """Publish the bus events for one resolved step/landing: movement,
+        reactive city artillery, destructions, captures, and the conqueror's
+        capture-time disband. Shared by `moves` and amphibious `unloads`."""
+        from empire.core.engine import ArtilleryOutcome, reactive_city_fire
+        from empire.core.events import (
+            CityCapturedEvent,
+            CityFiredEvent,
+            UnitDisbandedEvent,
+            UnitMovedEvent,
+            UnitRemovedEvent,
+        )
+
+        unit = self.game.map.unit_by_id(unit_id)
+        if outcome.steps_taken > 0 and unit is not None:
+            self.game.event_bus.publish(
+                UnitMovedEvent(unit_id=unit_id, from_=start, to=unit.coord)
+            )
+        # Reactive overwatch (spec §4.7) on a unit that ended in gun range.
+        if self.game.rules.city_artillery_range > 0 and unit is not None:
+            mcoord = unit.coord
+            for city_id, result in reactive_city_fire(
+                unit, self.game.map, self.game.rules, self.game.rng
             ):
-                from empire.core.engine import ArtilleryOutcome, reactive_city_fire
-                from empire.core.events import CityFiredEvent
-
-                mcoord = unit.coord
-                for city_id, result in reactive_city_fire(
-                    unit, self.game.map, self.game.rules, self.game.rng
-                ):
-                    if result.target_id is None:
-                        continue
-                    destroyed = result.outcome is ArtilleryOutcome.TARGET_DESTROYED
-                    hit = destroyed or result.outcome is ArtilleryOutcome.TARGET_DAMAGED
+                if result.target_id is None:
+                    continue
+                destroyed = result.outcome is ArtilleryOutcome.TARGET_DESTROYED
+                hit = destroyed or result.outcome is ArtilleryOutcome.TARGET_DAMAGED
+                self.game.event_bus.publish(
+                    CityFiredEvent(
+                        city_id=city_id, target_id=result.target_id,
+                        target_coord=mcoord, hit=hit, destroyed=destroyed,
+                    )
+                )
+                if destroyed:
                     self.game.event_bus.publish(
-                        CityFiredEvent(
-                            city_id=city_id,
-                            target_id=result.target_id,
-                            target_coord=mcoord,
-                            hit=hit,
-                            destroyed=destroyed,
-                        )
+                        UnitRemovedEvent(unit_id=result.target_id, last_coord=mcoord)
                     )
-                    if destroyed:
-                        self.game.event_bus.publish(
-                            UnitRemovedEvent(unit_id=result.target_id, last_coord=mcoord)
-                        )
-            for uid in outcome.units_destroyed:
-                self.game.event_bus.publish(
-                    UnitRemovedEvent(unit_id=uid, last_coord=start)
+        for uid in outcome.units_destroyed:
+            self.game.event_bus.publish(UnitRemovedEvent(unit_id=uid, last_coord=start))
+        for cid in outcome.cities_captured:
+            self.game.event_bus.publish(
+                CityCapturedEvent(
+                    city_id=cid, new_owner_id=player.id, previous_owner_id=None
                 )
-            for cid in outcome.cities_captured:
-                self.game.event_bus.publish(
-                    CityCapturedEvent(
-                        city_id=cid,
-                        new_owner_id=player.id,
-                        previous_owner_id=None,  # not tracked at this layer
-                    )
+            )
+        if outcome.last_outcome is StepOutcome.CAPTURED:
+            city = self.game.map.city_by_id(outcome.cities_captured[-1])
+            self.game.event_bus.publish(
+                UnitDisbandedEvent(
+                    unit_id=unit_id,
+                    last_coord=city.coord if city is not None else start,
                 )
-            if outcome.last_outcome is StepOutcome.CAPTURED:
-                # The conqueror disbanded into the city at capture (§4.5).
-                from empire.core.events import UnitDisbandedEvent
-
-                city = self.game.map.city_by_id(outcome.cities_captured[-1])
-                self.game.event_bus.publish(
-                    UnitDisbandedEvent(
-                        unit_id=move.unit_id,
-                        last_coord=city.coord if city is not None else start,
-                    )
-                )
+            )
 
     def _scan_phase(self, player: Player) -> None:
         scanned = scan_set_for_player(player, self.game.map)

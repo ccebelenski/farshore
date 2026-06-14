@@ -44,6 +44,21 @@ class ProductionOrder:
 
 
 @dataclass(frozen=True, slots=True)
+class UnloadOrder:
+    """Unload one aboard cargo unit onto an adjacent cell (spec §3.4).
+
+    `cargo_id` is the aboard unit to land; `to` is the destination cell
+    (must be adjacent to its carrier). The engine resolves the landing like
+    a normal step — an army can storm ashore into an enemy/neutral city.
+    Applied after `moves`, so a carrier can sail adjacent to the target this
+    turn and then disembark.
+    """
+
+    cargo_id: UnitId
+    to: tuple[int, int]
+
+
+@dataclass(frozen=True, slots=True)
 class UnitSentry:
     """A sentry/wake command for a unit.
 
@@ -86,6 +101,7 @@ class TurnPlan:
 
     production_orders: tuple[ProductionOrder, ...] = ()
     moves: tuple[UnitMove, ...] = ()
+    unloads: tuple[UnloadOrder, ...] = ()
     sentries: tuple[UnitSentry, ...] = ()
     set_orders: tuple[SetOrder, ...] = ()
     # Debug/telemetry. Free-form. Not consumed by the engine; useful for AI
