@@ -97,7 +97,7 @@ async def test_own_unit_production_always_logs() -> None:
         # Note: viewer's visible set is empty, but the unit is OURS.
         bus.publish(UnitPlacedEvent(unit_id=UnitId(1), at=Coord(2, 2)))
         await host.workers.wait_for_complete()
-        assert any("unit#1" in line for line in _lines(host.panel))
+        assert any("army#1" in line for line in _lines(host.panel))
 
 
 async def test_enemy_production_at_unseen_cell_does_not_log() -> None:
@@ -115,7 +115,7 @@ async def test_enemy_production_at_unseen_cell_does_not_log() -> None:
         host.panel.attach_to(bus, real_map, me)
         bus.publish(UnitPlacedEvent(unit_id=UnitId(99), at=Coord(3, 3)))
         await host.workers.wait_for_complete()
-        assert not any("unit#99" in line for line in _lines(host.panel))
+        assert not any("#99" in line for line in _lines(host.panel))
 
 
 async def test_enemy_production_at_visible_cell_logs() -> None:
@@ -132,7 +132,7 @@ async def test_enemy_production_at_visible_cell_logs() -> None:
         host.panel.attach_to(bus, real_map, me)
         bus.publish(UnitPlacedEvent(unit_id=UnitId(99), at=Coord(3, 3)))
         await host.workers.wait_for_complete()
-        assert any("unit#99" in line for line in _lines(host.panel))
+        assert any("army#99" in line for line in _lines(host.panel))
 
 
 async def test_enemy_movement_at_unseen_cells_does_not_log() -> None:
@@ -149,7 +149,7 @@ async def test_enemy_movement_at_unseen_cells_does_not_log() -> None:
             UnitMovedEvent(unit_id=UnitId(99), from_=Coord(3, 3), to=Coord(2, 3)),
         )
         await host.workers.wait_for_complete()
-        assert not any("unit#99" in line for line in _lines(host.panel))
+        assert not any("#99" in line for line in _lines(host.panel))
 
 
 async def test_capture_of_own_city_always_logs() -> None:
@@ -221,3 +221,40 @@ async def test_game_ended_always_logs() -> None:
         bus.publish(GameEndedEvent(winner_id=me.id, final_turn=42))
         await host.workers.wait_for_complete()
         assert any("game over" in line for line in _lines(host.panel))
+
+
+async def test_destroyed_unit_keeps_its_kind_label_via_cache() -> None:
+    """A destruction event fires after the unit is off the map, but the log
+    still names its kind: the id->kind cache, primed at attach and topped up
+    on observation, survives the unit's removal (kinds are immutable)."""
+    me = Player(id=PlayerId(1), name="Me", is_ai=False, view=ViewMap())
+    enemy = Player(id=PlayerId(2), name="Enemy", is_ai=True, view=ViewMap())
+    real_map = _land_map(4, 4)
+    enemy_army = Army(UnitId(99), enemy, Coord(3, 3))
+    real_map.place_unit(enemy_army, Coord(3, 3))
+    me.view.visible.add(Coord(3, 3))
+    bus = EventBus()
+    host = _LogHost()
+    async with host.run_test():
+        # Cache is primed from the map at attach (army#99 present).
+        host.panel.attach_to(bus, real_map, me)
+        # Now the unit dies and is gone from the map before the event.
+        real_map.remove_unit(enemy_army)
+        bus.publish(UnitRemovedEvent(unit_id=UnitId(99), last_coord=Coord(3, 3)))
+        await host.workers.wait_for_complete()
+        assert any("army#99 destroyed" in line for line in _lines(host.panel))
+
+
+async def test_never_observed_unit_falls_back_to_generic_label() -> None:
+    """A unit the log never cached (never on the map, never moved) degrades
+    gracefully to 'unit#N' rather than crashing."""
+    me = Player(id=PlayerId(1), name="Me", is_ai=False, view=ViewMap())
+    real_map = _land_map(4, 4)
+    me.view.visible.add(Coord(2, 2))
+    bus = EventBus()
+    host = _LogHost()
+    async with host.run_test():
+        host.panel.attach_to(bus, real_map, me)
+        bus.publish(UnitRemovedEvent(unit_id=UnitId(404), last_coord=Coord(2, 2)))
+        await host.workers.wait_for_complete()
+        assert any("unit#404 destroyed" in line for line in _lines(host.panel))

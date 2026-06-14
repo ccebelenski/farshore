@@ -66,7 +66,29 @@ class LogPanel(VerticalScroll):
           - [magenta]...[/]    conflict events (unit destroyed; enemy captures own city)
           - [green]...[/]      own gains (you capture an enemy/neutral city)
         """
+        from empire.core.identity import UnitId
+
         log = self.query_one("#log", RichLog)
+
+        # id -> unit-kind label ("army", "destroyer", ...). A unit's kind is
+        # immutable, so once cached it's good forever — which lets the log
+        # name a unit even in the events that fire after it leaves the map
+        # (destroyed, disbanded, shelled). Primed from units present now;
+        # topped up whenever a unit is observed (placed / moved / damaged).
+        kind_by_id: dict[int, str] = {
+            int(u.id): u.kind.value for u in real_map.all_units()
+        }
+
+        def remember(uid: int) -> None:
+            if uid in kind_by_id:
+                return
+            unit = real_map.unit_by_id(UnitId(uid))
+            if unit is not None:
+                kind_by_id[uid] = unit.kind.value
+
+        def label(uid: int) -> str:
+            kind = kind_by_id.get(uid)
+            return f"{kind}#{uid}" if kind is not None else f"unit#{uid}"
 
         def write(line: str) -> None:
             log.write(line)
@@ -75,8 +97,6 @@ class LogPanel(VerticalScroll):
             return c in viewer.view.visible or c in viewer.view.remembered
 
         def own_unit(uid: int) -> bool:
-            from empire.core.identity import UnitId
-
             unit = real_map.unit_by_id(UnitId(uid))
             return unit is not None and unit.owner is viewer
 
@@ -84,20 +104,20 @@ class LogPanel(VerticalScroll):
             write(f"-- turn {e.turn} --")
 
         def on_placed(e: UnitPlacedEvent) -> None:
+            remember(int(e.unit_id))
             mine = own_unit(int(e.unit_id))
             if not (mine or seen(e.at)):
                 return
-            line = (
-                f"  produced unit#{int(e.unit_id)} at ({e.at.x},{e.at.y})"
-            )
+            line = f"  produced {label(int(e.unit_id))} at ({e.at.x},{e.at.y})"
             write(line if mine else f"[red]{line}[/red]")
 
         def on_moved(e: UnitMovedEvent) -> None:
+            remember(int(e.unit_id))
             mine = own_unit(int(e.unit_id))
             if not (mine or seen(e.from_) or seen(e.to)):
                 return
             line = (
-                f"  unit#{int(e.unit_id)} moved "
+                f"  {label(int(e.unit_id))} moved "
                 f"({e.from_.x},{e.from_.y})->({e.to.x},{e.to.y})"
             )
             write(line if mine else f"[red]{line}[/red]")
@@ -108,7 +128,7 @@ class LogPanel(VerticalScroll):
             if not seen(e.last_coord):
                 return
             write(
-                f"  [magenta]unit#{int(e.unit_id)} destroyed at "
+                f"  [magenta]{label(int(e.unit_id))} destroyed at "
                 f"({e.last_coord.x},{e.last_coord.y})[/magenta]",
             )
 
@@ -119,7 +139,7 @@ class LogPanel(VerticalScroll):
             if not seen(e.last_coord):
                 return
             write(
-                f"  [yellow]unit#{int(e.unit_id)} disbanded (no city room) at "
+                f"  [yellow]{label(int(e.unit_id))} disbanded (no city room) at "
                 f"({e.last_coord.x},{e.last_coord.y})[/yellow]",
             )
 
@@ -153,8 +173,10 @@ class LogPanel(VerticalScroll):
                 if city is not None
                 else f"city#{int(e.city_id)}"
             )
+            remember(int(e.target_id))  # damaging hits leave it on the map
             target = (
-                f"unit#{int(e.target_id)} at ({e.target_coord.x},{e.target_coord.y})"
+                f"{label(int(e.target_id))} at "
+                f"({e.target_coord.x},{e.target_coord.y})"
             )
             if e.destroyed:
                 write(f"  [magenta]{where} artillery DESTROYS {target}[/magenta]")
