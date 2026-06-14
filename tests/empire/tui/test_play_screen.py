@@ -316,8 +316,8 @@ async def test_capturing_a_city_prompts_for_production() -> None:
         await pilot.pause()
         assert city.owner is human  # captured
         assert isinstance(app.screen, ProductionModal)  # picker opened
-        # Pick an army to build there.
-        await pilot.press("enter")  # ProductionModal: first button = army
+        # Keyboard-first picker: Enter selects the cursor row, dismissing it.
+        await pilot.press("enter")
         await pilot.pause()
         assert isinstance(app.screen, PlayScreen)
 
@@ -341,3 +341,67 @@ async def test_free_cursor_hint_names_city_actions() -> None:
         screen._cursor = capital.coord  # pyright: ignore[reportPrivateUsage]
         hint = screen._cursor_context_hint()  # pyright: ignore[reportPrivateUsage]
         assert "'p'" in hint and "production" in hint
+
+
+async def test_production_modal_esc_dismisses_without_change() -> None:
+    """The '^p' picker is keyboard-first: Esc closes it (was hard to dismiss)
+    and leaves production unchanged."""
+    from empire.tui.modals import ProductionModal
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app()
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    capital = next(c for c in game.map.cities() if c.owner is human)
+    before = capital.production.building
+
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        await pilot.press("escape")  # free the cursor
+        screen._cursor = capital.coord  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("p")
+        await pilot.pause()
+        assert isinstance(app.screen, ProductionModal)
+        await pilot.press("escape")  # Esc must close it
+        await pilot.pause()
+        assert isinstance(app.screen, PlayScreen)
+        # Esc = cancel: the live production target is unchanged (any queued
+        # value is the current one — a no-op, same as the old modal's cancel).
+        assert capital.production.building == before
+        queued = screen._pending_production.get(  # pyright: ignore[reportPrivateUsage]
+            capital.id, before
+        )
+        assert queued == before
+
+
+async def test_production_modal_picks_a_kind() -> None:
+    """Down to a kind, Enter selects it, queued for end-of-turn."""
+    from empire.core.unit import UnitKind
+    from empire.tui.modals import ProductionModal
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app()
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    capital = next(c for c in game.map.cities() if c.owner is human)
+
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        await pilot.press("escape")
+        screen._cursor = capital.coord  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("p")
+        await pilot.pause()
+        modal = app.screen
+        assert isinstance(modal, ProductionModal)
+        # Cursor starts on the current kind; Enter selects it (a valid kind).
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, PlayScreen)
+        queued = screen._pending_production.get(capital.id)  # pyright: ignore[reportPrivateUsage]
+        assert queued is None or isinstance(queued, UnitKind)
