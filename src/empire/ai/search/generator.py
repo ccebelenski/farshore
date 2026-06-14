@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from empire.ai.search.naval import is_ocean_coastal
 from empire.ai.search.plan import Objective, Plan, Role, SurplusPolicy
-from empire.ai.vision import sea_frontier_cells
+from empire.ai.vision import frontier_cells, sea_frontier_cells
 from empire.contracts.world_view import WorldView
 from empire.core.coord import Coord
 from empire.core.ruleset import RuleSet
@@ -49,13 +49,32 @@ class CandidateGenerator:
         mode so a naval plan isn't out-scored by faster army production in a
         12-turn playout that can't see the invasion pay off)."""
         fist = self._fist_size(view.rules)
-        targets, overseas = self._partition_targets(view)
+        targets, overseas, has_land_frontier = self._assess(view)
         defenses = self._threatened_home_cities(view)
 
+        # No land-reachable target left → decide between going overseas and
+        # finishing the home continent, by priority:
+        #   1. a known coastal enemy/neutral city overseas → INVADE it now
+        #      (beats exploring empty home interior — we already found a prize);
+        #   2. home still has unexplored land → keep scouting it by land
+        #      (there may be more cities to capture);
+        #   3. nothing known overseas but open ocean remains → patrol-recon;
+        #   4. truly nothing reachable → hold.
+        # Naval-mode returns emit ONLY naval plans — an army-building hold would
+        # out-score a slower-building patrol/transport in the 12-turn playout.
         if not targets:
-            # Home land exhausted → go overseas (or hold if nothing's reachable).
-            naval = self._naval_plans(view, overseas)
-            return (*naval, Plan(objectives=(), surplus=SurplusPolicy.RESERVE))
+            invade = self._invade_plans(view, overseas)
+            if invade:
+                return tuple(invade)
+            if has_land_frontier:
+                return (
+                    Plan(objectives=(), surplus=SurplusPolicy.SCOUT),
+                    Plan(objectives=(), surplus=SurplusPolicy.RESERVE),
+                )
+            recon = self._recon_plans(view)
+            return tuple(recon) if recon else (
+                Plan(objectives=(), surplus=SurplusPolicy.RESERVE),
+            )
 
         plans: list[Plan] = []
 
@@ -141,14 +160,17 @@ class CandidateGenerator:
             return rules.city_artillery_range + 1
         return 3
 
-    def _partition_targets(
+    def _assess(
         self, view: WorldView
-    ) -> tuple[list[Coord], list[Coord]]:
-        """Split known capturable cities into (land-reachable, overseas),
-        each nearest-to-home first. Land-reachable = an army can walk there
-        from a home city (same landmass); overseas = everything else (needs
-        a transport). Without naval the AI ignores overseas targets entirely,
-        which is why it stalled once its continent was won."""
+    ) -> tuple[list[Coord], list[Coord], bool]:
+        """Assess the land situation from one land flood out of a home city:
+        (land-reachable targets, overseas targets, has-reachable-land-frontier).
+
+        Land-reachable = an army can walk there (same landmass); overseas =
+        everything else (needs a transport). The frontier flag is whether any
+        unexplored-land edge is still reachable on foot — i.e. the home
+        continent isn't fully scouted yet, so there may be more cities to
+        find before going overseas."""
         from empire.pathfinding.cost import ARMY
         from empire.pathfinding.distance_field import DistanceField, PassabilityGrid
 
@@ -159,37 +181,42 @@ class CandidateGenerator:
 
         own = view.own_cities
         if not own:
-            return [], known
+            return [], known, False
         grid = PassabilityGrid(view.real_map(), ARMY, view.own_player.view)
         reach = DistanceField(own[0].coord, grid)
         land: list[Coord] = []
         overseas: list[Coord] = []
         for t in known:
             (land if reach.steps_to(t) is not None else overseas).append(t)
-        return land, overseas
+        has_frontier = any(
+            reach.steps_to(c) is not None for c in frontier_cells(view)
+        )
+        return land, overseas, has_frontier
 
-    def _naval_plans(self, view: WorldView, overseas: list[Coord]) -> list[Plan]:
-        """Naval-mode candidates (home land won). Strategically committed by
-        the generator: if a coastal overseas target is known, invade it;
-        otherwise, if there's unexplored ocean, recon with patrols. (Not
-        both — emitting recon alongside invade lets the faster-building patrol
-        out-score the invasion in the playout, so the generator picks one.)"""
+    def _invade_plans(self, view: WorldView, overseas: list[Coord]) -> list[Plan]:
+        """One INVADE plan per nearest known coastal overseas city (empty if
+        none is known). Builds a transport until one exists, then armies to
+        fill it."""
         coastal = [t for t in overseas if is_ocean_coastal(view, t)]
-        if coastal:
-            have_transport = any(
-                u.kind is UnitKind.TRANSPORT for u in view.own_units
+        if not coastal:
+            return []
+        have_transport = any(
+            u.kind is UnitKind.TRANSPORT for u in view.own_units
+        )
+        prod = UnitKind.ARMY if have_transport else UnitKind.TRANSPORT
+        return [
+            Plan(
+                objectives=(Objective(t, Role.INVADE, INVADE_STRENGTH),),
+                surplus=SurplusPolicy.RESERVE,
+                production=prod,
             )
-            prod = UnitKind.ARMY if have_transport else UnitKind.TRANSPORT
-            return [
-                Plan(
-                    objectives=(Objective(t, Role.INVADE, INVADE_STRENGTH),),
-                    surplus=SurplusPolicy.RESERVE,
-                    production=prod,
-                )
-                for t in coastal[:TARGET_FAN]
-            ]
+            for t in coastal[:TARGET_FAN]
+        ]
+
+    def _recon_plans(self, view: WorldView) -> list[Plan]:
+        """Patrol-recon the open ocean to discover landmasses / coastal
+        targets (empty if there's no unexplored sea)."""
         if sea_frontier_cells(view):
-            # Explore the ocean to find landmasses / coastal targets.
             return [
                 Plan(
                     objectives=(),
