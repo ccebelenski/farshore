@@ -405,3 +405,104 @@ async def test_production_modal_picks_a_kind() -> None:
         assert isinstance(app.screen, PlayScreen)
         queued = screen._pending_production.get(capital.id)  # pyright: ignore[reportPrivateUsage]
         assert queued is None or isinstance(queued, UnitKind)
+
+
+async def test_deferring_all_units_does_not_auto_end_the_turn() -> None:
+    """Sentrying/skipping every unit must NOT auto-end the turn (they're
+    deferred, not finished) — so the player can still wake them. Was the
+    'wake doesn't work on multiple units' bug: the turn ended in 0.4s."""
+    from empire.core.coord import Coord
+    from empire.core.identity import UnitId
+    from empire.core.tile import TerrainKind
+    from empire.core.unit import Army
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app(auto_turn=True)  # the shipped default
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    cap = next(c for c in game.map.cities() if c.owner is human)
+    spots = []
+    for dx in range(-4, 5):
+        for dy in range(-4, 5):
+            c = Coord(cap.coord.x + dx, cap.coord.y + dy)
+            if (
+                game.map.in_bounds(c)
+                and game.map.terrain_at(c) is TerrainKind.LAND
+                and not game.map.units_at(c)
+            ):
+                spots.append(c)
+        if len(spots) >= 2:
+            break
+    a, b = spots[0], spots[1]
+    army_a = Army(UnitId(811), human, a)
+    game.map.place_unit(army_a, a)
+    army_b = Army(UnitId(812), human, b)
+    game.map.place_unit(army_b, b)
+
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        turn0 = game.turn
+        # Sentry both via free-select.
+        screen._cursor = a  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("u", "full_stop")
+        screen._cursor = b  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("u", "full_stop")
+        # Well past the 0.4s auto-end beat: turn must still be open.
+        await pilot.pause(0.8)
+        assert game.turn == turn0, "deferred units should hold the turn open"
+        # And both can be woken back into the turn with full moves.
+        screen._cursor = a  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("u", "w")
+        screen._cursor = b  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("u", "w")
+        await pilot.pause()
+        assert army_a.standing_order is None and army_b.standing_order is None
+        needs = {int(u.id) for u in screen._units_needing_orders()}  # pyright: ignore[reportPrivateUsage]
+        assert needs == {811, 812}
+
+
+async def test_skip_defers_without_forfeiting_moves() -> None:
+    """'n' skip is a defer, not a forfeit: the unit keeps its moves and can
+    be woken/revisited to act this turn."""
+    from empire.core.coord import Coord
+    from empire.core.identity import UnitId
+    from empire.core.tile import TerrainKind
+    from empire.core.unit import Army
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app(auto_turn=False)
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    cap = next(c for c in game.map.cities() if c.owner is human)
+    spot = next(
+        Coord(cap.coord.x + dx, cap.coord.y)
+        for dx in range(1, 6)
+        if game.map.in_bounds(Coord(cap.coord.x + dx, cap.coord.y))
+        and game.map.terrain_at(Coord(cap.coord.x + dx, cap.coord.y))
+        is TerrainKind.LAND
+        and not game.map.units_at(Coord(cap.coord.x + dx, cap.coord.y))
+    )
+    army = Army(UnitId(813), human, spot)
+    game.map.place_unit(army, spot)
+
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        screen._cursor = spot  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("u", "n")  # select then skip (defer)
+        await pilot.pause()
+        # Moves not forfeited.
+        assert screen._moves_used.get(army.id, 0) == 0  # pyright: ignore[reportPrivateUsage]
+        # Revisit and it's actionable again.
+        screen._cursor = spot  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("u")
+        await pilot.pause()
+        assert screen._selected_unit_id == army.id  # pyright: ignore[reportPrivateUsage]
+        assert army.id in {
+            u.id for u in screen._units_needing_orders()  # pyright: ignore[reportPrivateUsage]
+        }

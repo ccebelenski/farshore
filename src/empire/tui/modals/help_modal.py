@@ -24,12 +24,13 @@ Cursor / movement (no unit selected: moves cursor):
 
 Unit / city:
   u                select own unit at cursor
-  n                skip this unit (forfeit its remaining moves)
+  n                skip (defer) this unit — keeps its moves, revisit later
   Tab              peek next unit (current keeps its moves)
   Shift+N          previous unit (un-handles it for revision)
   p                set production for own city at cursor
   k                set a city's default order for the units it builds
-  .                persistent sentry — wakes on enemy in scan range
+  .                sentry (defer) — wakes on enemy; 'w' to wake now
+  w                wake a sentried/skipped unit back into this turn
   d                set heading — steps NOW, then walks every turn
   g                go-to target — Enter steps now, then walks
   o                unload — next direction lands the carrier's cargo
