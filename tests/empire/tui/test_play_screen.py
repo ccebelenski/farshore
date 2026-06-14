@@ -407,17 +407,19 @@ async def test_production_modal_picks_a_kind() -> None:
         assert queued is None or isinstance(queued, UnitKind)
 
 
-async def test_deferring_all_units_does_not_auto_end_the_turn() -> None:
-    """Sentrying/skipping every unit must NOT auto-end the turn (they're
-    deferred, not finished) — so the player can still wake them. Was the
-    'wake doesn't work on multiple units' bug: the turn ended in 0.4s."""
+async def test_wake_via_cursor_without_selecting_works_for_multiple() -> None:
+    """The exact playtest repro: wake by pointing the cursor at a sentried
+    unit and pressing 'w' WITHOUT selecting it first — for several units in a
+    row. Each must actually wake (it stayed sentried before, because wake
+    only acted on the *selected* unit)."""
     from empire.core.coord import Coord
     from empire.core.identity import UnitId
+    from empire.core.standing_order import Sentry
     from empire.core.tile import TerrainKind
     from empire.core.unit import Army
     from empire.tui.screens.play_screen import PlayScreen
 
-    app, _, _ = _build_app(auto_turn=True)  # the shipped default
+    app, _, _ = _build_app(auto_turn=False)
     assert app.game is not None
     game = app.game
     human = next(p for p in game.players if not p.is_ai)
@@ -439,29 +441,61 @@ async def test_deferring_all_units_does_not_auto_end_the_turn() -> None:
     game.map.place_unit(army_a, a)
     army_b = Army(UnitId(812), human, b)
     game.map.place_unit(army_b, b)
+    # Both already sentried (as if from a previous turn).
+    army_a.standing_order = Sentry()
+    army_b.standing_order = Sentry()
+
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        # Point-and-wake, no 'u' select, for both in a row.
+        screen._cursor = a  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("w")
+        screen._cursor = b  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("w")
+        await pilot.pause()
+        assert army_a.standing_order is None, "cursor-wake left A sentried"
+        assert army_b.standing_order is None, "cursor-wake left B sentried"
+        # Both are back in the order queue with full moves this turn.
+        needs = {int(u.id) for u in screen._units_needing_orders()}  # pyright: ignore[reportPrivateUsage]
+        assert needs == {811, 812}
+
+
+async def test_sentrying_everything_still_auto_ends_the_turn() -> None:
+    """Auto-end must still fire when every unit is sentried — sentry defers
+    the unit but does not stop the turn from completing (user's model)."""
+    from empire.core.coord import Coord
+    from empire.core.identity import UnitId
+    from empire.core.tile import TerrainKind
+    from empire.core.unit import Army
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app(auto_turn=True)  # the shipped default
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    cap = next(c for c in game.map.cities() if c.owner is human)
+    spot = next(
+        Coord(cap.coord.x + dx, cap.coord.y)
+        for dx in range(1, 6)
+        if game.map.in_bounds(Coord(cap.coord.x + dx, cap.coord.y))
+        and game.map.terrain_at(Coord(cap.coord.x + dx, cap.coord.y))
+        is TerrainKind.LAND
+        and not game.map.units_at(Coord(cap.coord.x + dx, cap.coord.y))
+    )
+    army = Army(UnitId(814), human, spot)
+    game.map.place_unit(army, spot)
 
     async with app.run_test(size=(80, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, PlayScreen)
         turn0 = game.turn
-        # Sentry both via free-select.
-        screen._cursor = a  # pyright: ignore[reportPrivateUsage]
-        await pilot.press("u", "full_stop")
-        screen._cursor = b  # pyright: ignore[reportPrivateUsage]
-        await pilot.press("u", "full_stop")
-        # Well past the 0.4s auto-end beat: turn must still be open.
-        await pilot.pause(0.8)
-        assert game.turn == turn0, "deferred units should hold the turn open"
-        # And both can be woken back into the turn with full moves.
-        screen._cursor = a  # pyright: ignore[reportPrivateUsage]
-        await pilot.press("u", "w")
-        screen._cursor = b  # pyright: ignore[reportPrivateUsage]
-        await pilot.press("u", "w")
-        await pilot.pause()
-        assert army_a.standing_order is None and army_b.standing_order is None
-        needs = {int(u.id) for u in screen._units_needing_orders()}  # pyright: ignore[reportPrivateUsage]
-        assert needs == {811, 812}
+        screen._cursor = spot  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("u", "full_stop")  # sentry the only unit
+        await pilot.pause(0.8)  # past the auto-end beat
+        assert game.turn > turn0, "sentrying everything should still auto-end"
 
 
 async def test_skip_defers_without_forfeiting_moves() -> None:

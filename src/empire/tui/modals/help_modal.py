@@ -30,7 +30,7 @@ Unit / city:
   p                set production for own city at cursor
   k                set a city's default order for the units it builds
   .                sentry (defer) — wakes on enemy; 'w' to wake now
-  w                wake a sentried/skipped unit back into this turn
+  w                wake the unit under the cursor (or selected) into this turn
   d                set heading — steps NOW, then walks every turn
   g                go-to target — Enter steps now, then walks
   l                load — carrier waits for cargo, wakes when full

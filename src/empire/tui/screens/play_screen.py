@@ -181,15 +181,12 @@ class PlayScreen(Screen[None]):
         # direction-key presses (each press = one immediate step).
         self._moves_used: dict[UnitId, int] = {}
         self._pending_production: dict[CityId, UnitKind | None] = {}
-        # Set of unit IDs the auto-cycle should skip this turn (genuinely
-        # done — moved out, dead, loaded — OR deferred; see _deferred).
+        # Set of unit IDs the auto-cycle should skip this turn (moved out,
+        # dead, loaded, sentried, or skipped). A sentry/skip is reversible
+        # until end-turn and does NOT consume the unit's move: waking or
+        # revisiting it restores its full move for this turn (playtest model,
+        # 2026-06). Auto-end still fires once the queue empties.
         self._handled: set[UnitId] = set()
-        # Units *deferred* this turn (sentried or skipped) — "passed by,"
-        # not finished. They keep their unspent moves and can be woken back
-        # into the turn, and — crucially — they hold the turn open: auto-end
-        # won't fire while any deferral is live, so deferring everything
-        # never ends the turn out from under the player (playtest, 2026-06).
-        self._deferred: set[UnitId] = set()
         # Next direction key triggers a heading-set instead of stepping.
         self._awaiting_heading: bool = False
         # Cursor mode is "pick a destination for go-to" while True.
@@ -369,7 +366,6 @@ class PlayScreen(Screen[None]):
                 and cargo_n >= cap
             ):
                 carrier.standing_order = None
-                self._deferred.discard(carrier.id)
                 self._handled.discard(carrier.id)
                 self._hint = f"{label} fully loaded ({cargo_n}/{cap}) — woken"
             self._advance_to_next_unit()
@@ -507,9 +503,8 @@ class PlayScreen(Screen[None]):
             if u.owner is self._human:
                 self._selected_unit_id = u.id
                 # Un-handle so direction keys apply moves again (if any
-                # budget remains); taking control ends any deferral.
+                # budget remains).
                 self._handled.discard(u.id)
-                self._deferred.discard(u.id)
                 remaining = u.moves_this_turn() - self._moves_used.get(u.id, 0)
                 self._hint = (
                     f"free-select: {remaining} move(s) left; "
@@ -528,7 +523,6 @@ class PlayScreen(Screen[None]):
         holds the turn open against auto-end."""
         if self._selected_unit_id is not None:
             self._handled.add(self._selected_unit_id)
-            self._deferred.add(self._selected_unit_id)
         self._advance_to_next_unit()
         self._refresh_view()
 
@@ -576,9 +570,9 @@ class PlayScreen(Screen[None]):
             )
             target = candidates[(idx - 1) % len(candidates)]
         self._select_and_center(target)
-        # The user is revisiting; un-mark "handled"/deferred so new orders count.
+        # The user is revisiting; un-mark "handled" so any new orders count.
+        # (sentry/skip didn't consume the move, so it's fully restorable.)
         self._handled.discard(target.id)
-        self._deferred.discard(target.id)
         self._refresh_view()
 
     def action_deselect(self) -> None:
@@ -607,7 +601,6 @@ class PlayScreen(Screen[None]):
             return
         uid = self._selected_unit_id
         self._handled.add(uid)
-        self._deferred.add(uid)  # deferred, not finished — holds the turn open
         unit = self._game.map.unit_by_id(uid)
         if unit is not None:
             unit.standing_order = Sentry()
@@ -686,8 +679,7 @@ class PlayScreen(Screen[None]):
             return
 
         carrier.standing_order = Loading()
-        self._handled.add(carrier.id)
-        self._deferred.add(carrier.id)  # waiting, not finished — holds the turn
+        self._handled.add(carrier.id)  # skipped by the cycle; waits across turns
         note = f"loaded {snapped} adjacent, " if snapped else ""
         self._hint = (
             f"loading mode: {note}{len(carrier.cargo)}/{cap} aboard — "
@@ -709,7 +701,6 @@ class PlayScreen(Screen[None]):
                     continue
                 self._game.map.load_cargo(carrier, cargo)
                 self._handled.discard(cargo.id)  # it's aboard now, off the cycle
-                self._deferred.discard(cargo.id)
                 loaded += 1
                 if len(carrier.cargo) >= carrier.effective_capacity():
                     return loaded
@@ -780,24 +771,28 @@ class PlayScreen(Screen[None]):
         self._refresh_view()
 
     def action_wake(self) -> None:
-        """Clear any standing order on the selected unit so it re-enters auto-cycle."""
-        if self._selected_unit_id is None:
-            return
-        uid = self._selected_unit_id
-        unit = self._game.map.unit_by_id(uid)
-        if unit is not None:
-            unit.standing_order = None
-        self._pending_orders.pop(uid, None)  # also cancel an order set this turn
-        self._handled.discard(uid)
-        self._deferred.discard(uid)  # back in play; no longer holding the turn
-        # A woken unit that never actually moved gets its full turn back —
-        # deferral spends no moves, so _moves_used is already 0 for it.
-        moves_left = (
-            unit.moves_this_turn() - self._moves_used.get(uid, 0)
-            if unit is not None
-            else 0
+        """Wake the own unit under the CURSOR (point-and-wake), or the
+        selected unit if the cursor isn't on one. Cursor-first is what makes
+        waking several units work: move cursor, 'w', move cursor, 'w' — no
+        select step, so the cursor keeps moving (playtest: waking by hovering
+        did nothing, because wake only acted on the selected unit)."""
+        unit = next(
+            (u for u in self._game.map.units_at(self._cursor) if u.owner is self._human),
+            None,
         )
-        self._hint = f"woke unit — {moves_left} move(s) this turn"
+        if unit is None:
+            unit = self._selected_unit()
+        if unit is None:
+            self._hint = "no unit here to wake — put the cursor on one"
+            self._refresh_view()
+            return
+        unit.standing_order = None
+        self._pending_orders.pop(unit.id, None)  # cancel an order set this turn
+        self._handled.discard(unit.id)
+        # A woken unit that never actually moved gets its full turn back —
+        # sentry/skip spend no moves, so _moves_used is already 0 for it.
+        moves_left = unit.moves_this_turn() - self._moves_used.get(unit.id, 0)
+        self._hint = f"woke {unit.kind.value}#{int(unit.id)} — {moves_left} move(s)"
         self._refresh_view()
 
     def action_confirm(self) -> None:
@@ -997,7 +992,6 @@ class PlayScreen(Screen[None]):
         self._moves_used.clear()
         self._selected_unit_id = None
         self._handled.clear()
-        self._deferred.clear()
         self._awaiting_heading = False
         self._awaiting_goto_target = False
         self._awaiting_unload = False
@@ -1069,7 +1063,6 @@ class PlayScreen(Screen[None]):
         # cursor may be out of bounds for a differently-shaped map.
         self._selected_unit_id = None
         self._handled.clear()
-        self._deferred.clear()
         self._moves_used.clear()
         self._awaiting_heading = False
         self._awaiting_goto_target = False
@@ -1157,17 +1150,8 @@ class PlayScreen(Screen[None]):
         candidates = self._units_needing_orders()
         if not candidates:
             self._selected_unit_id = None
-            deferred = self._live_deferred_count()
-            if deferred:
-                # Deferred (sentried/skipped) units hold the turn open — they
-                # were passed by, not finished, and the player may still wake
-                # them. Never auto-end here; require an explicit 'e'.
-                self._hint = (
-                    f"{deferred} unit(s) sentried/skipped — 'w' to wake, "
-                    "or 'e' to end the turn"
-                )
-            elif self._auto_turn and not self._game.is_over():
-                self._hint = "all units moved — ending turn (auto; 'a' toggles)"
+            if self._auto_turn and not self._game.is_over():
+                self._hint = "all units handled — ending turn (auto; 'a' toggles)"
                 # A visible beat so the player sees the world before it moves.
                 self.set_timer(0.4, self._auto_end_turn)
             else:
@@ -1202,29 +1186,17 @@ class PlayScreen(Screen[None]):
 
     def _auto_end_turn(self) -> None:
         """Timer callback for auto-turn. Re-checks the world — the player may
-        have toggled auto off, selected a unit, woken a deferral, or ended
-        the turn manually while the timer was pending."""
+        have toggled auto off, selected a unit, woken a sentried unit (which
+        re-enters the order queue), or ended the turn manually while the
+        timer was pending."""
         if (
             not self._auto_turn
             or self._turn_running
             or self._game.is_over()
             or self._units_needing_orders()
-            or self._live_deferred_count()  # deferrals hold the turn open
         ):
             return
         self.action_end_turn()
-
-    def _live_deferred_count(self) -> int:
-        """Deferred units still on the board and owned — stale ids (a deferred
-        unit that since died) don't count. Drives the 'hold the turn open'
-        rule so sentrying/skipping everything never auto-ends the turn."""
-        live = {
-            int(u.id)
-            for u in self._game.map.board_units()
-            if u.owner is self._human
-        }
-        self._deferred &= live  # prune dead/gone ids
-        return len(self._deferred)
 
     def _select_and_center(self, unit: Unit) -> None:
         self._selected_unit_id = unit.id
