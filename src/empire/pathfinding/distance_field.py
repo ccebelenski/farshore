@@ -68,7 +68,12 @@ class PassabilityGrid:
         for y in range(self.height):
             for x in range(self.width):
                 c = Coord(x, y)
-                if view is not None and not view.seen(c):
+                if not real_map.tile(c).on_board:
+                    # The 1-cell border ring is water terrain but unwalkable —
+                    # routing a unit there yields steps the engine rejects as
+                    # off-board (it freezes ships sailing near the map edge).
+                    flags.append(False)
+                elif view is not None and not view.seen(c):
                     flags.append(unknown_passable)
                 else:
                     flags.append(profile.cost_for(real_map.terrain_at(c)) is not None)

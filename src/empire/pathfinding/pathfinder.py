@@ -93,6 +93,8 @@ class Pathfinder(ABC):
             for neighbor in current.neighbors():
                 if not real_map.in_bounds(neighbor):
                     continue
+                if not real_map.tile(neighbor).on_board:
+                    continue  # the unwalkable 1-cell border ring
 
                 # Determine cell cost.
                 if view is not None and not view.seen(neighbor):
