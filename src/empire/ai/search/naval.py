@@ -30,7 +30,7 @@ from empire.pathfinding.cost import SEA as SEA_COST
 from empire.pathfinding.distance_field import DistanceField, PassabilityGrid
 
 # Sea unit kinds (everything that lives on water).
-_SEA_KINDS = frozenset(
+SEA_KINDS = frozenset(
     {
         UnitKind.PATROL,
         UnitKind.DESTROYER,
@@ -40,6 +40,7 @@ _SEA_KINDS = frozenset(
         UnitKind.BATTLESHIP,
     }
 )
+_SEA_KINDS = SEA_KINDS  # internal alias
 
 
 class NavalResult:

@@ -30,7 +30,7 @@ follower for each candidate playout and for each committed turn.
 
 from __future__ import annotations
 
-from empire.ai.search.naval import plan_naval
+from empire.ai.search.naval import SEA_KINDS, is_ocean_coastal, plan_naval
 from empire.ai.search.plan import Objective, Plan, Role, SurplusPolicy
 from empire.ai.strategic.behaviors.base import idle_step
 from empire.ai.vision import frontier_cells
@@ -61,13 +61,20 @@ class PlanFollower:
 
     def plan_turn(self, view: WorldView) -> TurnPlan:
         moves, unloads = self._decide(view)
-        production = tuple(
-            ProductionOrder(city_id=c.id, target=self._plan.production)
-            for c in view.own_cities
-            if c.production.building is None
-        )
+        # Ships can only launch from a coastal city; building one inland just
+        # strands it. When the plan calls for a sea unit, build it only at
+        # coastal cities and make cargo armies at the inland ones instead.
+        sea_prod = self._plan.production in SEA_KINDS
+        production: list[ProductionOrder] = []
+        for c in view.own_cities:
+            if c.production.building is not None:
+                continue
+            target = self._plan.production
+            if sea_prod and not is_ocean_coastal(view, c.coord):
+                target = UnitKind.ARMY
+            production.append(ProductionOrder(city_id=c.id, target=target))
         return TurnPlan(
-            production_orders=production,
+            production_orders=tuple(production),
             moves=tuple(m for m in moves.values() if m.path),
             unloads=tuple(unloads),
         )
