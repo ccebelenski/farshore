@@ -23,6 +23,7 @@ class Role(Enum):
 
     ASSAULT = "assault"  # march onto the target (combat/capture on entry)
     DEFEND = "defend"  # hold adjacent to the target city (§5.4: never on it)
+    INVADE = "invade"  # ferry armies by transport and storm an overseas city
 
 
 class SurplusPolicy(Enum):

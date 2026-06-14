@@ -14,10 +14,13 @@ playout.
 
 from __future__ import annotations
 
+from empire.ai.search.naval import is_ocean_coastal
 from empire.ai.search.plan import Objective, Plan, Role, SurplusPolicy
+from empire.ai.vision import sea_frontier_cells
 from empire.contracts.world_view import WorldView
 from empire.core.coord import Coord
 from empire.core.ruleset import RuleSet
+from empire.core.unit import UnitKind
 
 # How many nearest targets get dedicated assault candidates.
 TARGET_FAN = 4
@@ -27,6 +30,8 @@ ALL_OUT_FAN = 6
 DEFEND_STRENGTH = 2
 # An enemy unit within this range of a home city marks it threatened.
 THREAT_RANGE = 6
+# Strength a single amphibious operation commits.
+INVADE_STRENGTH = 3
 
 
 class CandidateGenerator:
@@ -35,10 +40,22 @@ class CandidateGenerator:
     def generate(self, view: WorldView) -> tuple[Plan, ...]:
         """Candidates in a stable, deterministic order (ties in playout score
         resolve toward the earlier candidate, so order encodes a mild prior:
-        aggressive single-front plans first, passivity last)."""
+        aggressive single-front plans first, passivity last).
+
+        Strategy is sequential: fight the home continent first (land plans),
+        and only when no land-reachable target remains switch to naval —
+        recon the sea, then invade discovered overseas cities. The switch is
+        a generator decision (it drops the army-building baselines in naval
+        mode so a naval plan isn't out-scored by faster army production in a
+        12-turn playout that can't see the invasion pay off)."""
         fist = self._fist_size(view.rules)
-        targets = self._ranked_targets(view)
+        targets, overseas = self._partition_targets(view)
         defenses = self._threatened_home_cities(view)
+
+        if not targets:
+            # Home land exhausted → go overseas (or hold if nothing's reachable).
+            naval = self._naval_plans(view, overseas)
+            return (*naval, Plan(objectives=(), surplus=SurplusPolicy.RESERVE))
 
         plans: list[Plan] = []
 
@@ -124,14 +141,63 @@ class CandidateGenerator:
             return rules.city_artillery_range + 1
         return 3
 
-    def _ranked_targets(self, view: WorldView) -> list[Coord]:
-        """Capturable cities, nearest-to-home first (enemy and neutral alike —
-        the playout, not a weight table, decides which is worth more)."""
+    def _partition_targets(
+        self, view: WorldView
+    ) -> tuple[list[Coord], list[Coord]]:
+        """Split known capturable cities into (land-reachable, overseas),
+        each nearest-to-home first. Land-reachable = an army can walk there
+        from a home city (same landmass); overseas = everything else (needs
+        a transport). Without naval the AI ignores overseas targets entirely,
+        which is why it stalled once its continent was won."""
+        from empire.pathfinding.cost import ARMY
+        from empire.pathfinding.distance_field import DistanceField, PassabilityGrid
+
         home = self._home_centroid(view)
-        targets = [c.coord for c in view.known_enemy_cities]
-        targets += [c.coord for c in view.neutral_cities]
-        targets.sort(key=lambda c: (c.chebyshev_to(home), c.y, c.x))
-        return targets
+        known = [c.coord for c in view.known_enemy_cities]
+        known += [c.coord for c in view.neutral_cities]
+        known.sort(key=lambda c: (c.chebyshev_to(home), c.y, c.x))
+
+        own = view.own_cities
+        if not own:
+            return [], known
+        grid = PassabilityGrid(view.real_map(), ARMY, view.own_player.view)
+        reach = DistanceField(own[0].coord, grid)
+        land: list[Coord] = []
+        overseas: list[Coord] = []
+        for t in known:
+            (land if reach.steps_to(t) is not None else overseas).append(t)
+        return land, overseas
+
+    def _naval_plans(self, view: WorldView, overseas: list[Coord]) -> list[Plan]:
+        """Naval-mode candidates (home land won). Strategically committed by
+        the generator: if a coastal overseas target is known, invade it;
+        otherwise, if there's unexplored ocean, recon with patrols. (Not
+        both — emitting recon alongside invade lets the faster-building patrol
+        out-score the invasion in the playout, so the generator picks one.)"""
+        coastal = [t for t in overseas if is_ocean_coastal(view, t)]
+        if coastal:
+            have_transport = any(
+                u.kind is UnitKind.TRANSPORT for u in view.own_units
+            )
+            prod = UnitKind.ARMY if have_transport else UnitKind.TRANSPORT
+            return [
+                Plan(
+                    objectives=(Objective(t, Role.INVADE, INVADE_STRENGTH),),
+                    surplus=SurplusPolicy.RESERVE,
+                    production=prod,
+                )
+                for t in coastal[:TARGET_FAN]
+            ]
+        if sea_frontier_cells(view):
+            # Explore the ocean to find landmasses / coastal targets.
+            return [
+                Plan(
+                    objectives=(),
+                    surplus=SurplusPolicy.SCOUT,
+                    production=UnitKind.PATROL,
+                )
+            ]
+        return []
 
     @staticmethod
     def _home_centroid(view: WorldView) -> Coord:

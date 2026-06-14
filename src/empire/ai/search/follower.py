@@ -30,11 +30,12 @@ follower for each candidate playout and for each committed turn.
 
 from __future__ import annotations
 
+from empire.ai.search.naval import plan_naval
 from empire.ai.search.plan import Objective, Plan, Role, SurplusPolicy
 from empire.ai.strategic.behaviors.base import idle_step
 from empire.ai.vision import frontier_cells
 from empire.contracts.surprise import Surprise
-from empire.contracts.turn_plan import ProductionOrder, TurnPlan, UnitMove
+from empire.contracts.turn_plan import ProductionOrder, TurnPlan, UnitMove, UnloadOrder
 from empire.contracts.world_view import WorldView
 from empire.core.coord import Coord
 from empire.core.identity import UnitId
@@ -59,28 +60,47 @@ class PlanFollower:
     # ---- AIController ------------------------------------------------------
 
     def plan_turn(self, view: WorldView) -> TurnPlan:
-        moves = [m for m in self._decide_all(view).values() if m.path]
+        moves, unloads = self._decide(view)
         production = tuple(
             ProductionOrder(city_id=c.id, target=self._plan.production)
             for c in view.own_cities
             if c.production.building is None
         )
-        return TurnPlan(production_orders=production, moves=tuple(moves))
+        return TurnPlan(
+            production_orders=production,
+            moves=tuple(m for m in moves.values() if m.path),
+            unloads=tuple(unloads),
+        )
 
     def revise_move(
         self, unit_id: UnitId, surprise: Surprise, view: WorldView
     ) -> UnitMove:
         del surprise  # plan-driven: re-decide against the live view
-        return self._decide_all(view).get(unit_id, UnitMove(unit_id=unit_id))
+        moves, _ = self._decide(view)
+        return moves.get(unit_id, UnitMove(unit_id=unit_id))
 
     # ---- decision core -----------------------------------------------------
 
-    def _decide_all(self, view: WorldView) -> dict[UnitId, UnitMove]:
-        """Every army's move this turn, by deterministic re-assignment."""
+    def _decide(
+        self, view: WorldView
+    ) -> tuple[dict[UnitId, UnitMove], list[UnloadOrder]]:
+        """All unit moves + amphibious unloads this turn. Naval runs first
+        and claims invasion-cargo armies; the land logic handles the rest."""
+        naval = plan_naval(view, self._plan)
+        land = self._decide_land(view, naval.claimed_armies)
+        return {**land, **naval.moves}, naval.unloads
+
+    def _decide_land(
+        self, view: WorldView, claimed: set[UnitId]
+    ) -> dict[UnitId, UnitMove]:
+        """Every (non-cargo) army's move this turn, by deterministic
+        re-assignment. `claimed` armies are committed as naval cargo."""
         armies = [
             u
             for u in view.own_units
-            if u.kind is UnitKind.ARMY and u.carried_by is None
+            if u.kind is UnitKind.ARMY
+            and u.carried_by is None
+            and u.id not in claimed
         ]
         if not armies:
             return {}

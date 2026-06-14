@@ -20,10 +20,21 @@ def terrain_for_view(view: WorldView, c: Coord) -> TerrainKind | None:
 
 
 def frontier_cells(view: WorldView) -> frozenset[Coord]:
-    """All frontier cells on the board: seen, land-walkable, with at least
-    one unseen on-board 8-neighbor — the places exploration pushes into.
-    One sweep per view; cache the result per planning view, not per unit.
-    """
+    """Land frontier: seen land-walkable cells with at least one unseen
+    on-board 8-neighbor — where land exploration pushes into. One sweep per
+    view; cache per planning view, not per unit."""
+    return _frontier(view, want_water=False)
+
+
+def sea_frontier_cells(view: WorldView) -> frozenset[Coord]:
+    """Sea frontier: seen WATER cells with at least one unseen on-board
+    8-neighbor — where a ship sails to reveal more of the map (and, by the
+    Phase-15.9 value gradient, the lower-prior side of the frontier: open
+    ocean rather than land likely to hold cities)."""
+    return _frontier(view, want_water=True)
+
+
+def _frontier(view: WorldView, *, want_water: bool) -> frozenset[Coord]:
     seen = view.own_player.view.seen
     real_map = view.real_map()
     results: set[Coord] = set()
@@ -33,7 +44,10 @@ def frontier_cells(view: WorldView) -> frozenset[Coord]:
             if not seen(c):
                 continue
             terrain = terrain_for_view(view, c)
-            if terrain is None or terrain is TerrainKind.WATER:
+            if terrain is None:
+                continue
+            is_water = terrain is TerrainKind.WATER
+            if is_water != want_water:
                 continue
             for n in c.neighbors():
                 if view.in_bounds(n) and not seen(n):
