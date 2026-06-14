@@ -109,13 +109,19 @@ def _run_operation(
     want = min(transport.effective_capacity(), _OP_FORCE)
     aboard = len(transport.cargo)
 
-    # Armies that could still reach the transport to board (free, land-reachable).
+    # Armies that could still reach the transport to board (free,
+    # land-reachable). Exclude any army already on the target's landmass — a
+    # transport loitering off the destination coast floods one step inland and
+    # would otherwise re-claim the very troops it just landed, pulling them
+    # back aboard instead of letting them assault.
+    target_land = DistanceField(target, land_grid)
     field_to_transport = DistanceField(transport.coord, land_grid)
     boarders = sorted(
         (
             (steps, int(a.id), a)
             for a in armies
             if a.id not in result.claimed_armies
+            and target_land.steps_to(a.coord) is None
             and (steps := field_to_transport.steps_to(a.coord)) is not None
         ),
     )
@@ -125,28 +131,98 @@ def _run_operation(
     # a third army that doesn't exist).
     loaded_enough = aboard >= want or (aboard >= 1 and not boarders)
     if loaded_enough:
-        if transport.coord.chebyshev_to(target) <= 1:
-            for cargo_id in list(transport.cargo):
+        # Storm ashore onto a beachhead — empty land cells *beside* the city,
+        # one per cargo (stacking-off blocks two on one cell). Unloading onto
+        # the city itself would feed armies to its capture roll one at a time,
+        # each consumed (spec §5.4): a poor assault. From the beach the land
+        # follower's massed-assault doctrine takes the city next turn.
+        landings = _landing_cells(view, transport, target, land_grid)
+        if landings:
+            for cargo_id, cell in zip(list(transport.cargo), landings):
                 result.unloads.append(
-                    UnloadOrder(cargo_id=cargo_id, to=(target.x, target.y))
+                    UnloadOrder(cargo_id=cargo_id, to=(cell.x, cell.y))
                 )
             return
-        beach = _beachhead(view, target, transport, sea_grid)
+        # Sail to the target's coast. The target lies across fogged ocean the
+        # fog-masked grid can't route through, so the beachhead geometry and a
+        # fallback heading come from the true-geography grid — the same
+        # "gauntlet beats abandonment" pattern the land follower uses. The
+        # engine moves the transport through real water cells, peeling back the
+        # fog as it goes.
+        raw_sea = PassabilityGrid(view.real_map(), SEA_COST)
+        # Route around our own ships: stacking-off means a recon patrol idling
+        # in a strait would block the transport indefinitely (its grid is
+        # terrain-only and can't see the occupant).
+        others = frozenset(
+            u.coord
+            for u in view.own_units
+            if u.kind in _SEA_KINDS
+            and u.carried_by is None
+            and u.id != transport.id
+        )
+        nav = sea_grid.with_blocked(others) if others else sea_grid
+        raw_nav = raw_sea.with_blocked(others) if others else raw_sea
+        beach = _beachhead(view, target, transport, nav)
+        if beach is None:
+            beach = _beachhead(view, target, transport, raw_nav)
         if beach is not None:
             move = _step_toward(
-                transport, beach, DistanceField(transport.coord, sea_grid)
+                transport, beach, DistanceField(transport.coord, nav)
             )
+            if move is None:
+                move = _step_toward(
+                    transport, beach, DistanceField(transport.coord, raw_nav)
+                )
             if move is not None:
                 result.moves[transport.id] = move
         return
 
-    # LOADING → the transport holds station (no move) while the nearest free
-    # armies march aboard.
+    # LOADING. A transport in dry-dock (on its city cell) can neither be
+    # boarded nor unload (spec §5.4), so first float it to an adjacent sea
+    # cell beside land — only then can armies step aboard. Once afloat it
+    # holds station while the nearest free armies march in.
+    if _in_drydock(view, transport):
+        spot = _loiter_spot(view, transport, sea_grid, land_grid)
+        if spot is not None:
+            result.moves[transport.id] = UnitMove(
+                unit_id=transport.id, path=((spot.x, spot.y),)
+            )
     for _, _, army in boarders[: want - aboard]:
         result.claimed_armies.add(army.id)
         move = _board_move(army, transport, land_grid)
         if move is not None:
             result.moves[army.id] = move
+
+
+def _in_drydock(view: WorldView, transport: Unit) -> bool:
+    """A transport sitting on a friendly city cell is in dry-dock."""
+    return any(c.coord == transport.coord for c in view.own_cities)
+
+
+def _loiter_spot(
+    view: WorldView,
+    transport: Unit,
+    sea_grid: PassabilityGrid,
+    land_grid: PassabilityGrid,
+) -> Coord | None:
+    """An adjacent sea cell to float a dry-docked transport to, preferring the
+    one bordering the most boardable land (so armies have a cell to embark
+    from). Ties break on (y, x)."""
+    best: tuple[tuple[int, int, int], Coord] | None = None
+    for n in transport.coord.neighbors():
+        if not view.in_bounds(n) or not sea_grid.is_passable(n):
+            continue
+        land_access = sum(
+            1
+            for m in n.neighbors()
+            if view.in_bounds(m)
+            and m != transport.coord
+            and land_grid.is_passable(m)
+        )
+        key = (-land_access, n.y, n.x)
+        if best is None or key < best[0]:
+            best = (key, n)
+    return best[1] if best is not None else None
 
 
 def _board_move(
@@ -196,6 +272,34 @@ def _pick_transport(
     loaded = [t for t in transports if t.cargo]
     pool = loaded if loaded else transports
     return min(pool, key=lambda t: (t.coord.chebyshev_to(target), int(t.id)))
+
+
+def _landing_cells(
+    view: WorldView,
+    transport: Unit,
+    target: Coord,
+    land_grid: PassabilityGrid,
+) -> list[Coord]:
+    """Army-passable land cells adjacent to the transport — the beachhead an
+    amphibious assault disembarks onto, nearest the target city first. One
+    cell per cargo army (stacking-off lands one per cell). Empty while the
+    transport is still at sea; non-empty once it reaches the target's coast
+    (`_beachhead` sails it there), so the troops land on the target's own
+    landmass and the assault doctrine marches them to the city."""
+    out: list[Coord] = []
+    for n in transport.coord.neighbors():
+        if not view.in_bounds(n) or not land_grid.is_passable(n):
+            continue
+        if n == target:
+            continue  # storm the city from the beach, don't unload onto it
+        # Only land at the *target's* coast — a loaded transport loitering off
+        # its home shore also has land neighbours; without this it would
+        # disembark right back home and never sail.
+        if n.chebyshev_to(target) > 2:
+            continue
+        out.append(n)
+    out.sort(key=lambda c: (c.chebyshev_to(target), c.y, c.x))
+    return out
 
 
 def _beachhead(

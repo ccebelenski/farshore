@@ -184,10 +184,28 @@ class CandidateGenerator:
             return [], known, False
         grid = PassabilityGrid(view.real_map(), ARMY, view.own_player.view)
         reach = DistanceField(own[0].coord, grid)
+
+        # A city is a *land* target if any own army can walk to it — not just
+        # from the home continent, but from a beachhead too: once a transport
+        # lands troops overseas, the city beside them becomes a land target so
+        # the massed-assault doctrine (not the invade pipeline) storms it. Add
+        # one flood per landmass that holds an own army the home flood can't
+        # reach (landed forces); skip armies already covered by another flood.
+        fields = [reach]
+        for u in view.own_units:
+            if u.kind is not UnitKind.ARMY or u.carried_by is not None:
+                continue
+            if any(f.steps_to(u.coord) is not None for f in fields):
+                continue
+            fields.append(DistanceField(u.coord, grid))
+
+        def land_reachable(c: Coord) -> bool:
+            return any(f.steps_to(c) is not None for f in fields)
+
         land: list[Coord] = []
         overseas: list[Coord] = []
         for t in known:
-            (land if reach.steps_to(t) is not None else overseas).append(t)
+            (land if land_reachable(t) else overseas).append(t)
         has_frontier = any(
             reach.steps_to(c) is not None for c in frontier_cells(view)
         )

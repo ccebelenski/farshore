@@ -44,6 +44,13 @@ from empire.pathfinding.cost import ARMY as ARMY_COST_PROFILE
 from empire.pathfinding.distance_field import DistanceField, PassabilityGrid
 
 
+# Roles whose armies storm a city: a land assault and the land phase of an
+# amphibious invasion both drive troops onto the target the same way (the
+# follower handles INVADE cargo via `plan_naval`; any *landed* invasion army
+# falls through to here to take the city).
+_STORM_ROLES = frozenset({Role.ASSAULT, Role.INVADE})
+
+
 class PlanFollower:
     """Executes one frozen `Plan`; satisfies `AIController` structurally."""
 
@@ -67,11 +74,18 @@ class PlanFollower:
         sea_prod = self._plan.production in SEA_KINDS
         production: list[ProductionOrder] = []
         for c in view.own_cities:
-            if c.production.building is not None:
-                continue
             target = self._plan.production
             if sea_prod and not is_ocean_coastal(view, c.coord):
                 target = UnitKind.ARMY
+            # Re-target only when the city isn't already building the desired
+            # kind. `building` is never cleared to None once set (production
+            # keeps churning out the same kind), so guarding on "is None"
+            # would lock a city to its first-ever order forever — fatal the
+            # moment a plan needs to switch army->transport. `set_target`
+            # applies the §5.2 change penalty on a real switch and is a no-op
+            # when the kind already matches.
+            if c.production.building is target:
+                continue
             production.append(ProductionOrder(city_id=c.id, target=target))
         return TurnPlan(
             production_orders=tuple(production),
@@ -130,7 +144,7 @@ class PlanFollower:
         safe_grid = grid.with_blocked(all_ring_cells) if rings else grid
         target_grids: dict[Coord, PassabilityGrid] = {}
         for objective in groups:
-            if objective.role is Role.ASSAULT and objective.target not in target_grids:
+            if objective.role in _STORM_ROLES and objective.target not in target_grids:
                 others = frozenset(
                     cell
                     for center, cells in rings.items()
