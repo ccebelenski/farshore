@@ -1200,6 +1200,91 @@ human-play phase.
 
 ---
 
+## Phase 15.9 — Naval & air for `SearchAI` (capability, not new structure)
+
+**Why:** every AI is land-only — it can't cross water, so on the classic
+separate-continent setup the enemy is confined to its island, can't reach
+the player, and the game is an unwinnable/unlosable stalemate (surfaced by
+playtest, 2026-06). Naval makes force-projection across water possible (the
+headline gap); air adds the recon that fixes fog and the strike that clears
+field defenders. Decided with the user: **naval first, then air.**
+
+**Design (converged with the user — explicitly NOT a structural change).**
+This extends the four existing `SearchAI` components; there is no new
+strategic tier. The key realisation: the `CandidateGenerator` is *already*
+the heuristic strategic decision-maker (it ranks targets, sizes fists,
+picks surplus — all without simulating to decide what to propose), so the
+naval/air "strategy" is just richer generator heuristics, scored by the
+same tactical playouts and committed the same way.
+
+- **Value is a gradient (extend the existing objective ordering):** known
+  capturable target (enemy/neutral city, enemy unit) > **land frontier** >
+  **ocean frontier**. Frontiers are classified by their *explored* neighbour
+  (a fog cell touching known land = land frontier, likely more land/cities;
+  touching known water = ocean frontier, low prior) — computable today; we
+  already detect land frontiers for the SCOUT surplus, just add the sea side.
+  The land-frontier term is naturally zero on a dark-ocean start, leaving the
+  low ocean value → "send cheap patrols."
+- **Build mix falls out of frontier composition** (a generator heuristic, no
+  value-of-information field needed): mostly ocean frontier → **patrols**
+  (build 15, speed 4, scan 3 — the cheap scouts); newly discovered shore /
+  land frontier → **transports + armies** (+ escorts); known overseas city →
+  **amphibious projection**.
+- **Units now have multiple use-cases — this is the real new work.** An army
+  was one-dimensional (march, capture). Now a unit's job is role-dependent:
+  army = capturer | cargo; fighter = scout | striker | carrier-borne reach;
+  warship (patrol/destroyer/sub/battleship) = sea-scout | escort | ship-hunter
+  | shore-bombarder; transport/carrier = ferry. The `Plan` grows role-tagged
+  objectives and the `PlanFollower` grows one behavior per role.
+- **Sunk cost — loaded transports are the densest, most fragile value in the
+  game** (6 armies' build time + the hull + the sail, all in one sinkable
+  place; the engine drowns cargo with the hull). Consequences: **escort is a
+  first-class role**, **carrying-cargo routing avoids known threats**, and the
+  evaluator weights aboard units (it already counts cargo via `all_units`, so
+  a playout already sees sinking a loaded transport as a huge material swing —
+  tactical sink-avoidance is free; the long-sail protection is the escort
+  behavior).
+- **Exploration / long-naval horizon is handled by the existing mechanism, no
+  special structure.** Search playouts run on the belief state (unknown =
+  empty) and the horizon is ~12 turns, so the search structurally cannot
+  *value* scouting or a 40–60-turn invasion. That's fine: those decisions live
+  in the generator's heuristics (exactly where target selection already
+  lives) and win by candidate-ordering fallback, the same way land scouting
+  already happens today — the playout never scores exploration positively, it
+  just isn't beaten by something better. The invasion is *proposed* by a cost
+  heuristic off discovered geography (no prediction engine), and the search
+  executes the land fight after the landing.
+
+**Explicitly out of scope (a later "prediction engine" phase if ever):** any
+belief distribution over hidden contents — no anticipating ambushes, no
+staleness/re-fog threat tracking. Threats stay **reactive** (the surprise/
+wake system). We value *looking* (the frontier gradient), not *guessing what's
+hidden*.
+
+**Groundwork already in place** (from the SearchAI + TUI playtest work):
+cargo load/unload + the `Loading` wait-until-full standing order, the `l`/`o`
+commands, `SEA`/`AIR` cost profiles and sea pathfinding, `DistanceField`,
+all unit kinds with stats. New mechanical pieces: sea-frontier detection,
+naval/air follower behaviors, the role-tagged plan, generator naval heuristics.
+
+**Validation gate (build FIRST, like the SearchAI work):** a **multi-continent
+arena** — two capitals on *separate* landmasses with open ocean between (the
+map generator already makes continents; this is a setup variant + a "can the
+challenger project across water and WIN" success metric). Per-game sim cost is
+higher (multi-continent, longer games); `--jobs` + the dedicated VM absorb it.
+The land-brawl arena cannot test projection by construction, which is why this
+was deferred from 15.7.
+
+**Sequencing:** (1) multi-continent arena + metric; (2) naval recon→projection
+(sea-frontier scouting with patrols, then transport+army+escort amphibious
+operations) — the bulk; (3) air folds into the *tactical* layer afterward
+(fighter scout/strike inside the search, no horizon problem). **Exit gate:**
+the challenger beats a land-only opponent on the multi-continent arena with
+statistical significance — i.e., it actually crosses water and conquers, which
+no current AI can.
+
+---
+
 ## Phase 16 — Persistence hardening + schema v1 freeze (1-2 sessions)
 
 **Deliverable:** Full serializers for every entity including `AIMemory`. Schema v1 frozen — golden saves committed for round-trip regression detection.
