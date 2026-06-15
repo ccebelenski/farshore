@@ -42,12 +42,17 @@ class CandidateGenerator:
         resolve toward the earlier candidate, so order encodes a mild prior:
         aggressive single-front plans first, passivity last).
 
-        Strategy is sequential: fight the home continent first (land plans),
-        and only when no land-reachable target remains switch to naval —
-        recon the sea, then invade discovered overseas cities. The switch is
-        a generator decision (it drops the army-building baselines in naval
-        mode so a naval plan isn't out-scored by faster army production in a
-        12-turn playout that can't see the invasion pay off)."""
+        Naval runs in *parallel* with the land game, not after it. As long as
+        land-reachable targets remain we still emit the land assault plans, but
+        we also offer naval candidates (recon the sea; invade a discovered
+        overseas city) so the search can start projecting before the home
+        continent is exhausted. The playout prices the trade — a naval plan
+        spends coastal-city production on hulls instead of armies — and the
+        evaluator's intel term lets a scouting plan show progress the search
+        can see (without it, exploration never won a playout, so naval didn't
+        begin until no land target was left and the enemy continent had gone
+        undiscovered for a hundred turns). When no land target remains the
+        naval plans stand alone (the early-return branch below)."""
         fist = self._fist_size(view.rules)
         targets, overseas, has_land_frontier = self._assess(view)
         defenses = self._threatened_home_cities(view)
@@ -142,6 +147,15 @@ class CandidateGenerator:
                     surplus=SurplusPolicy.SCOUT,
                 )
             )
+
+        # Naval candidates, offered in parallel with the land plans above so
+        # projection can begin before the home continent is conquered. Invade
+        # a known overseas coastal city; otherwise recon the open sea to find
+        # one. The search picks these only when a playout says the naval
+        # trade-off (coastal production -> hulls; exploration value) beats
+        # pressing the land fight.
+        plans.extend(self._invade_plans(view, overseas))
+        plans.extend(self._recon_plans(view))
 
         # Baselines the search must always be able to fall back on.
         plans.append(Plan(objectives=(), surplus=SurplusPolicy.SCOUT))

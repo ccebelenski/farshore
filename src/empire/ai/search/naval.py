@@ -255,8 +255,14 @@ def _board_move(
     return _step_toward(army, best[3], field)
 
 
-# How many armies a single amphibious operation tries to carry.
-_OP_FORCE = 3
+# How many armies a single amphibious operation tries to carry. Filling the
+# transport (capacity 6) matters for holding: capture consumes the storming
+# army (§4.5), so a 3-army wave that loses one or two crossing the beach takes
+# the city with its last soldier and leaves it empty — recaptured next turn
+# (the t146->t147 loss the projection probe found). A full wave lands enough
+# survivors to both capture and garrison. `want` is still min()'d with the
+# transport's damage-scaled capacity, so this just stops under-filling.
+_OP_FORCE = 6
 
 
 def _pick_transport(

@@ -74,12 +74,18 @@ def _home_continent(game: Game, player: Player) -> set[tuple[int, int]]:
 def play_match(
     profile: MapProfile, seed: int, challenger_first: bool, cap: int,
     rules: RuleSet = STANDARD, ai: str = "search",
-) -> tuple[str, int, int] | None:
-    """Run one game; return (outcome, turns, off_home_cities). Outcome is
-    'strategic' | 'baseline' | 'draw' | 'unfinished' (labels match the
-    land-brawl arena so `ArenaResult` is reusable). `off_home_cities` is how
-    many cities the challenger holds off its starting continent at the end —
-    the projection telemetry (> 0 means it crossed water)."""
+) -> tuple[str, int, int, int] | None:
+    """Run one game; return (outcome, turns, peak_off_home, end_off_home).
+    Outcome is 'strategic' | 'baseline' | 'draw' | 'unfinished' (labels match
+    the land-brawl arena so `ArenaResult` is reusable).
+
+    Two projection telemetry numbers, because they answer different questions:
+    `peak_off_home` is the most off-home cities the challenger held at ANY turn
+    (> 0 means it crossed water and took ground at least once — measures defect
+    (a), did it ever project); `end_off_home` is what it still holds at the cap
+    (> 0 means the beachhead stuck — measures defect (b), sustained waves). The
+    old end-only metric read 0 for a game that captured and then lost a city
+    the next turn, hiding all early naval progress."""
     built = build_two_continent(profile, seed, rules)
     if built is None:
         return None
@@ -90,21 +96,27 @@ def play_match(
     chal = players[ci]
     home = _home_continent(game, chal)
 
+    def off_home_now() -> int:
+        return sum(
+            1 for c in game.map.cities()
+            if c.owner is chal and (c.coord.x, c.coord.y) not in home
+        )
+
+    peak_off_home = 0
     for _ in range(cap):
         game.run_turn()
+        peak_off_home = max(peak_off_home, off_home_now())
         if game.is_over():
             break
 
-    off_home = sum(
-        1 for c in game.map.cities()
-        if c.owner is chal and (c.coord.x, c.coord.y) not in home
-    )
+    end_off_home = off_home_now()
     if not game.is_over():
-        return ("unfinished", game.turn, off_home)
+        return ("unfinished", game.turn, peak_off_home, end_off_home)
     winner = game.winner()
     if winner is None:
-        return ("draw", game.turn, off_home)
-    return ("strategic" if winner is chal else "baseline", game.turn, off_home)
+        return ("draw", game.turn, peak_off_home, end_off_home)
+    label = "strategic" if winner is chal else "baseline"
+    return (label, game.turn, peak_off_home, end_off_home)
 
 
 def run_arena(
@@ -112,23 +124,28 @@ def run_arena(
     rules: RuleSet = STANDARD, jobs: int = 1, ai: str = "search",
 ) -> tuple[ArenaResult, int]:
     """Each seed played twice (sides swapped) to cancel which side gets the
-    larger continent. Returns the win/loss tally plus the count of games in
-    which the challenger projected (held >= 1 city off its home continent)."""
+    larger continent. Returns the win/loss tally plus two projection counts:
+    `ever_projected` (held >= 1 off-home city at any turn — did it cross water
+    at all) and `held_at_cap` (still holds one at game end — did the beachhead
+    stick)."""
     result = ArenaResult()
     turns: list[int] = []
-    projected_games = 0
+    ever_projected = 0
+    held_at_cap = 0
     start = time.time()
 
-    def consume(outcome: tuple[str, int, int] | None) -> None:
-        nonlocal projected_games
+    def consume(outcome: tuple[str, int, int, int] | None) -> None:
+        nonlocal ever_projected, held_at_cap
         if outcome is None:
             return
-        label, played, off_home = outcome
+        label, played, peak_off_home, end_off_home = outcome
         setattr(result, label, getattr(result, label) + 1)
         if label in ("strategic", "baseline"):
             turns.append(played)
-        if off_home > 0:
-            projected_games += 1
+        if peak_off_home > 0:
+            ever_projected += 1
+        if end_off_home > 0:
+            held_at_cap += 1
 
     specs = [(seed, cf) for seed in range(seeds) for cf in (True, False)]
     if jobs <= 1:
@@ -149,13 +166,13 @@ def run_arena(
                     print(
                         f"  {done}/{len(futures)} games: S={result.strategic} "
                         f"B={result.baseline} draw={result.draw} "
-                        f"unfin={result.unfinished} projected={projected_games} "
-                        f"({time.time() - start:.0f}s)",
+                        f"unfin={result.unfinished} ever={ever_projected} "
+                        f"held={held_at_cap} ({time.time() - start:.0f}s)",
                         flush=True,
                     )
 
     result.mean_turns = sum(turns) / len(turns) if turns else 0.0
-    return result, projected_games
+    return result, ever_projected, held_at_cap
 
 
 def main() -> None:
@@ -180,14 +197,16 @@ def main() -> None:
 
     rules = FORTIFIED_CITIES if args.fortified else STANDARD
     print(f"ruleset: {rules.name}  jobs: {args.jobs}  ai: {args.ai}  cap: {args.cap}")
-    result, projected = run_arena(
+    result, ever_projected, held_at_cap = run_arena(
         args.seeds, args.cap, rules=rules, jobs=args.jobs, ai=args.ai
     )
     total = 2 * args.seeds
     print(f"\n{total} games: S={result.strategic} B={result.baseline} "
           f"draw={result.draw} unfinished={result.unfinished}")
-    print(f"projection (challenger held a city off its home continent): "
-          f"{projected}/{total} games")
+    print(f"projection — ever crossed water (held an off-home city at any "
+          f"turn): {ever_projected}/{total} games")
+    print(f"projection — beachhead stuck (still held at cap): "
+          f"{held_at_cap}/{total} games")
     if result.decided:
         print(f"{args.ai} win-rate among decided: {result.strategic}/{result.decided} "
               f"= {result.strategic / result.decided:.1%}")

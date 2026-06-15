@@ -43,8 +43,11 @@ def test_land_only_challenger_cannot_project() -> None:
         NAVAL_PROFILE, seed=1, challenger_first=True, cap=40, ai="strategic"
     )
     assert out is not None
-    outcome, turns, off_home = out
-    assert off_home == 0, "a land-only AI must not capture across water"
+    outcome, turns, peak_off_home, end_off_home = out
+    # A land-only AI can neither reach nor hold ground across water, so both
+    # the ever-projected (peak) and held-at-cap (end) counts must be zero.
+    assert peak_off_home == 0, "a land-only AI must not capture across water"
+    assert end_off_home == 0
     # 40 turns is far too short to conquer two continents; expect unfinished.
     assert outcome in ("unfinished", "strategic", "baseline", "draw")
     del turns
