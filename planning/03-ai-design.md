@@ -545,3 +545,242 @@ verification as the heuristic generator's, so a small local model's
 hallucinated plan loses in simulation instead of losing the game. Search also
 provides the difficulty ladder for free (candidate count, horizon, and eval
 noise as knobs, §5).
+
+## 10. Strategy & value — making campaigns first-class (Phase 15.9+ foundation)
+
+Decided with the user (2026-06-15/16), from the naval-projection work. The
+multi-continent gate exposed a failure the land game had hidden: `SearchAI`
+could *invade* (build a transport, sail, land, capture a city — confirmed
+end-to-end) but never *hold* — across every fix tried, captured overseas cities
+were retaken within a turn or two and the challenger won zero games. Three
+operational fixes were attempted and all failed to move the "held at cap"
+metric: filling the transport wave (3→6 armies; doubled *ever-projected* 2/8→
+4/8 but held stayed 0), sustained ferrying (regressed projection to 0 —
+fragmentation), and a staged amphibious fleet (no effect). A ground-truth probe
+found the cause: at capture the challenger had ~2 armies on the beachhead
+landmass against ~6 defenders — pure local force inferiority — and §5.4 forbids
+garrisoning a friendly city, so a city is held only by *winning the landmass*,
+not by parking a unit.
+
+The deeper diagnosis is a **timescale mismatch**, not a force shortfall. The
+§9 search re-decides every turn and scores the turn-+H state as a *terminal*
+value ("if the game froze here, how good is it?"). A campaign that takes ~40
+turns to pay off always looks like a bad bargain at +12 versus grabbing a
+nearby land city now, so the AI never *sustains* the commitment — it only ever
+stumbles into invasion as a side-effect of running out of land targets. Every
+operational tweak was an operational fix to a strategic problem.
+
+The foundation has **two pillars, co-designed; neither ships alone:**
+
+**(1) Strategy = the "how".** A library of coordinated, *multi-turn, phased*
+operation structures. This is what stops the AI being a horde — value alone
+gives every unit a locally-good move and no coordination, and the project has
+*proven* the horde loses (unprepared marching onto a city is death; the fist
+must be massed first; you cannot land coordinated transports by having each
+transport individually decide it "looks good" to sail). The current `Plan` is
+too thin to express a phased campaign. The first new structure is an
+**invade-and-hold campaign**: prepare force → stage/assemble the fleet → land
+as a coordinated mass → **consolidate and hold** (the phase that was missing).
+This is *not* hand-doctrine: the structures are executable building blocks (the
+"behaviors as a script library" of §9.4); *which* campaign to commit to and
+when to abandon it stays a search/value decision. How = library, why = search.
+
+**(2) Value = the "why".** Situational evaluation that weighs strategies — incl.
+holding and exploration — as **peers on one currency**, and is rich enough that
+a campaign-in-progress reads as the real value it is. Key shift: **the horizon
+is a progress probe, not an end state.** The +H lookahead answers "is this line
+progressing well enough to continue?", not "did it finish?". So the evaluator
+must register progress toward strategic goals, not just completed results. The
+intel/frontier term (§ added Phase 15.9) was the first instance — it made
+*exploration* progress visible in-horizon so a scouting line stopped scoring as
+worthless; generalize it. The peer value terms:
+
+- **Cities, material** — existing.
+- **Expected value of the fog** — unexplored *reachable* ground is worth its
+  expected contents (maybe a city, maybe an army, maybe nothing), weighed
+  equally against every other option, not special-cased. (Implemented as a
+  self-flattening frontier term; the richer form is an explicit EV.)
+- **Holdability / local force balance** — the genuinely missing term: a
+  captured city's worth is *conditioned* on whether the local situation supports
+  keeping it, and force massed on a contested landmass reads as real value
+  (progress), not stranded units.
+
+**Re-evaluation is the engine, not a fallback.** What "looks good" near a
+freshly captured city is genuinely situational (enemy still adjacent? my force
+massing? more cities behind it? unexplored ground?), so the right move *should*
+be recomputed there rather than predicted in advance. Crucially, **sustaining a
+campaign must come from the eval valuing the in-progress state correctly, not
+from forced commitment**: if the evaluator can see that "8 armies massed on
+landmass L grinding the defender down" is a strong position, plain per-turn
+re-evaluation keeps choosing to press it (it keeps looking good) and bails the
+moment it stops (force wiped, progress gone negative) — no hysteresis hack
+needed. Holding failed all session precisely because the eval was blind to that
+mid-campaign state, so re-evaluation correctly concluded "this looks bad" every
+turn.
+
+**(3) Stability = principled commitment.** Switching strategies has a *real*
+cost — the turns already sunk into the current line's in-progress state (an
+assembled, staged fleet) that a new line would forfeit and have to recreate.
+This is sunk cost that is **real, not the fallacy**. It falls out of pillar (2):
+if the eval values the in-progress state correctly, switching away already looks
+expensive.
+
+**The cost is a *strategy* cost, not a *unit* cost.** This is the key
+distinction. The units themselves usually survive a switch — three transports
+don't evaporate when you abandon an invasion, they can sail elsewhere. What is
+forfeited is the **coordinated arrangement**: the fleet assembled in one place,
+loaded, staged off the right coast, the force committed and positioned — the
+accumulated *campaign progress*, which costs turns to recreate somewhere else.
+So both the in-progress value (pillar 2) and the switch bar (pillar 3) must be
+measured at the **strategy level**, not by summing unit values: a loaded, staged
+fleet is worth more than "3 transports + 12 armies" precisely because the
+coordination and positioning are themselves the asset. An evaluator that only
+counts units will undervalue every campaign-in-progress and will therefore
+oscillate; it has to price the coordination premium that the strategy structure
+has built up. Two guards keep it from either pathology:
+- **The switch bar scales with investment** — deep into a campaign (16 turns of
+  fleet-building) → high bar to abandon; just started → low bar. The §9
+  `SWITCH_MARGIN` hysteresis is the flat seed of this; the principled version
+  makes the margin a function of accumulated investment.
+- **It is a bar, not a lock** — a *much* better option still wins, and a
+  *collapsing* campaign still gets bailed. Stay while the current line looks
+  good and nothing dominates; leave if something is dramatically better **or**
+  the current one has fallen apart.
+
+**Short-horizon goals stay correct and cheap.** Grab the close city; explore the
+landmass you're on. The short horizon already handles these well; the work is
+*adding* the missing strategic-timescale considerations, not replacing the
+operational ones.
+
+### 10.1 First build & validation
+
+The single missing *value* source is **holdability / local force balance**, and
+the single missing *structure* is the **invade-and-hold campaign**. Co-build the
+minimal version of both and let the `_naval_arena` gate measure it: the metric
+that must move is **held-at-cap** (a beachhead that sticks), with **ever-
+projected** as the no-regression floor (currently 4/8 ever, 0/8 held, committed
+66b4e63). The arena is the oracle — "value is hard to define" is answered
+empirically (weights tuned against the gate), not by intuition. Open design
+questions for the doc/implementation: the progress currency (Δ of an enriched
+position eval vs a separate progress function); the investment-scaled switch
+margin's exact form; and whether the campaign needs an explicit phased object or
+can be carried by a richer `Plan` + the holdability eval term alone (the lighter
+first experiment).
+
+#### 10.1.1 Attempt 1 (stashed) and the conversion finding
+
+The first build (stash, not committed): holdability eval terms (recapture-risk
+discount + pressure credit) + a staged amphibious fleet (transports assemble
+fully, then sail and land together). Arena: ever 4/8 (= floor), **held still
+0/8**. A probe found the staging *works* — it delivered **12 armies concentrated
+at sea** — but they never captured. Why: **the concentration dissipates at the
+beach.** `_beachhead`/`_landing_cells` sail to the sea cell *nearest the target
+city* and unload right beside it — i.e. straight into the city's artillery range
+and defender screen, the worst possible spot — and only ~2–3 land per turn (one
+army per army-passable adjacent cell). Each small batch charges the city, is
+ground up by the 4–5 enemy armies screening it, and only then do the next 2–3
+unload and die in turn (cargo drained 12→0 piecemeal, city never flipped). It is
+the horde failure at the tactical scale: concentrate at sea, dribble ashore,
+self-feed into the screen.
+
+#### 10.1.2 Beachhead selection + consolidation (the real fix)
+
+The landing site is chosen to be the *worst* spot; choosing a good one is the
+fix, and it makes consolidation fall out for free. Two coupled parts:
+
+- **Landing-zone selection ("seek landing zone").** Score army-passable coastal
+  cells on the *target's* landmass and land at the best, not the nearest-to-city:
+  - **Avoid (last choice):** inside any enemy city's artillery range
+    (`FORTIFIED`); adjacent to / inside an enemy army cluster.
+  - **Prefer:** *width* — many army-passable neighbours, so several unload per
+    turn **and** the landed mass has room to pool (the direct fix for the
+    2–3/turn dribble); *safety* — distance from enemy armies and gun cities;
+    *proximity* to the target, secondary.
+  - **Priority when no ideal site exists:** safety > width > proximity. A safe,
+    wide zone two tiles off beats a cramped one against the wall — the march is
+    cheap, the grinding isn't.
+- **Then it's a fist.** Land the mass in that safe, wide zone. Because it is not
+  adjacent to the city, the armies *accumulate* instead of charging one-by-one,
+  and the existing land massed-assault doctrine (the proven "fist") masses and
+  storms the city — the `_assess` flood already makes the city a land target the
+  moment our troops are on its landmass. Likely **no new assault code at all**:
+  consolidation is a consequence of *where* you land, not a new behavior. (Add an
+  explicit "hold until massed" gate only if the arena shows the fist still
+  charging early.)
+
+Net: the next build is a **landing-zone selector** replacing the
+nearest-coast `_beachhead`, plus sailing the fleet to it. Delivery (sea
+concentration) and value (holdability eval) already check out; this is the
+conversion piece. Metric to move remains held-at-cap; floor 4/8 ever.
+
+#### 10.1.3 Built — landing-zone selector (working tree, uncommitted)
+
+`_landing_zone` replaces `_beachhead`; `_landing_cells` filters by target-
+landmass membership. Also fixed a real bug: the `SEA` cost profile has
+`city_cost=1`, so the enemy city tile itself scored as the best launch cell and
+the transport sailed onto it, failed the capture (only armies capture) and was
+destroyed with all cargo — the selector now requires a `WATER` launch cell.
+**Result: ever-projection 4/8 → 6/8** (conversion improved — landing away from
+the wall lets the force pool and the fist storm; unit test captures cleanly),
+all tests green, but **held still 0/8.** The bottleneck moved again: deliver and
+convert now work; cities are captured but **lost again before the cap**. Next
+question (probe a projecting seed): do captures hold for a stretch then get
+retaken (the enemy continent out-producing / churn), or never stick — which
+decides between sustained reinforcement / clear-the-landmass, a defensive
+covering posture, or the over-horizon evaluator priors.
+
+#### 10.1.4 Post-capture probe → reinforcement op + odds-aware attack
+
+Probe (seed 0): at the capture the challenger had **2 armies vs 8** on the
+landmass; the city fell in one turn; the survivors did **not** wander or idle —
+they sensibly defended then pressed the next city, died doing so, and **no
+reinforcement wave ever followed** (transports idle after one attempt). So
+holding isn't a post-capture micro problem; it's force economy — a single wave
+attritted to ~2 against 8 defenders, with no follow-on.
+
+The sharper question this raised: **why does the search commit (or continue) an
+attack it will lose?** Three causes compound: (1) the ~12-turn playout rewards
+the *transient* capture — a flipped city scores ~+100, and the §10.1
+recapture-risk discount caps at 3 net armies (≈24), nowhere near cancelling it,
+so a doomed grab still scores positive; (2) by the time only 2 are ashore they
+are already stranded — every option is bad, so "grab it transiently" wins among
+equally-doomed choices (the real error is upstream); (3) **there is no
+"reinforce, don't attack yet" plan generated**, so the patient option can't be
+chosen. Note the Phase-15.7 hand-doctrine line *had* an odds-estimator (combat ×
+arrival × trend × surprise → commit/abort); the search pivot discarded exactly
+this judgment.
+
+Two coupled fixes (the §10 pillars, again):
+- **Reinforcement op — a first-class support strategy (how).** Given a beachhead
+  that is locally outnumbered, ferry/build toward local superiority and
+  *withhold the assault until the force ratio is favorable*. This is the patient
+  alternative the search currently lacks, and it doubles as the cure for
+  "transports idle after one wave" — keeping a campaign shuttling is the op's
+  whole job. A strategy to be weighed, not a side-effect.
+- **Odds / force-ratio-aware attack valuation (why).** Value an assault by its
+  prospects so committing into 2-vs-8 scores as the loss it is, not a transient
+  win — don't credit a capture the trajectory will immediately undo (the
+  horizon-as-progress-probe point). The Phase-15.7 odds estimate returns as an
+  *evaluator input*, not a hand-coded loop; the holdability term is its weak
+  seed.
+  Neither alone works: a reinforcement op the eval won't value never gets
+  picked; odds-awareness with no reinforce option just makes the AI sit and die.
+
+**Odds are fog-honest and dynamic.** They are computed from what the player
+*knows* at that turn, so they will be optimistic under fog — an invasion looks
+great before the enemy is sighted, then the odds crater a turn later as
+discovery reveals the defenders. That is fine, because re-evaluation reruns
+every turn (re-evaluation-as-engine): a wrong, optimistic commit is corrected
+the moment the fog lifts — *provided there is something to switch to*. Which is
+why **retreat must be a first-class option**, the fourth member of the campaign
+library:
+- **retreat** — re-embark the surviving troops and withdraw (or fall back to a
+  defensible spot) when the rescored odds collapse, preserving the force instead
+  of feeding it in. This is the abort half of the Phase-15.7 commit/abort loop,
+  now search-native (re-evaluation is the loop; retreat is the escape hatch) and
+  consistent with "strategy cost, not unit cost" — pulling out saves the units
+  even when the campaign's coordination is written off.
+
+So the invade-and-hold campaign is a small library of weighable structures —
+**invade** (built) · **reinforce** · **assault** (exists) · **retreat** —
+selected each turn under fog-honest, per-turn-rescored, odds-aware valuation.

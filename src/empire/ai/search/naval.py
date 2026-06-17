@@ -73,14 +73,22 @@ def plan_naval(view: WorldView, plan: Plan) -> NavalResult:
     invade_targets = [
         o.target for o in plan.objectives if o.role is Role.INVADE
     ]
-    for target in invade_targets:
-        transport = _pick_transport(ships, used_ships, target)
-        if transport is None:
-            continue  # no free transport; production builds one
-        used_ships.add(transport.id)
-        _run_operation(
-            view, target, transport, armies, land_grid, sea_grid, result
-        )
+    if invade_targets:
+        # Concentrate the whole transport fleet on the primary target and land
+        # it together. A lone transport's wave lands outnumbered and is retaken
+        # at once; a fleet that *stages* — full hulls loiter at the embark coast
+        # until the rest have loaded, then all sail together — puts enough
+        # ashore in one blow to win the landmass. Staging is read off the board
+        # (all loaded, or no army can still board), so no cross-turn state.
+        target = invade_targets[0]
+        fleet = [s for s in ships if s.kind is UnitKind.TRANSPORT]
+        ready = _fleet_ready(view, target, fleet, armies, land_grid)
+        for transport in fleet:
+            used_ships.add(transport.id)
+            _run_operation(
+                view, target, transport, armies, land_grid, sea_grid, result,
+                hold=not ready,
+            )
 
     # Every other ship scouts the sea frontier.
     frontier = sea_frontier_cells(view)
@@ -91,6 +99,38 @@ def plan_naval(view: WorldView, plan: Plan) -> NavalResult:
         if move is not None:
             result.moves[ship.id] = move
     return result
+
+
+def _fleet_ready(
+    view: WorldView,
+    target: Coord,
+    fleet: list[Unit],
+    armies: list[Unit],
+    land_grid: PassabilityGrid,
+) -> bool:
+    """Should the assembled fleet sail now? Yes once every transport is full,
+    or once no free army can still reach a not-yet-full hull (don't wait for
+    reinforcements that will never come). Fleet-scope mirror of the
+    single-transport `loaded_enough` test."""
+    if not fleet:
+        return False
+
+    def full(t: Unit) -> bool:
+        return len(t.cargo) >= min(t.effective_capacity(), _OP_FORCE)
+
+    if all(full(t) for t in fleet):
+        return True
+    # Free armies not already on the target's landmass (those are landed troops,
+    # not boarders) that could still march to a hull with room.
+    target_land = DistanceField(target, land_grid)
+    free = [a for a in armies if target_land.steps_to(a.coord) is None]
+    for transport in fleet:
+        if full(transport):
+            continue
+        reach = DistanceField(transport.coord, land_grid)
+        if any(reach.steps_to(a.coord) is not None for a in free):
+            return False  # someone can still board; keep assembling
+    return any(t.cargo for t in fleet)
 
 
 # ---- amphibious operation ----------------------------------------------------
@@ -104,8 +144,13 @@ def _run_operation(
     land_grid: PassabilityGrid,
     sea_grid: PassabilityGrid,
     result: NavalResult,
+    hold: bool = False,
 ) -> None:
-    """Drive one transport's invasion of `target` this turn."""
+    """Drive one transport's invasion of `target` this turn.
+
+    `hold` is the staging brake: while the fleet isn't assembled, a hull that is
+    already full waits in place (it still loads if it has room) instead of
+    sailing off alone — so the wave lands concentrated, not piecemeal."""
     want = min(transport.effective_capacity(), _OP_FORCE)
     aboard = len(transport.cargo)
 
@@ -130,22 +175,27 @@ def _run_operation(
     # and no further reinforcement can reach the boat (don't wait forever for
     # a third army that doesn't exist).
     loaded_enough = aboard >= want or (aboard >= 1 and not boarders)
-    if loaded_enough:
-        # Storm ashore onto a beachhead — empty land cells *beside* the city,
-        # one per cargo (stacking-off blocks two on one cell). Unloading onto
-        # the city itself would feed armies to its capture roll one at a time,
-        # each consumed (spec §5.4): a poor assault. From the beach the land
-        # follower's massed-assault doctrine takes the city next turn.
-        landings = _landing_cells(view, transport, target, land_grid)
+    # Staging brake: a full hull holds station until the rest of the fleet is
+    # ready (it has nothing left to load, so it simply waits this turn).
+    if loaded_enough and hold and aboard >= want:
+        return
+    if loaded_enough and not hold:
+        # Storm ashore onto the chosen landing zone — army-passable cells on the
+        # target's landmass beside the transport, one per cargo (stacking-off
+        # lands one per cell). Landing *away* from the city (not against its
+        # wall) lets the troops pool into a mass before the land follower's
+        # massed-assault doctrine marches them on the city; landing right beside
+        # it fed them to the defenders piecemeal and never converted (§10.1.1).
+        landings = _landing_cells(view, transport, target, land_grid, target_land)
         if landings:
             for cargo_id, cell in zip(list(transport.cargo), landings):
                 result.unloads.append(
                     UnloadOrder(cargo_id=cargo_id, to=(cell.x, cell.y))
                 )
             return
-        # Sail to the target's coast. The target lies across fogged ocean the
-        # fog-masked grid can't route through, so the beachhead geometry and a
-        # fallback heading come from the true-geography grid — the same
+        # Sail to the chosen landing zone's sea cell. The target lies across
+        # fogged ocean the fog-masked grid can't route through, so geometry and
+        # a fallback heading come from the true-geography grid — the same
         # "gauntlet beats abandonment" pattern the land follower uses. The
         # engine moves the transport through real water cells, peeling back the
         # fog as it goes.
@@ -162,9 +212,11 @@ def _run_operation(
         )
         nav = sea_grid.with_blocked(others) if others else sea_grid
         raw_nav = raw_sea.with_blocked(others) if others else raw_sea
-        beach = _beachhead(view, target, transport, nav)
+        beach = _landing_zone(view, target, transport, nav, land_grid, target_land)
         if beach is None:
-            beach = _beachhead(view, target, transport, raw_nav)
+            beach = _landing_zone(
+                view, target, transport, raw_nav, land_grid, target_land
+            )
         if beach is not None:
             move = _step_toward(
                 transport, beach, DistanceField(transport.coord, nav)
@@ -264,6 +316,13 @@ def _board_move(
 # transport's damage-scaled capacity, so this just stops under-filling.
 _OP_FORCE = 6
 
+# Landing-zone selection (§10.1.2). `_LAND_MARCH`: how far from the target a
+# landing cell may be (the fist marches the rest on foot) — keeps the beachhead
+# on the target's doorstep without forcing it against the wall. `_SCREEN_R`:
+# Chebyshev radius for counting the enemy defender screen near a landing spot.
+_LAND_MARCH = 6
+_SCREEN_R = 3
+
 
 def _pick_transport(
     ships: list[Unit], used: set[UnitId], target: Coord
@@ -285,48 +344,100 @@ def _landing_cells(
     transport: Unit,
     target: Coord,
     land_grid: PassabilityGrid,
+    target_land: DistanceField,
 ) -> list[Coord]:
-    """Army-passable land cells adjacent to the transport — the beachhead an
-    amphibious assault disembarks onto, nearest the target city first. One
-    cell per cargo army (stacking-off lands one per cell). Empty while the
-    transport is still at sea; non-empty once it reaches the target's coast
-    (`_beachhead` sails it there), so the troops land on the target's own
-    landmass and the assault doctrine marches them to the city."""
+    """Army-passable land cells adjacent to the transport that lie on the
+    *target's* landmass — the beachhead the assault disembarks onto, one cell
+    per cargo army (stacking-off lands one per cell). Empty while the transport
+    is mid-ocean or sitting off its home shore (those neighbours aren't on the
+    target landmass), non-empty once it reaches the chosen landing zone, so it
+    never disembarks on the wrong coast. `target_land` is the land flood from
+    the target; membership = a finite distance in it."""
     out: list[Coord] = []
     for n in transport.coord.neighbors():
         if not view.in_bounds(n) or not land_grid.is_passable(n):
             continue
         if n == target:
             continue  # storm the city from the beach, don't unload onto it
-        # Only land at the *target's* coast — a loaded transport loitering off
-        # its home shore also has land neighbours; without this it would
-        # disembark right back home and never sail.
-        if n.chebyshev_to(target) > 2:
-            continue
+        if target_land.steps_to(n) is None:
+            continue  # not the target's landmass (home shore, an islet, etc.)
         out.append(n)
-    out.sort(key=lambda c: (c.chebyshev_to(target), c.y, c.x))
+    # Nearest the target first, so cargo lands on the cells closest to the city.
+    out.sort(key=lambda c: ((target_land.steps_to(c) or 0), c.y, c.x))
     return out
 
 
-def _beachhead(
-    view: WorldView, target: Coord, transport: Unit, sea_grid: PassabilityGrid
+def _landing_zone(
+    view: WorldView,
+    target: Coord,
+    transport: Unit,
+    sea_grid: PassabilityGrid,
+    land_grid: PassabilityGrid,
+    target_land: DistanceField,
 ) -> Coord | None:
-    """The sea cell adjacent to `target` that the transport can reach
-    soonest — the spot to sail to before disembarking."""
-    field = DistanceField(transport.coord, sea_grid)
-    best: tuple[int, int, int, Coord] | None = None
-    for n in target.neighbors():
-        if not view.in_bounds(n):
-            continue
-        if not sea_grid.is_passable(n):
-            continue
-        steps = field.steps_to(n)
-        if steps is None:
-            continue
-        key = (steps, n.y, n.x, n)
-        if best is None or key < best:
-            best = key
-    return best[3] if best is not None else None
+    """The sea cell to sail to: adjacent to the best landing spot on the
+    target's landmass, not merely the cell nearest the city (§10.1.2).
+
+    Each candidate sea cell is the launch point for disembarking onto its
+    army-passable landmass neighbours. Scored, best first, by:
+      1. out of enemy-city artillery range  (don't land under the guns)
+      2. fewest enemy armies near the landing cells  (avoid the defender screen)
+      3. widest  (most landmass neighbours → several land per turn AND room to
+         pool into a mass instead of trickling in)
+      4. closest to the target  (shorter fist march), then soonest reachable.
+    Returns None if no reachable landmass coast is in range."""
+    sea_field = DistanceField(transport.coord, sea_grid)
+    art = view.rules.city_artillery_range
+    gun_cities: list[Coord] = []
+    if art > 0:
+        gun_cities = [c.coord for c in view.known_enemy_cities]
+        gun_cities += [c.coord for c in view.neutral_cities]
+    enemy = [k.snapshot.coord for k in view.known_enemy_units]
+
+    best_key: tuple | None = None
+    best_sea: Coord | None = None
+    d = _LAND_MARCH + 1
+    for dy in range(-d, d + 1):
+        for dx in range(-d, d + 1):
+            s = Coord(target.x + dx, target.y + dy)
+            if not view.in_bounds(s) or not sea_grid.is_passable(s):
+                continue
+            # The launch cell must be open water. The SEA cost profile counts
+            # city tiles as passable (ships dock in port), so without this the
+            # enemy city itself scores as the best "sea cell" — and the
+            # transport sails onto it, fails the capture (only armies capture)
+            # and is destroyed with all its cargo.
+            if view.real_map().terrain_at(s) is not TerrainKind.WATER:
+                continue
+            sea_steps = sea_field.steps_to(s)
+            if sea_steps is None:
+                continue
+            land_neighbors = [
+                n for n in s.neighbors()
+                if n != target
+                and view.in_bounds(n)
+                and land_grid.is_passable(n)
+                and (md := target_land.steps_to(n)) is not None
+                and md <= _LAND_MARCH
+            ]
+            if not land_neighbors:
+                continue
+            in_gun = any(
+                ln.chebyshev_to(g) <= art
+                for ln in land_neighbors
+                for g in gun_cities
+            )
+            screen = sum(
+                1
+                for e in enemy
+                if min(ln.chebyshev_to(e) for ln in land_neighbors) <= _SCREEN_R
+            )
+            width = len(land_neighbors)
+            march = min(target_land.steps_to(n) or 0 for n in land_neighbors)
+            key = (in_gun, screen, -width, march, sea_steps, s.y, s.x)
+            if best_key is None or key < best_key:
+                best_key, best_sea = key, s
+    return best_sea
 
 
 def _sea_scout(

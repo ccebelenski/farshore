@@ -32,6 +32,12 @@ DEFEND_STRENGTH = 2
 THREAT_RANGE = 6
 # Strength a single amphibious operation commits.
 INVADE_STRENGTH = 3
+# Transports to assemble for a concentrated landing. One thin wave lands
+# outnumbered (~2 of ours vs ~6 defenders, per the projection probe) and is
+# retaken at once; a small fleet, staged and landed together, puts enough
+# ashore to win the landmass. Kept small and on ONE target — concentration,
+# not a fragmenting trickle to several (which regressed projection to zero).
+FLEET_TRANSPORTS = 2
 
 
 class CandidateGenerator:
@@ -216,33 +222,55 @@ class CandidateGenerator:
         def land_reachable(c: Coord) -> bool:
             return any(f.steps_to(c) is not None for f in fields)
 
+        # `land` = anything an army can walk to (home flood OR a beachhead) —
+        # stormed on foot by the massed-assault doctrine. `overseas` = anything
+        # our HOME continent can't reach, deliberately *not* excluding cities a
+        # beachhead already reaches: a landmass we've landed on but not yet won
+        # stays a ferry target so reinforcements keep flowing to it (holding
+        # takes local superiority, which one thin wave can't deliver). Such a
+        # city is then BOTH a land target (assault with what's ashore) and an
+        # overseas one (ferry more) — the two plans the search weighs by the
+        # local balance.
         land: list[Coord] = []
         overseas: list[Coord] = []
         for t in known:
-            (land if land_reachable(t) else overseas).append(t)
+            if land_reachable(t):
+                land.append(t)
+            if reach.steps_to(t) is None:
+                overseas.append(t)
         has_frontier = any(
             reach.steps_to(c) is not None for c in frontier_cells(view)
         )
         return land, overseas, has_frontier
 
     def _invade_plans(self, view: WorldView, overseas: list[Coord]) -> list[Plan]:
-        """One INVADE plan per nearest known coastal overseas city (empty if
-        none is known). Builds a transport until one exists, then armies to
-        fill it."""
+        """A single INVADE plan against the nearest known coastal overseas city
+        (empty if none is known).
+
+        One target, deliberately: the follower assembles its transports into a
+        fleet and lands them concentrated there. Spreading invade plans across
+        several targets fragments the force and regressed projection to zero.
+        Production builds hulls up to `FLEET_TRANSPORTS`, then armies to fill
+        them — by the time an overseas city is known the home continent usually
+        holds an army surplus, so hulls are the bottleneck, not troops."""
         coastal = [t for t in overseas if is_ocean_coastal(view, t)]
         if not coastal:
             return []
-        have_transport = any(
-            u.kind is UnitKind.TRANSPORT for u in view.own_units
+        target = coastal[0]
+        n_transports = sum(
+            1 for u in view.own_units if u.kind is UnitKind.TRANSPORT
         )
-        prod = UnitKind.ARMY if have_transport else UnitKind.TRANSPORT
+        prod = (
+            UnitKind.TRANSPORT
+            if n_transports < FLEET_TRANSPORTS
+            else UnitKind.ARMY
+        )
         return [
             Plan(
-                objectives=(Objective(t, Role.INVADE, INVADE_STRENGTH),),
+                objectives=(Objective(target, Role.INVADE, INVADE_STRENGTH),),
                 surplus=SurplusPolicy.RESERVE,
                 production=prod,
             )
-            for t in coastal[:TARGET_FAN]
         ]
 
     def _recon_plans(self, view: WorldView) -> list[Plan]:

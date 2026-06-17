@@ -21,6 +21,14 @@ Terms, in dominance order (see `planning/03-ai-design.md` §9.1):
   the reachable map is known), and it is bounded by a perimeter so it stays
   small by construction. See `_frontier_penalty`.
 
+- **Holdability / local force balance** (Phase 15.9+ §10): a city's worth is
+  conditioned on the armies in its neighborhood — an own city outnumbered
+  locally is discounted (recapture risk), and own force massed at an enemy/
+  neutral city is credited (a campaign-in-progress is worth something before
+  the city flips). This is what makes "invade and hold" a value the search can
+  *sustain*: the lean middle of a campaign reads as progress, not waste. See
+  `_contested_balance`.
+
 Deliberately absent in v1 (add only if the arena demands them): a Lanchester
 concentration term (massed > scattered at equal count). Weights are a frozen
 value type so variants are explicit objects, and the arena — not intuition —
@@ -34,7 +42,13 @@ from dataclasses import dataclass
 from empire.core.city import City
 from empire.core.game import Game
 from empire.core.identity import PlayerId
-from empire.core.unit import UNIT_REGISTRY
+from empire.core.unit import UNIT_REGISTRY, UnitKind
+
+# Chebyshev radius and per-city cap for the local-force-balance (holdability)
+# term. A city's fate turns on the armies in its immediate neighborhood, not
+# the global count; the cap keeps one lopsided cluster from dominating.
+_CONTEST_RADIUS = 3
+_CONTEST_CAP = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +65,18 @@ class EvalWeights:
     # 0.15 the whole term is worth a couple of armies at most and never rivals
     # a city. The one term most likely to need arena tuning.
     intel: float = 0.15
+    # Holdability / local force balance (Phase 15.9+ §10): conditions a city's
+    # worth on whether the local situation supports keeping (own) or taking
+    # (enemy/neutral) it. `recapture_risk` discounts an own city per net enemy
+    # army in its neighborhood — so a beachhead taken while outnumbered reads as
+    # the precarious thing it is, and bringing force to even the balance is
+    # visible progress. `pressure` credits own armies massed at an enemy/neutral
+    # city — a campaign-in-progress (force projected to contact) scores as value
+    # before the city flips, which is what lets the search *sustain* an invasion
+    # through its lean middle instead of abandoning it. Kept below `city` so
+    # neither ever inverts the basic territory calculus.
+    recapture_risk: float = 8.0
+    pressure: float = 4.0
 
 
 class Evaluator:
@@ -83,7 +109,43 @@ class Evaluator:
             score += sign * w.army
 
         score -= w.intel * self._frontier_penalty(game, player_id)
+        score += self._contested_balance(game, player_id, w)
         return score
+
+    @staticmethod
+    def _contested_balance(game: Game, player_id: PlayerId, w: EvalWeights) -> float:
+        """Local force balance around contested cities (holdability, §10).
+
+        For each own city locally outnumbered by enemy armies, a recapture-risk
+        discount; for each enemy/neutral city we have massed armies beside, a
+        pressure credit. Only land armies contest cities. Distances are
+        Chebyshev within `_CONTEST_RADIUS`; counts are capped so one big stack
+        can't run the score away."""
+        own_armies: list = []
+        enemy_armies: list = []
+        for u in game.map.all_units():
+            if u.kind is not UnitKind.ARMY:
+                continue
+            (own_armies if u.owner.id == player_id else enemy_armies).append(u.coord)
+        if not own_armies and not enemy_armies:
+            return 0.0
+
+        def near(coords: list, c) -> int:
+            return sum(1 for x in coords if x.chebyshev_to(c) <= _CONTEST_RADIUS)
+
+        adj = 0.0
+        for city in game.map.cities():
+            own_n = near(own_armies, city.coord)
+            enemy_n = near(enemy_armies, city.coord)
+            if city.owner is not None and city.owner.id == player_id:
+                deficit = enemy_n - own_n
+                if deficit > 0:
+                    adj -= w.recapture_risk * min(deficit, _CONTEST_CAP)
+            else:
+                surplus = own_n - enemy_n
+                if surplus > 0:
+                    adj += w.pressure * min(surplus, _CONTEST_CAP)
+        return adj
 
     @staticmethod
     def _frontier_penalty(game: Game, player_id: PlayerId) -> float:
