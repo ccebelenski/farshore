@@ -74,18 +74,20 @@ class CandidateGenerator:
         # Naval-mode returns emit ONLY naval plans — an army-building hold would
         # out-score a slower-building patrol/transport in the 12-turn playout.
         if not targets:
-            invade = self._invade_plans(view, overseas)
-            if invade:
-                return tuple(invade)
-            if has_land_frontier:
-                return (
-                    Plan(objectives=(), surplus=SurplusPolicy.SCOUT),
-                    Plan(objectives=(), surplus=SurplusPolicy.RESERVE),
-                )
-            recon = self._recon_plans(view)
-            return tuple(recon) if recon else (
-                Plan(objectives=(), surplus=SurplusPolicy.RESERVE),
-            )
+            # No KNOWN land target. Empty `targets` EARLY means the home
+            # continent is unexplored, NOT that it's won — so we must keep
+            # scouting it on foot to find the enemy at all (the regression bug:
+            # this branch used to switch straight to naval/RESERVE, so the AI
+            # never explored home and turtled to defeat). Always offer land
+            # exploration; naval (invade a discovered overseas city, recon the
+            # sea) is ADDITIVE, never a replacement; RESERVE is the last resort.
+            # `has_land_frontier` is no longer a gate — it glitches False on the
+            # first turn (vision not yet populated), which locked RESERVE.
+            del has_land_frontier
+            scout = Plan(objectives=(), surplus=SurplusPolicy.SCOUT)
+            reserve = Plan(objectives=(), surplus=SurplusPolicy.RESERVE)
+            naval = [*self._invade_plans(view, overseas), *self._recon_plans(view)]
+            return (scout, *naval, reserve)
 
         plans: list[Plan] = []
 
