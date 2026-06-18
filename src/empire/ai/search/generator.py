@@ -38,6 +38,10 @@ INVADE_STRENGTH = 3
 # ashore to win the landmass. Kept small and on ONE target — concentration,
 # not a fragmenting trickle to several (which regressed projection to zero).
 FLEET_TRANSPORTS = 2
+# Fighters to keep on hand for recon/strike. A couple of fast, far-seeing
+# scouts (scan 5, speed 8, fly anywhere) is plenty; more just starves ground
+# production. The follower builds them one base at a time (see PlanFollower).
+AIR_QUOTA = 2
 
 
 class CandidateGenerator:
@@ -87,7 +91,8 @@ class CandidateGenerator:
             scout = Plan(objectives=(), surplus=SurplusPolicy.SCOUT)
             reserve = Plan(objectives=(), surplus=SurplusPolicy.RESERVE)
             naval = [*self._invade_plans(view, overseas), *self._recon_plans(view)]
-            return (scout, *naval, reserve)
+            air = self._air_plans(view)
+            return (scout, *naval, *air, reserve)
 
         plans: list[Plan] = []
 
@@ -164,6 +169,7 @@ class CandidateGenerator:
         # pressing the land fight.
         plans.extend(self._invade_plans(view, overseas))
         plans.extend(self._recon_plans(view))
+        plans.extend(self._air_plans(view))
 
         # Baselines the search must always be able to fall back on.
         plans.append(Plan(objectives=(), surplus=SurplusPolicy.SCOUT))
@@ -287,6 +293,28 @@ class CandidateGenerator:
                 )
             ]
         return []
+
+    def _air_plans(self, view: WorldView) -> list[Plan]:
+        """Build a fighter for recon/strike while under the air quota and there
+        is still fog worth scouting. Fighters are the AI's best scouts (scan 5,
+        speed 8, fly over anything); the follower flies them (`plan_air`) and
+        builds them one base at a time. Empty once the quota is met or the map
+        is fully known. The search picks this only when a playout says a
+        scout's intel/strike is worth a city-turn of production."""
+        n_fighters = sum(
+            1 for u in view.own_units if u.kind is UnitKind.FIGHTER
+        )
+        if n_fighters >= AIR_QUOTA:
+            return []
+        if not frontier_cells(view) and not sea_frontier_cells(view):
+            return []
+        return [
+            Plan(
+                objectives=(),
+                surplus=SurplusPolicy.SCOUT,
+                production=UnitKind.FIGHTER,
+            )
+        ]
 
     @staticmethod
     def _home_centroid(view: WorldView) -> Coord:

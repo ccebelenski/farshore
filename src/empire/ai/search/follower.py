@@ -30,6 +30,7 @@ follower for each candidate playout and for each committed turn.
 
 from __future__ import annotations
 
+from empire.ai.search.air import plan_air
 from empire.ai.search.naval import SEA_KINDS, is_ocean_coastal, plan_naval
 from empire.ai.search.plan import Objective, Plan, Role, SurplusPolicy
 from empire.ai.strategic.behaviors.base import idle_step
@@ -72,10 +73,18 @@ class PlanFollower:
         # strands it. When the plan calls for a sea unit, build it only at
         # coastal cities and make cargo armies at the inland ones instead.
         sea_prod = self._plan.production in SEA_KINDS
+        # Fighters build at a single base, not fleet-wide — a couple of scouts
+        # is plenty and they refuel at home; the other cities keep making armies
+        # so an air plan doesn't gut ground production. Cheapest sane base: the
+        # first own city (deterministic).
+        air_prod = self._plan.production is UnitKind.FIGHTER
+        air_base = view.own_cities[0].id if air_prod and view.own_cities else None
         production: list[ProductionOrder] = []
         for c in view.own_cities:
             target = self._plan.production
             if sea_prod and not is_ocean_coastal(view, c.coord):
+                target = UnitKind.ARMY
+            elif air_prod and c.id != air_base:
                 target = UnitKind.ARMY
             # Re-target only when the city isn't already building the desired
             # kind. `building` is never cleared to None once set (production
@@ -108,8 +117,10 @@ class PlanFollower:
         """All unit moves + amphibious unloads this turn. Naval runs first
         and claims invasion-cargo armies; the land logic handles the rest."""
         naval = plan_naval(view, self._plan)
+        air = plan_air(view, self._plan)
         land = self._decide_land(view, naval.claimed_armies)
-        return {**land, **naval.moves}, naval.unloads
+        # Fighters are neither cargo nor land armies, so no claim conflict.
+        return {**land, **naval.moves, **air}, naval.unloads
 
     def _decide_land(
         self, view: WorldView, claimed: set[UnitId]
