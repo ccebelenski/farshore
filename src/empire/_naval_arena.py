@@ -23,11 +23,16 @@ import time
 
 from empire._arena import ArenaResult
 from empire.ai.baseline import BaselineAI
+from empire.ai.search.naval import SEA_KINDS
 from empire.contracts.controller import AIController
 from empire.core.game import Game
 from empire.core.player import Player
 from empire.core.ruleset import FORTIFIED_CITIES, STANDARD, MapProfile, RuleSet
+from empire.core.unit import UnitKind
 from empire.setup import build_game, land_continents
+
+# Sea unit kinds (telemetry: did the challenger build a navy at all).
+_SHIP_KINDS = SEA_KINDS
 
 
 def _challenger(kind: str) -> AIController:
@@ -74,8 +79,9 @@ def _home_continent(game: Game, player: Player) -> set[tuple[int, int]]:
 def play_match(
     profile: MapProfile, seed: int, challenger_first: bool, cap: int,
     rules: RuleSet = STANDARD, ai: str = "search",
-) -> tuple[str, int, int, int] | None:
-    """Run one game; return (outcome, turns, peak_off_home, end_off_home).
+) -> tuple[str, int, int, int, int, int] | None:
+    """Run one game; return (outcome, turns, peak_off_home, end_off_home,
+    peak_ships, peak_fighters).
     Outcome is 'strategic' | 'baseline' | 'draw' | 'unfinished' (labels match
     the land-brawl arena so `ArenaResult` is reusable).
 
@@ -102,43 +108,56 @@ def play_match(
             if c.owner is chal and (c.coord.x, c.coord.y) not in home
         )
 
+    def own_count(kind: UnitKind) -> int:
+        return sum(
+            1 for u in game.map.all_units()
+            if u.owner is chal and u.kind is kind
+        )
+
     peak_off_home = 0
+    peak_ships = 0  # any sea unit (transport/patrol/warship) — naval involvement
+    peak_fighters = 0  # air involvement
     for _ in range(cap):
         game.run_turn()
         peak_off_home = max(peak_off_home, off_home_now())
+        peak_ships = max(peak_ships, sum(own_count(k) for k in _SHIP_KINDS))
+        peak_fighters = max(peak_fighters, own_count(UnitKind.FIGHTER))
         if game.is_over():
             break
 
     end_off_home = off_home_now()
+    extra = (peak_ships, peak_fighters)
     if not game.is_over():
-        return ("unfinished", game.turn, peak_off_home, end_off_home)
+        return ("unfinished", game.turn, peak_off_home, end_off_home, *extra)
     winner = game.winner()
     if winner is None:
-        return ("draw", game.turn, peak_off_home, end_off_home)
+        return ("draw", game.turn, peak_off_home, end_off_home, *extra)
     label = "strategic" if winner is chal else "baseline"
-    return (label, game.turn, peak_off_home, end_off_home)
+    return (label, game.turn, peak_off_home, end_off_home, *extra)
 
 
 def run_arena(
     seeds: int, cap: int, profile: MapProfile = NAVAL_PROFILE, verbose: bool = True,
     rules: RuleSet = STANDARD, jobs: int = 1, ai: str = "search",
-) -> tuple[ArenaResult, int]:
+) -> tuple[ArenaResult, int, int, int, int]:
     """Each seed played twice (sides swapped) to cancel which side gets the
-    larger continent. Returns the win/loss tally plus two projection counts:
-    `ever_projected` (held >= 1 off-home city at any turn — did it cross water
-    at all) and `held_at_cap` (still holds one at game end — did the beachhead
-    stick)."""
+    larger continent. Returns the win/loss tally plus projection counts
+    (`ever_projected`, `held_at_cap`) and involvement counts (`built_navy`,
+    `built_air` — games where the challenger built any ship / any fighter, so we
+    can SEE naval/air are actually being used, not just the win outcome)."""
     result = ArenaResult()
     turns: list[int] = []
     ever_projected = 0
     held_at_cap = 0
+    built_navy = 0
+    built_air = 0
     start = time.time()
 
-    def consume(outcome: tuple[str, int, int, int] | None) -> None:
-        nonlocal ever_projected, held_at_cap
+    def consume(outcome: tuple[str, int, int, int, int, int] | None) -> None:
+        nonlocal ever_projected, held_at_cap, built_navy, built_air
         if outcome is None:
             return
-        label, played, peak_off_home, end_off_home = outcome
+        label, played, peak_off_home, end_off_home, peak_ships, peak_fighters = outcome
         setattr(result, label, getattr(result, label) + 1)
         if label in ("strategic", "baseline"):
             turns.append(played)
@@ -146,6 +165,10 @@ def run_arena(
             ever_projected += 1
         if end_off_home > 0:
             held_at_cap += 1
+        if peak_ships > 0:
+            built_navy += 1
+        if peak_fighters > 0:
+            built_air += 1
 
     specs = [(seed, cf) for seed in range(seeds) for cf in (True, False)]
     if jobs <= 1:
@@ -167,12 +190,13 @@ def run_arena(
                         f"  {done}/{len(futures)} games: S={result.strategic} "
                         f"B={result.baseline} draw={result.draw} "
                         f"unfin={result.unfinished} ever={ever_projected} "
-                        f"held={held_at_cap} ({time.time() - start:.0f}s)",
+                        f"held={held_at_cap} navy={built_navy} air={built_air} "
+                        f"({time.time() - start:.0f}s)",
                         flush=True,
                     )
 
     result.mean_turns = sum(turns) / len(turns) if turns else 0.0
-    return result, ever_projected, held_at_cap
+    return result, ever_projected, held_at_cap, built_navy, built_air
 
 
 def main() -> None:
@@ -197,12 +221,14 @@ def main() -> None:
 
     rules = FORTIFIED_CITIES if args.fortified else STANDARD
     print(f"ruleset: {rules.name}  jobs: {args.jobs}  ai: {args.ai}  cap: {args.cap}")
-    result, ever_projected, held_at_cap = run_arena(
+    result, ever_projected, held_at_cap, built_navy, built_air = run_arena(
         args.seeds, args.cap, rules=rules, jobs=args.jobs, ai=args.ai
     )
     total = 2 * args.seeds
     print(f"\n{total} games: S={result.strategic} B={result.baseline} "
           f"draw={result.draw} unfinished={result.unfinished}")
+    print(f"involvement — built a navy (any ship): {built_navy}/{total} games; "
+          f"built air (any fighter): {built_air}/{total} games")
     print(f"projection — ever crossed water (held an off-home city at any "
           f"turn): {ever_projected}/{total} games")
     print(f"projection — beachhead stuck (still held at cap): "
