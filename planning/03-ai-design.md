@@ -784,3 +784,50 @@ library:
 So the invade-and-hold campaign is a small library of weighable structures —
 **invade** (built) · **reinforce** · **assault** (exists) · **retreat** —
 selected each turn under fog-honest, per-turn-rescored, odds-aware valuation.
+
+### 10.2 The value surface — why projection never started (Phase 15.9+)
+
+The naval pipeline was built (recon, transports, landing, the campaign library
+above) yet multi-continent projection sat at zero. A set-piece sweep —
+`_setpiece.py` (inject units, single-step) and `_eval_curves.py` (feed the
+`Evaluator` controlled positions, measure the response) — found the cause was
+**not** the pipeline but the **value function**. Handed patrols for free, the AI
+discovered three overseas cities and *still* would not invade: an amphibious op
+shows ~zero progress inside the 12-turn horizon while a land assault banks a
++100 city, so land wins every playout. The deeper measurement (curve simulator)
+showed the value surface toward overseas conquest is a **flat-to-downhill plain
+ending in a cliff at capture**:
+
+- **Explore** → *penalised*. The old `intel` term counted the fog *perimeter*;
+  pushing the boundary out grows the perimeter, so scouting *lowered* the score,
+  and a sea-ringed continent never reached the self-flattening zero.
+- **Discover a landmass** → *penalised* (measured −4.65 for four cities). Neutral
+  cities scored 0 ("opportunity, not assets"); enemy cities scored negative
+  (zero-sum); revealing coastline only *added* perimeter penalty.
+- **Approach** → *flat*. `pressure` (holdability) credits force only once it is
+  already within 3 tiles of the target — a step at the end, not a ramp toward it.
+- **Capture** → +∞, but beyond the horizon.
+
+A short-horizon search climbs gradients; there was none to climb, so it never
+left home. The fix reshapes the surface to **ascend** the whole way (home-blind
+→ explore → discover → approach → capture), two terms replacing the broken one:
+
+- **Opportunity.** A known, unowned, *reachable* city carries a
+  distance-discounted fraction of city value — discovery becomes a value *spike*,
+  approach a *ramp*. Distance is **projection-aware**: a same-landmass target is
+  discounted by land-march distance; an overseas one pays a `ferry_penalty` plus
+  the crossing (two multi-source BFS floods, land-grid and air-grid, from our
+  forces). Kept below `city` so capturing always beats loitering beside a prize.
+- **Exploration.** Reward *seen area* (information gained), land weighted above
+  sea (cities live on land; open ocean is the low-prior frontier side). Monotone
+  in exploration — the opposite of the perimeter penalty — so clearing fog toward
+  likely prizes is worth something.
+
+Both are one-sided (own fog only, not zero-sum), bounded below `city`, and
+weights live in `EvalWeights` so the arena tunes them. The four curves
+(`_eval_curves.py`) are the fast regression oracle for the *shape*; the land
+arenas (STANDARD + FORTIFIED) guard against regressing the land game — these
+terms touch **every** position, not just naval — and the naval arena measures
+whether projection finally starts. This is the principled form of "value should
+shift as the situation changes": the gradient, not a doctrine override, is what
+turns the search toward the sea.

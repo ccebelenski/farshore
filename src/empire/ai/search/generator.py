@@ -78,21 +78,27 @@ class CandidateGenerator:
         # Naval-mode returns emit ONLY naval plans — an army-building hold would
         # out-score a slower-building patrol/transport in the 12-turn playout.
         if not targets:
-            # No KNOWN land target. Empty `targets` EARLY means the home
-            # continent is unexplored, NOT that it's won — so we must keep
-            # scouting it on foot to find the enemy at all (the regression bug:
-            # this branch used to switch straight to naval/RESERVE, so the AI
-            # never explored home and turtled to defeat). Always offer land
-            # exploration; naval (invade a discovered overseas city, recon the
-            # sea) is ADDITIVE, never a replacement; RESERVE is the last resort.
-            # `has_land_frontier` is no longer a gate — it glitches False on the
-            # first turn (vision not yet populated), which locked RESERVE.
-            del has_land_frontier
-            scout = Plan(objectives=(), surplus=SurplusPolicy.SCOUT)
+            # No KNOWN land target. Two cases that must NOT be conflated:
+            #   - home continent still has unexplored land → keep scouting it on
+            #     foot to find the enemy at all (the original regression: this
+            #     branch jumped straight to naval/RESERVE, so the AI never
+            #     explored home and turtled to defeat — empty `targets` early
+            #     means UNEXPLORED, not "home won");
+            #   - home is fully explored → drop SCOUT so naval/air projection
+            #     takes over (offering SCOUT here lets it stick via hysteresis
+            #     and crowd out the ships, which stalls projection — navy=0).
+            # `has_land_frontier` is the gate, but it reads False on turn 0-1
+            # before the opening scan populates vision, so force exploration then.
+            naval = [
+                *self._invade_plans(view, overseas),
+                *self._recon_plans(view),
+                *self._air_plans(view),
+            ]
             reserve = Plan(objectives=(), surplus=SurplusPolicy.RESERVE)
-            naval = [*self._invade_plans(view, overseas), *self._recon_plans(view)]
-            air = self._air_plans(view)
-            return (scout, *naval, *air, reserve)
+            if has_land_frontier or view.turn <= 1:
+                scout = Plan(objectives=(), surplus=SurplusPolicy.SCOUT)
+                return (scout, *naval, reserve)
+            return (*naval, reserve) if naval else (reserve,)
 
         plans: list[Plan] = []
 

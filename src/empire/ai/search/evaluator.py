@@ -11,15 +11,24 @@ Terms, in dominance order (see `planning/03-ai-design.md` §9.1):
   of an army — without this term the search can't see value building up.
 - **Material**: armies on the board.
 
-- **Intel / frontier** (Phase 15.9): an unexplored *reachable* frontier is a
-  standing penalty, so a position that has pushed back the fog scores higher.
-  Without it a scouting plan and a sit-still plan are indistinguishable to the
-  search (same cities, same material), so exploration never wins a playout —
-  which is why naval projection didn't start until the land game was fully
-  exhausted (the enemy continent stayed undiscovered). The term is *one-sided*
-  (only our own fog; it is not zero-sum) and self-flattening (it vanishes once
-  the reachable map is known), and it is bounded by a perimeter so it stays
-  small by construction. See `_frontier_penalty`.
+- **Exploration / information** (Phase 15.9+ §10.2): seen area is rewarded —
+  land worth more than sea (cities live on land; open ocean is the low-prior
+  side of the frontier). This *replaces* the original perimeter-penalty `intel`
+  term, which we measured to be counterproductive: a perimeter count *rises* as
+  you push the fog back (a growing seen region has a growing boundary), so it
+  penalised the very scouting it was meant to reward, and a sea-ringed continent
+  never reaches the self-flattening zero. Rewarding seen-area instead is monotone
+  in exploration and one-sided (only our own fog; not zero-sum). The legacy
+  `intel` weight defaults to 0; `_frontier_penalty` is kept for comparison only.
+
+- **Opportunity** (Phase 15.9+ §10.2): a known, unowned, *reachable* city carries
+  a distance-discounted fraction of city value — so discovering an overseas
+  landmass is a value *spike* (not the penalty the old surface produced) and
+  bringing force toward it is a value *ramp* the short-horizon search can climb
+  to the capture payoff. Distance is projection-aware: a same-landmass target is
+  discounted by land-march distance; an overseas target pays a ferry surcharge
+  plus the crossing. Always kept below `city` so capturing a prize strictly beats
+  loitering beside it. See `_opportunity_and_exploration`.
 
 - **Holdability / local force balance** (Phase 15.9+ §10): a city's worth is
   conditioned on the armies in its neighborhood — an own city outnumbered
@@ -37,12 +46,17 @@ is what tunes them.
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 
 from empire.core.city import City
+from empire.core.coord import Coord
 from empire.core.game import Game
 from empire.core.identity import PlayerId
+from empire.core.tile import TerrainKind
 from empire.core.unit import UNIT_REGISTRY, UnitKind
+from empire.pathfinding.cost import AIR, ARMY
+from empire.pathfinding.distance_field import PassabilityGrid
 
 # Chebyshev radius and per-city cap for the local-force-balance (holdability)
 # term. A city's fate turns on the armies in its immediate neighborhood, not
@@ -60,11 +74,26 @@ class EvalWeights:
     city: float = 100.0
     army: float = 10.0
     production: float = 8.0  # one *completed* build ≈ most of an army
-    # Penalty per unexplored tile bordering our seen region (the reachable
-    # frontier). Small — a typical mid-game frontier is tens of tiles, so at
-    # 0.15 the whole term is worth a couple of armies at most and never rivals
-    # a city. The one term most likely to need arena tuning.
-    intel: float = 0.15
+    # Legacy perimeter-penalty (Phase 15.9). Measured counterproductive — it
+    # penalised scouting and never self-flattened on a sea-ringed continent — so
+    # it is disabled (0.0) and superseded by the exploration term below. Kept as
+    # a weight so the old behavior can still be A/B'd in the curve simulator.
+    intel: float = 0.0
+    # Exploration / information (§10.2): reward per seen cell, land worth more
+    # than sea. Small — a ~100-cell home continent at 0.5/land ≈ 50, well under a
+    # city; the point is a monotone scouting gradient, not territory rivalry.
+    explore_land: float = 0.5
+    explore_sea: float = 0.05
+    # Opportunity (§10.2): a known unowned reachable city is worth up to
+    # `opportunity` when our force is adjacent, decaying with projection
+    # distance. Below `city` so capturing always beats loitering. `opp_scale`
+    # sets the reach of the ramp (turns of distance per e-fold of `opp_decay`);
+    # `ferry_penalty` is the extra projection cost charged to an overseas
+    # (water-crossing) target on top of the crossing distance.
+    opportunity: float = 50.0
+    opp_decay: float = 0.85
+    opp_scale: float = 5.0
+    ferry_penalty: float = 6.0
     # Holdability / local force balance (Phase 15.9+ §10): conditions a city's
     # worth on whether the local situation supports keeping (own) or taking
     # (enemy/neutral) it. `recapture_risk` discounts an own city per net enemy
@@ -108,9 +137,104 @@ class Evaluator:
             sign = 1.0 if unit.owner.id == player_id else -1.0
             score += sign * w.army
 
-        score -= w.intel * self._frontier_penalty(game, player_id)
+        if w.intel:
+            score -= w.intel * self._frontier_penalty(game, player_id)
         score += self._contested_balance(game, player_id, w)
+        score += self._opportunity_and_exploration(game, player_id, w)
         return score
+
+    @staticmethod
+    def _multi_source_bfs(origins: list[Coord], grid: PassabilityGrid) -> list[int]:
+        """Min step count from the nearest of `origins` to every cell (-1 if
+        unreachable), one 8-connected BFS seeded with all sources at once. The
+        sources themselves are distance 0 regardless of their own passability
+        (a unit standing on a city/coast still counts as 'here')."""
+        width, height = grid.width, grid.height
+        dist = [-1] * (width * height)
+        flags = grid.flags
+        queue: deque[int] = deque()
+        for o in origins:
+            if 0 <= o.x < width and 0 <= o.y < height:
+                i = o.y * width + o.x
+                if dist[i] != 0:
+                    dist[i] = 0
+                    queue.append(i)
+        while queue:
+            i = queue.popleft()
+            nd = dist[i] + 1
+            x, y = i % width, i // width
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < width and 0 <= ny < height:
+                        j = ny * width + nx
+                        if dist[j] < 0 and flags[j]:
+                            dist[j] = nd
+                            queue.append(j)
+        return dist
+
+    def _opportunity_and_exploration(
+        self, game: Game, player_id: PlayerId, w: EvalWeights
+    ) -> float:
+        """Exploration (seen-area, land>sea) + opportunity (distance-discounted
+        value of known unowned reachable cities). See class docstring §10.2."""
+        player = game.player_by_id(player_id)
+        if player is None:
+            return 0.0
+        view = player.view
+        real_map = game.map
+        total = 0.0
+
+        if w.explore_land or w.explore_sea:
+            land = sea = 0
+            for c in view.visible | view.remembered.keys():
+                if real_map.terrain_at(c) is TerrainKind.WATER:
+                    sea += 1
+                else:
+                    land += 1
+            total += w.explore_land * land + w.explore_sea * sea
+
+        if not w.opportunity:
+            return total
+
+        # Anchors: every own force we could project from (cities + land armies).
+        anchors = [
+            c.coord for c in real_map.cities()
+            if c.owner is not None and c.owner.id == player_id
+        ]
+        anchors += [
+            u.coord for u in real_map.all_units()
+            if u.owner.id == player_id and u.kind is UnitKind.ARMY
+        ]
+        if not anchors:
+            return total
+
+        # Known unowned cities only — can't value what we haven't found.
+        targets = [
+            city for city in real_map.cities()
+            if not (city.owner is not None and city.owner.id == player_id)
+            and view.seen(city.coord)
+        ]
+        if not targets:
+            return total
+
+        width = real_map.width
+        land_d = self._multi_source_bfs(anchors, PassabilityGrid(real_map, ARMY))
+        any_d = self._multi_source_bfs(anchors, PassabilityGrid(real_map, AIR))
+        for city in targets:
+            idx = city.coord.y * width + city.coord.x
+            march = land_d[idx]
+            if march >= 0:
+                cost = float(march)  # same landmass — just walk there
+            else:
+                crossing = any_d[idx]
+                if crossing < 0:  # AIR-unreachable (enclosed) — straight-line
+                    crossing = min(city.coord.chebyshev_to(a) for a in anchors)
+                cost = float(crossing) + w.ferry_penalty  # overseas — ferry it
+            total += w.opportunity * (w.opp_decay ** (cost / w.opp_scale))
+        return total
 
     @staticmethod
     def _contested_balance(game: Game, player_id: PlayerId, w: EvalWeights) -> float:

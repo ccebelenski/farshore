@@ -6,7 +6,7 @@ outweigh any plausible skirmish gain, and production-in-flight is worth a
 fraction of a finished unit.
 """
 
-from empire.ai.search.evaluator import Evaluator
+from empire.ai.search.evaluator import Evaluator, EvalWeights
 from empire.core.city import City, ProductionState
 from empire.core.coord import Coord
 from empire.core.game import Game
@@ -120,3 +120,66 @@ def test_production_in_flight_counts_fractionally() -> None:
     warm = _game(p1_cities=1, p2_cities=2, p1_city_work=4)  # army is 5 work
     gain = e.evaluate(warm, P1) - e.evaluate(cold, P1)
     assert 0.0 < gain < 10.0  # worth something, less than a finished army
+
+
+# --- §10.2 value-surface terms: opportunity + exploration --------------------
+
+# Isolating weights: each turns on exactly one of the new terms (intel off).
+_OPP_ONLY = EvalWeights(intel=0.0, explore_land=0.0, explore_sea=0.0)
+_EXPLORE_ONLY = EvalWeights(intel=0.0, opportunity=0.0)
+
+
+def _see_all(game: Game, pid: PlayerId) -> None:
+    p = game.player_by_id(pid)
+    assert p is not None
+    p.view.visible = {Coord(x, y) for x in range(10) for y in range(10)}
+
+
+def test_discovered_unowned_city_is_an_opportunity() -> None:
+    """A known, reachable, unowned city carries positive value — discovery is a
+    draw toward the prize, not the old penalty/zero."""
+    e = Evaluator(_OPP_ONLY)
+    g = _game(p1_cities=1, p2_cities=1, neutral_cities=1)
+    blind = e.evaluate(g, P1)  # empty view: prize unknown → no opportunity
+    _see_all(g, P1)
+    assert e.evaluate(g, P1) > blind
+
+
+def test_capturing_beats_loitering_beside_the_prize() -> None:
+    """Opportunity must stay below the value of actually owning the city, so the
+    search never prefers sitting next to a prize over taking it."""
+    e = Evaluator(_OPP_ONLY)
+    g = _game(p1_cities=1, p2_cities=1, neutral_cities=1)
+    _see_all(g, P1)
+    loiter = e.evaluate(g, P1)
+    prize = next(c for c in g.map.cities() if c.owner is None)
+    prize.owner = g.player_by_id(P1)
+    assert e.evaluate(g, P1) > loiter
+
+
+def test_opportunity_decays_with_distance() -> None:
+    """A reachable prize nearer our force is worth more than a farther one."""
+    e = Evaluator(_OPP_ONLY)
+    near = _game(p1_cities=1, p2_cities=1)
+    far = _game(p1_cities=1, p2_cities=1)
+    # add one neutral city, near vs far from P1's anchor at (0, 0)
+    for g, at in ((near, Coord(2, 0)), (far, Coord(9, 9))):
+        tile = g.map.tile(at)
+        city = City(id=CityId(99), coord=at, owner=None,
+                    production=ProductionState(building=None, work=0))
+        g.map._tiles[at] = Tile(coord=at, terrain=TerrainKind.CITY, city=city)
+        _see_all(g, P1)
+    assert e.evaluate(near, P1) > e.evaluate(far, P1)
+
+
+def test_exploration_rewards_information_gained() -> None:
+    """Seeing more of the map raises the score — a monotone scouting gradient,
+    the opposite of the old perimeter penalty."""
+    e = Evaluator(_EXPLORE_ONLY)
+    g = _game(p1_cities=1, p2_cities=1)
+    p = g.player_by_id(P1)
+    assert p is not None
+    p.view.visible = {Coord(x, y) for x in range(3) for y in range(3)}
+    less = e.evaluate(g, P1)
+    p.view.visible = {Coord(x, y) for x in range(10) for y in range(10)}
+    assert e.evaluate(g, P1) > less

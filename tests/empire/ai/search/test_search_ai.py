@@ -160,6 +160,11 @@ def test_search_prefers_capturing_a_defenseless_city() -> None:
     tiles[home.coord] = Tile(coord=home.coord, terrain=TerrainKind.CITY, city=home)
     prize = City(id=CityId(2), coord=Coord(4, 0), owner=None)
     tiles[prize.coord] = Tile(coord=prize.coord, terrain=TerrainKind.CITY, city=prize)
+    # P2 must own a city, or the game starts already-won (P2 has nothing) and
+    # the evaluator short-circuits to +win for every plan — the test then passes
+    # only by tie-break luck, not because the army was sent at the prize.
+    foe = City(id=CityId(3), coord=Coord(7, 7), owner=p2)
+    tiles[foe.coord] = Tile(coord=foe.coord, terrain=TerrainKind.CITY, city=foe)
     real_map = Map(width=8, height=8, tiles=tiles)
     army = Army(UnitId(1), p1, Coord(2, 0))
     real_map.place_unit(army, Coord(2, 0))
