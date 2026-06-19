@@ -1,12 +1,12 @@
 """`LogPanel`: scrolling event log. Subscribes to `EventBus` and appends
 human-readable lines for unit moves, captures, removals, and turn ticks.
 
-Fog of war: events outside the human player's visible/remembered set are
-not written. Own units always show (the human owns them — fog never
-hides your own actions from yourself). Enemy production at an unseen
-city, an enemy unit walking across an unseen continent, etc. are all
-suppressed — otherwise the log silently betrays information the player
-should have to scout for.
+Fog of war: a LIVE event is written only where the human can CURRENTLY see
+(`view.visible`) — NOT in merely *remembered* cells, which are stale terrain you
+can't actually watch. Own units always show (fog never hides your own actions
+from yourself). Enemy production at an unseen city, an enemy unit walking across
+fog (even fog you've previously scouted), etc. are all suppressed — otherwise
+the log silently betrays information the player should have to scout for.
 """
 
 from __future__ import annotations
@@ -93,8 +93,12 @@ class LogPanel(VerticalScroll):
         def write(line: str) -> None:
             log.write(line)
 
-        def seen(c: Coord) -> bool:
-            return c in viewer.view.visible or c in viewer.view.remembered
+        def visible_now(c: Coord) -> bool:
+            # LIVE events (move / produce / destroy / capture / shellfall) are
+            # only observable where the viewer can CURRENTLY see. `remembered`
+            # cells are stale terrain you can't watch — including them (the old
+            # `seen`) leaked enemy movement through fogged-but-remembered areas.
+            return c in viewer.view.visible
 
         def own_unit(uid: int) -> bool:
             unit = real_map.unit_by_id(UnitId(uid))
@@ -106,7 +110,7 @@ class LogPanel(VerticalScroll):
         def on_placed(e: UnitPlacedEvent) -> None:
             remember(int(e.unit_id))
             mine = own_unit(int(e.unit_id))
-            if not (mine or seen(e.at)):
+            if not (mine or visible_now(e.at)):
                 return
             line = f"  produced {label(int(e.unit_id))} at ({e.at.x},{e.at.y})"
             write(line if mine else f"[red]{line}[/red]")
@@ -114,7 +118,7 @@ class LogPanel(VerticalScroll):
         def on_moved(e: UnitMovedEvent) -> None:
             remember(int(e.unit_id))
             mine = own_unit(int(e.unit_id))
-            if not (mine or seen(e.from_) or seen(e.to)):
+            if not (mine or visible_now(e.from_) or visible_now(e.to)):
                 return
             line = (
                 f"  {label(int(e.unit_id))} moved "
@@ -125,7 +129,7 @@ class LogPanel(VerticalScroll):
         def on_removed(e: UnitRemovedEvent) -> None:
             # The unit is gone — we can't tell whose it was. Treat every
             # destruction as a conflict event (combat, capture failure).
-            if not seen(e.last_coord):
+            if not visible_now(e.last_coord):
                 return
             write(
                 f"  [magenta]{label(int(e.unit_id))} destroyed at "
@@ -136,7 +140,7 @@ class LogPanel(VerticalScroll):
             # Disband fires on the owner's own city cell, which the owner can
             # always see; fog-filter by location so enemy disbands at unseen
             # cities stay hidden. Yellow: a (usually self-inflicted) loss.
-            if not seen(e.last_coord):
+            if not visible_now(e.last_coord):
                 return
             write(
                 f"  [yellow]{label(int(e.unit_id))} disbanded (no city room) at "
@@ -148,7 +152,7 @@ class LogPanel(VerticalScroll):
 
             city = real_map.city_by_id(CityId(int(e.city_id)))
             is_own_now = city is not None and city.owner is viewer
-            if not is_own_now and (city is None or not seen(city.coord)):
+            if not is_own_now and (city is None or not visible_now(city.coord)):
                 return
             owner = "?" if e.new_owner_id is None else f"P#{int(e.new_owner_id)}"
             line = f"  city#{int(e.city_id)} captured by {owner}"
@@ -163,7 +167,7 @@ class LogPanel(VerticalScroll):
             # Attribution for artillery losses ("why did my army just die?").
             # Filter by the target's location: if you can see the shellfall,
             # you learn about the shot.
-            if not seen(e.target_coord):
+            if not visible_now(e.target_coord):
                 return
             from empire.core.identity import CityId
 

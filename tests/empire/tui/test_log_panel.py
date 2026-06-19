@@ -4,10 +4,10 @@ The widget subscribes to `EventBus` and writes filtered lines into its
 embedded `RichLog`. Filter rules:
   - Turn ticks and GameEnded always show (game-wide events).
   - Own-unit events (production / movement) always show.
-  - Enemy production / movement show only if the relevant coord is
-    visible or remembered by the viewer.
-  - Unit destruction shows only if the coord is seen.
-  - City capture shows if the city is now own, or its coord is seen.
+  - Enemy production / movement / destruction / capture (LIVE events) show
+    only if the relevant coord is CURRENTLY visible — not merely remembered
+    (stale terrain you can't watch).
+  - City capture shows if the city is now own, or its coord is visible.
 
 These tests mount the widget in a minimal Textual app so its `query_one`
 plumbing works, publish events on a bus, then introspect the
@@ -258,3 +258,47 @@ async def test_never_observed_unit_falls_back_to_generic_label() -> None:
         bus.publish(UnitRemovedEvent(unit_id=UnitId(404), last_coord=Coord(2, 2)))
         await host.workers.wait_for_complete()
         assert any("unit#404 destroyed" in line for line in _lines(host.panel))
+
+
+async def test_enemy_movement_in_remembered_only_cells_does_not_log() -> None:
+    """Regression: a LIVE enemy move is observable only where the viewer can
+    CURRENTLY see — NOT in cells it merely remembers (stale terrain). The log
+    used to leak enemy moves through fogged-but-remembered areas."""
+    from empire.core.map import RememberedTile
+
+    me = Player(id=PlayerId(1), name="Me", is_ai=False, view=ViewMap())
+    enemy = Player(id=PlayerId(2), name="Enemy", is_ai=True, view=ViewMap())
+    real_map = _land_map(4, 4)
+    real_map.place_unit(Army(UnitId(99), enemy, Coord(3, 3)), Coord(3, 3))
+    # Both endpoints remembered (seen once) but not currently visible.
+    for c in (Coord(3, 3), Coord(2, 3)):
+        me.view.remembered[c] = RememberedTile(
+            coord=c, terrain=TerrainKind.LAND, remembered_at=1
+        )
+    bus = EventBus()
+    host = _LogHost()
+    async with host.run_test():
+        host.panel.attach_to(bus, real_map, me)
+        bus.publish(
+            UnitMovedEvent(unit_id=UnitId(99), from_=Coord(3, 3), to=Coord(2, 3)),
+        )
+        await host.workers.wait_for_complete()
+        assert not any("#99" in line for line in _lines(host.panel))
+
+
+async def test_enemy_movement_into_visible_cell_logs() -> None:
+    """An enemy arriving in a currently-visible cell IS observed."""
+    me = Player(id=PlayerId(1), name="Me", is_ai=False, view=ViewMap())
+    enemy = Player(id=PlayerId(2), name="Enemy", is_ai=True, view=ViewMap())
+    real_map = _land_map(4, 4)
+    real_map.place_unit(Army(UnitId(99), enemy, Coord(3, 3)), Coord(3, 3))
+    me.view.visible.add(Coord(2, 3))  # the destination is in sight
+    bus = EventBus()
+    host = _LogHost()
+    async with host.run_test():
+        host.panel.attach_to(bus, real_map, me)
+        bus.publish(
+            UnitMovedEvent(unit_id=UnitId(99), from_=Coord(3, 3), to=Coord(2, 3)),
+        )
+        await host.workers.wait_for_complete()
+        assert any("#99" in line for line in _lines(host.panel))
