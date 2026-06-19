@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "empire"
 version = "0.0.0"
-description = "TUI reimplementation of Walter Bright's Empire: Wargame of the Century"
+description = "TUI reimplementation of Empire: Wargame of the Century"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

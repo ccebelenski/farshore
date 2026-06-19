@@ -1,6 +1,6 @@
 # Empire
 
-A turn-based wargame in Python, inspired by Walter Bright's *Empire* (1977).
+A turn-based wargame in Python.
 
 Gameplay: a turn-based, single-player-vs-AI wargame on a grid map. Cities produce military units; players capture each other's cities until one side controls the world. Fog of war is in effect.
 

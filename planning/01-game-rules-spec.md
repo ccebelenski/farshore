@@ -1,6 +1,6 @@
 # Game Rules Specification
 
-The rules of the game, in our own terms. Inspired by the genre Walter Bright created with *Empire* (1977); see [`00-project-notes.md`](00-project-notes.md).
+The rules of the game, in our own terms. See [`00-project-notes.md`](00-project-notes.md).
 
 Numerical values are our design choices, subject to playtesting. Values marked `(TBD)` are decided during the relevant implementation phase. The implementer should treat this document as canonical — if it's ambiguous, fix the spec.
 

@@ -17,7 +17,7 @@ Planning artifacts. This directory captures design decisions made *before* writi
 
 ## Quick summary
 
-**Goal:** A turn-based wargame in Python, inspired by Walter Bright's *Empire* (1977).
+**Goal:** A turn-based wargame in Python.
 
 **Stack:**
 - **Language:** Python 3.11+, strictly object-oriented.
