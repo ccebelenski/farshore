@@ -72,3 +72,13 @@ direction: add an opportunistic-attack step to the follower — before/after a
 unit's planned move, if an adjacent enemy is a favorable target (odds/value),
 take the attack. Verify first that it's structural (follower never engages
 off-plan) vs the search declining unfavorable odds. Meatier than a UI fix.
+
+### "Mass map update" on a failed load (need repro detail)
+Moving an army onto a FULL transport correctly fails, but the map appeared to do
+a "mass update" at that moment. State is correct (load rejected). Two benign
+candidates: (1) the army actually moved several cells toward the transport first,
+revealing fog en route — only the final load step failed (legit); (2) cosmetic —
+every action triggers a full map re-render (for the hint line), repainting the
+whole grid even on a no-op. To tell them apart next time: did map CONTENT change
+(new terrain/units = case 1) or just flicker with identical content (case 2)? If
+case 2 is distracting, we can skip the map repaint when steps_taken == 0.
