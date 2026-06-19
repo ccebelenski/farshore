@@ -172,8 +172,10 @@ class LogPanel(VerticalScroll):
             from empire.core.identity import CityId
 
             city = real_map.city_by_id(CityId(int(e.city_id)))
+            mine = city is not None and city.owner is viewer
             where = (
-                f"city#{int(e.city_id)} ({city.coord.x},{city.coord.y})"
+                f"{'your ' if mine else ''}city#{int(e.city_id)} "
+                f"({city.coord.x},{city.coord.y})"
                 if city is not None
                 else f"city#{int(e.city_id)}"
             )
@@ -182,10 +184,13 @@ class LogPanel(VerticalScroll):
                 f"{label(int(e.target_id))} at "
                 f"({e.target_coord.x},{e.target_coord.y})"
             )
+            # Your guns firing on a foe is good news (green); a hostile city
+            # shelling you is a conflict event (magenta).
+            color = "green" if mine else "magenta"
             if e.destroyed:
-                write(f"  [magenta]{where} artillery DESTROYS {target}[/magenta]")
+                write(f"  [{color}]{where} artillery DESTROYS {target}[/{color}]")
             elif e.hit:
-                write(f"  [magenta]{where} artillery hits {target}[/magenta]")
+                write(f"  [{color}]{where} artillery hits {target}[/{color}]")
             else:
                 write(f"  {where} artillery fires at {target} — miss")
 

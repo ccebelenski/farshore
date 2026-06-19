@@ -23,6 +23,7 @@ from empire.core.city import City
 from empire.core.coord import Coord
 from empire.core.events import (
     CityCapturedEvent,
+    CityFiredEvent,
     GameEndedEvent,
     TurnAdvancedEvent,
     UnitMovedEvent,
@@ -302,3 +303,27 @@ async def test_enemy_movement_into_visible_cell_logs() -> None:
         )
         await host.workers.wait_for_complete()
         assert any("#99" in line for line in _lines(host.panel))
+
+
+async def test_own_city_artillery_is_marked_yours() -> None:
+    """Your own city's artillery reads as YOURS (green, 'your city#…'), so you
+    can tell your guns firing from an enemy/neutral city shelling you."""
+    me = Player(id=PlayerId(1), name="Me", is_ai=False, view=ViewMap())
+    enemy = Player(id=PlayerId(2), name="Foe", is_ai=True, view=ViewMap())
+    mycity = City(id=CityId(1), coord=Coord(2, 2), owner=me)
+    real_map = _land_map(6, 6, cities={Coord(2, 2): mycity})
+    real_map.place_unit(Army(UnitId(99), enemy, Coord(3, 3)), Coord(3, 3))
+    me.view.visible.add(Coord(3, 3))  # you can see the shellfall
+    bus = EventBus()
+    host = _LogHost()
+    async with host.run_test():
+        host.panel.attach_to(bus, real_map, me)
+        bus.publish(
+            CityFiredEvent(
+                city_id=CityId(1), target_id=UnitId(99),
+                target_coord=Coord(3, 3), hit=True, destroyed=True,
+            )
+        )
+        await host.workers.wait_for_complete()
+        lines = _lines(host.panel)
+        assert any("your city#1" in line and "DESTROYS" in line for line in lines)
