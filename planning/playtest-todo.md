@@ -82,3 +82,24 @@ every action triggers a full map re-render (for the hint line), repainting the
 whole grid even on a no-op. To tell them apart next time: did map CONTENT change
 (new terrain/units = case 1) or just flicker with identical content (case 2)? If
 case 2 is distracting, we can skip the map repaint when steps_taken == 0.
+
+### HEADLINE: SearchAI is a weak/passive opponent vs a human
+Playtest (t193, FORTIFIED-ish brawl): "the enemy puts up nearly no resistance; I
+tear through them; every army I lost was to my OWN attacks." => the AI dealt the
+human ~zero damage all game. Not merely suboptimal — it barely fights. This is
+the honest-fog weakness the arena flagged (search ~even with BaselineAI on
+STANDARD once it can't see through fog), now obvious against a competent human
+(the arena's BaselineAI opponent is too weak to expose it).
+Contributing gaps (compound):
+  1. No OPPORTUNISTIC ENGAGEMENT (above) — won't take adjacent free hits; almost
+     never initiates combat outside a committed assault plan.
+  2. PASSIVE DEFENSE — §5.4 (no garrison) means defense = massed armies near a
+     city + artillery; if the AI doesn't position defenders, the human just
+     walks in uncontested.
+  3. Possibly belief-myopia: fog-honest playouts make the AI plan poorly /
+     timidly (the same thing that dropped honest STANDARD to ~40%).
+This is the CORE post-playtest effort: "make the AI actually fight." Likely
+order: (a) opportunistic engagement (biggest bang — makes it deal damage at all),
+(b) defensive positioning, (c) revisit honest-fog planning strength. Each needs
+arena re-validation (and a stronger oracle than BaselineAI — e.g. self-play or a
+scripted aggressive bot — since BaselineAI can't measure "fights a human").
