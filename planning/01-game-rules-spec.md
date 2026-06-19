@@ -116,7 +116,7 @@ When a unit attempts to enter a cell occupied by another unit:
 ### 3.4 Loading and unloading
 
 - **Load:** A friendly Army unit may move into the cell of a friendly Transport (if Transport has cargo capacity). This consumes one movement point from the Army and uses no cargo capacity beyond the slot. The Army is now aboard.
-- **Unload:** A unit aboard a Transport may move from the Transport's cell to an adjacent legal cell, using one movement point from the unloading unit's *next* turn budget (i.e., Army cannot load and unload in the same turn).
+- **Unload:** A unit aboard a Transport may move from the Transport's cell to an adjacent legal cell. The disembark **consumes the landed unit's move for that turn** — a just-unloaded unit cannot move again until its next turn (the landing *is* its action). A unit also cannot load and unload in the same turn: it must have been aboard since a previous turn (a unit that loaded this turn already spent its move boarding).
 - Same rules apply for Fighter ↔ Carrier.
 
 ### 3.5 Fighter fuel

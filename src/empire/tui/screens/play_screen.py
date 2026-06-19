@@ -1314,6 +1314,12 @@ class PlayScreen(Screen[None]):
                 )
             scanned = scan_set_for_player(self._human, self._game.map)
             self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)
+            # The disembark IS the landed unit's move for the turn (spec §3.4):
+            # mark it spent + handled so it can't also move after landing.
+            landed = self._game.map.unit_by_id(cargo.id)
+            if landed is not None:
+                self._moves_used[cargo.id] = landed.moves_this_turn()
+                self._handled.add(cargo.id)
             remaining = len(carrier.cargo)
             self._hint = f"unloaded to ({to.x},{to.y}); {remaining} still aboard"
         elif outcome.last_outcome is StepOutcome.NO_UNLOAD_YET:
