@@ -598,3 +598,26 @@ def test_production_orders_change_target(p1: Player) -> None:
     g.attach_controller(p1.id, _OrderingController())
     g.run_turn()
     assert city.production.building is UnitKind.FIGHTER
+
+
+def test_city_can_produce_ships_only_at_a_port() -> None:
+    """Sea units build only at a city adjacent to water; land/air anywhere."""
+    from empire.core.engine import city_can_produce
+
+    # Port city at (1,1) touches water at (1,0); inland city at (3,3) doesn't.
+    real_map = _build_map(
+        [
+            "LWLL",
+            "LCLL",
+            "LLLL",
+            "LLLC",
+        ]
+    )
+    port, inland = Coord(1, 1), Coord(3, 3)
+    assert city_can_produce(UnitKind.BATTLESHIP, port, real_map)
+    assert not city_can_produce(UnitKind.BATTLESHIP, inland, real_map)
+    assert not city_can_produce(UnitKind.TRANSPORT, inland, real_map)
+    # Land/air build regardless of coast.
+    for kind in (UnitKind.ARMY, UnitKind.FIGHTER):
+        assert city_can_produce(kind, port, real_map)
+        assert city_can_produce(kind, inland, real_map)

@@ -864,6 +864,15 @@ class PlayScreen(Screen[None]):
             return
         self._open_production(city)
 
+    def _buildable_kinds(self, city: City) -> tuple[UnitKind, ...]:
+        """Unit kinds this city may build — ships only at a port (§3.2)."""
+        from empire.core.engine import city_can_produce
+
+        return tuple(
+            k for k in UnitKind
+            if city_can_produce(k, city.coord, self._game.map)
+        )
+
     def _open_production(self, city: City) -> None:
         current = self._pending_production.get(city.id, city.production.building)
 
@@ -872,7 +881,9 @@ class PlayScreen(Screen[None]):
             self._hint = f"production: {result.value if result else 'idle'}"
             self._refresh_view()
 
-        self.app.push_screen(ProductionModal(current), _set_target)
+        self.app.push_screen(
+            ProductionModal(current, self._buildable_kinds(city)), _set_target
+        )
 
     def _prompt_capture_production(self, city: City) -> None:
         """Open the production picker for a just-captured city, and only
@@ -890,7 +901,9 @@ class PlayScreen(Screen[None]):
             self._advance_to_next_unit()
             self._refresh_view()
 
-        self.app.push_screen(ProductionModal(current), _done)
+        self.app.push_screen(
+            ProductionModal(current, self._buildable_kinds(city)), _done
+        )
 
     def action_city_orders(self) -> None:
         """Set the default order applied to units this city produces (spec §5.3)."""

@@ -76,6 +76,21 @@ def can_enter_terrain(unit: Unit, terrain: TerrainKind, real_map: Map, to: Coord
     return True
 
 
+def city_can_produce(kind: UnitKind, coord: Coord, real_map: Map) -> bool:
+    """Whether a city at `coord` may build `kind`.
+
+    Sea units need a *port* — a city adjacent to water (§3.2, same rule that lets
+    a ship occupy the city); land/air/satellite build anywhere. The production
+    picker uses this so a landlocked city never offers ships.
+    """
+    if kind not in _SEA_KINDS:
+        return True
+    return any(
+        real_map.in_bounds(n) and real_map.terrain_at(n) is TerrainKind.WATER
+        for n in coord.neighbors()
+    )
+
+
 def is_legal_step(unit: Unit, to: Coord, real_map: Map, rules: RuleSet) -> bool:
     """Validate a single one-cell step.
 

@@ -8,6 +8,8 @@ Returns the chosen `UnitKind`, or `None` to build nothing (idle), via
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -16,12 +18,10 @@ from textual.widgets import Static
 
 from empire.core.unit import UnitKind
 
-# Selectable rows: every unit kind, then "idle" (build nothing).
-_KINDS: tuple[UnitKind, ...] = tuple(UnitKind)
-
 
 class ProductionModal(ModalScreen[UnitKind | None]):
-    """A movable-cursor list of build targets."""
+    """A movable-cursor list of build targets (only the kinds this city can
+    actually build — e.g. no ships at a landlocked city), then "idle"."""
 
     DEFAULT_CSS = """
     ProductionModal {
@@ -41,12 +41,23 @@ class ProductionModal(ModalScreen[UnitKind | None]):
     }
     """
 
-    def __init__(self, current: UnitKind | None) -> None:
+    def __init__(
+        self,
+        current: UnitKind | None,
+        allowed: Sequence[UnitKind] | None = None,
+    ) -> None:
         super().__init__()
+        # Only the kinds this city can build; defaults to all (callers that know
+        # the city pass the buildable set so e.g. ships never show inland).
+        self._kinds: tuple[UnitKind, ...] = (
+            tuple(allowed) if allowed is not None else tuple(UnitKind)
+        )
         self._current = current
-        # Cursor starts on the current target (or the trailing "idle" row).
+        # Cursor starts on the current target if it's still offered, else "idle".
         self._cursor = (
-            _KINDS.index(current) if current is not None else len(_KINDS)
+            self._kinds.index(current)
+            if current in self._kinds
+            else len(self._kinds)
         )
 
     def compose(self) -> ComposeResult:
@@ -63,22 +74,26 @@ class ProductionModal(ModalScreen[UnitKind | None]):
             f"build (now: {current_label}) — ↑↓ Enter · Esc cancel"
         )
         rows: list[str] = []
-        for i, kind in enumerate(_KINDS):
+        for i, kind in enumerate(self._kinds):
             marker = "►" if i == self._cursor else " "
             rows.append(f" {marker} {kind.value}")
-        idle_marker = "►" if self._cursor == len(_KINDS) else " "
+        idle_marker = "►" if self._cursor == len(self._kinds) else " "
         rows.append(f" {idle_marker} (idle — build nothing)")
         self.query_one("#prod-list", Static).update("\n".join(rows))
 
     def on_key(self, event: events.Key) -> None:
         key = event.key
-        n = len(_KINDS) + 1  # kinds + idle row
+        n = len(self._kinds) + 1  # kinds + idle row
         if key == "up":
             self._cursor = (self._cursor - 1) % n
         elif key == "down":
             self._cursor = (self._cursor + 1) % n
         elif key in ("enter", "space"):
-            chosen = _KINDS[self._cursor] if self._cursor < len(_KINDS) else None
+            chosen = (
+                self._kinds[self._cursor]
+                if self._cursor < len(self._kinds)
+                else None
+            )
             self.dismiss(chosen)
             return
         elif key == "escape":
