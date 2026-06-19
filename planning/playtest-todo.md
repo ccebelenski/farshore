@@ -1,0 +1,42 @@
+# Playtest TODO / backlog
+
+Feature requests and rough edges surfaced during human playtesting (vs the
+`search` AI). Bugs found-and-fixed are in git history, not here — this is the
+*not-yet-done* list.
+
+## Features requested
+
+### City production tracker (panel/pop-up)
+A single view of all your cities and what they're building, so you don't have to
+walk the map city by city. Per city, show:
+- city (id / name) and **coordinates**
+- what it's **producing** (or idle)
+- **ETA** — the turn the unit completes (`current_turn + ceil((build_time -
+  work) / work_per_turn)`; show "idle" when nothing is building)
+
+Open question: a transient pop-up (hotkey) vs a persistent side panel. A sortable
+list (by ETA, or by city) would help once there are many cities. Likely a new
+modal or an extension of the status/side area in `play_screen`.
+
+### Deliberate disband command
+No way to scrap a unit on purpose today (only the automatic over-capacity and
+capture-consumption disbands exist). Proposed: a hotkey (`x`) on a selected own
+unit → confirm modal → remove it. Engine has no deliberate-disband hook yet.
+DECISION NEEDED: a loaded transport — **block** (unload first) or **disband with
+a warning** that the N aboard are lost too? (No silent cargo drowning.)
+
+## Rough edges / pacing
+
+### Coastal standoff is anticlimactic
+Army (land) and patrol (sea) adjacent across a coast can't engage either way —
+expected (no ship-vs-land combat), but it makes "found the enemy, can't touch
+them" feel dead. **Warship bombardment** (the noted future mechanic — warships
+shelling coastal land units, not patrols) is what would make a coastal contest
+matter. See `project_stacking_vs_bombardment`.
+
+### Long pre-war buildup on separate-continent maps
+First enemy contact came ~turn 125 (separate continents → each side develops in
+isolation until someone crosses the water). Inherent to the setup, but if the
+solo stretch feels like dead air, consider: smaller maps / closer starts / a
+scaled-down quick-play profile, or surfacing exploration progress so it feels
+less empty.
