@@ -312,7 +312,7 @@ class Satellite(Unit):
     base_range = 50  # turns of orbital lifetime; RuleSet.satellite_range overrides
     build_time = 50
     legal_terrain = _ANY_TERRAIN  # orbits over anything
-    symbol = "*"
+    symbol = "@"  # distinct from the city glyph "*" (they collided — confusing)
     scan_range = 10
 
     def __init__(self, id_: UnitId, owner: Player, coord: Coord) -> None:

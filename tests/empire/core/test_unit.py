@@ -92,7 +92,7 @@ _GOLDEN: Final[dict[UnitKind, dict[str, object]]] = {
         "build_time": 50,
         "symbol": "B",
     },
-    UnitKind.SATELLITE: {"max_hits": 1, "speed": 1, "strength": 0, "build_time": 50, "symbol": "*"},
+    UnitKind.SATELLITE: {"max_hits": 1, "speed": 1, "strength": 0, "build_time": 50, "symbol": "@"},
 }
 
 
