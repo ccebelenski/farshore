@@ -40,3 +40,22 @@ isolation until someone crosses the water). Inherent to the setup, but if the
 solo stretch feels like dead air, consider: smaller maps / closer starts / a
 scaled-down quick-play profile, or surfacing exploration progress so it feels
 less empty.
+
+### Grid coordinate ruler on the map
+We show coordinates (cursor/status) but the map grid itself is unlabeled, so you
+can't map a coordinate to a cell by eye. Add axis labels to `MapWidget`:
+- left **gutter** with the row (y) number per line
+- top **ruler** with column (x) numbers — on a 28-wide grid, likely the units
+  digit every column with a full label (or tick) every 5/10
+Contained to `map_widget.py` (`render_line` + `on_mount` sizing); keyboard cursor
+is logical (coords, not screen pixels) so the offset doesn't touch game logic.
+Needs a visual pass to settle the ruler style.
+
+## Watch-items (need a repro)
+
+### Shelled with "no army in range"
+Took an artillery hit when no army seemed to be in range. Likely benign —
+artillery targets the most dangerous *any* in-range enemy, so a **fighter** (or
+other non-army unit) within range 2 of a city gets shelled too. If it recurs,
+note WHICH unit was hit: a non-army unit = expected; genuinely nothing in range
+= a real targeting/range bug to chase.
