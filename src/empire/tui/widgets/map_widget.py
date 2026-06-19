@@ -75,6 +75,12 @@ _STYLE_DANGER_BG = Style(bgcolor="#4A1212")
 _STYLE_CURSOR_FREE = Style(color="yellow", bold=True, reverse=True)
 _STYLE_CURSOR_ACTIVE = Style(color="cyan", bold=True, reverse=True)
 _STYLE_CURSOR_IDLE = Style(color="bright_black", bold=True, reverse=True)
+
+# Coordinate rulers: a left gutter (row/y number) + a top ruler (column/x units
+# digit, anchors bright every 10) so coordinates can be read off the grid.
+_GUTTER = 3  # "NN " — right-aligned 2-digit row label + a space
+_STYLE_RULER = Style(color="bright_black")
+_STYLE_RULER_ANCHOR = Style(color="yellow", bold=True)  # x divisible by 10
 _CURSOR_STYLES: dict[CursorMode, Style] = {
     CursorMode.FREE: _STYLE_CURSOR_FREE,
     CursorMode.ACTIVE: _STYLE_CURSOR_ACTIVE,
@@ -109,19 +115,29 @@ class MapWidget(Static):
         mv = self._provider()
         if mv is None:
             return Strip.blank(self.size.width)
-        if y >= mv.real_map.height:
+        width = mv.real_map.width
+        # Row 0 is the column ruler: gutter pad, then each column's units digit
+        # (anchors at multiples of 10 in bright yellow so they're countable).
+        if y == 0:
+            segments: list[Segment] = [Segment(" " * _GUTTER, _STYLE_RULER)]
+            for x in range(width):
+                style = _STYLE_RULER_ANCHOR if x % 10 == 0 else _STYLE_RULER
+                segments.append(Segment(str(x % 10), style))
+            return Strip(segments)
+        map_y = y - 1
+        if map_y >= mv.real_map.height:
             return Strip.blank(self.size.width)
-        segments: list[Segment] = []
-        for x in range(mv.real_map.width):
-            c = Coord(x, y)
-            segments.append(self._cell_segment(mv, c))
+        # Left gutter: the row (y) number, then the map cells.
+        segments = [Segment(f"{map_y:>2} ", _STYLE_RULER)]
+        for x in range(width):
+            segments.append(self._cell_segment(mv, Coord(x, map_y)))
         return Strip(segments)
 
     def on_mount(self) -> None:
         mv = self._provider()
         if mv is not None:
-            self.styles.width = mv.real_map.width
-            self.styles.height = mv.real_map.height
+            self.styles.width = mv.real_map.width + _GUTTER
+            self.styles.height = mv.real_map.height + 1  # + column ruler
 
     # ---- per-cell rendering -----------------------------------------------
 

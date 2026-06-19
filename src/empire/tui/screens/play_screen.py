@@ -91,6 +91,11 @@ _DIR_KEYS: dict[str, Direction] = {
     "up": Direction.N, "down": Direction.S, "left": Direction.W, "right": Direction.E,
 }
 
+# GOTO routes around discovered hostile-city gun rings: a danger cell costs this
+# much extra, so the path detours up to ~this many cells to skip one — but it's
+# finite, so a goal in/behind the ring is still reachable (intended assault).
+_GOTO_DANGER_WEIGHT = 8.0
+
 
 class PlayScreen(Screen[None]):
     """The playfield screen."""
@@ -1320,7 +1325,15 @@ class PlayScreen(Screen[None]):
         self._refresh_view()
 
     def _build_goto_path(self, unit: Unit, target: Coord) -> list[Coord] | None:
-        """BFS over the human's ViewMap; returns cells AFTER start (exclusive)."""
+        """BFS over the human's ViewMap; returns cells AFTER start (exclusive).
+
+        Routes AROUND the gun rings of *discovered* hostile cities (§4.7) by
+        weighting those cells, so GOTO never walks a unit into a known gauntlet
+        when a detour exists — but it's a weight, not a wall, so an intended
+        assault to a goal inside/behind the ring still reaches it.
+        """
+        from dataclasses import replace
+
         from empire.core.unit import (
             Army,
             Battleship,
@@ -1338,12 +1351,23 @@ class PlayScreen(Screen[None]):
             profile = SEA
         else:
             profile = AIR
+
+        mv = self._map_view()
+        danger = mv.danger_cells if mv is not None else frozenset()
+        # Don't penalize the goal itself — if the player aimed at a danger cell,
+        # take them there; only avoid danger encountered en route.
+        threat_at = None
+        if danger:
+            profile = replace(profile, danger_weight=_GOTO_DANGER_WEIGHT)
+            threat_at = lambda c: 1 if (c in danger and c != target) else 0  # noqa: E731
+
         result = BFSPathfinder().find_path(
             start=unit.coord,
             goal=target,
             real_map=self._game.map,
             profile=profile,
             view=self._human.view,
+            threat_at=threat_at,
         )
         if result is None:
             return None
