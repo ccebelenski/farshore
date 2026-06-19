@@ -68,7 +68,7 @@ often doesn't — it slides past toward its plan's objective. Hypothesis: the
 PlanFollower executes plan objectives (assault target / scout / ferry) and moves
 units toward them, with no OPPORTUNISTIC-ENGAGEMENT pass — so an adjacent free
 hit off the current plan is ignored. (BaselineAI is greedy and takes it.) Fix
-direction: add an opportunistic-attack step to the follower — before/após a
+direction: add an opportunistic-attack step to the follower — before/after a
 unit's planned move, if an adjacent enemy is a favorable target (odds/value),
 take the attack. Verify first that it's structural (follower never engages
 off-plan) vs the search declining unfavorable odds. Meatier than a UI fix.
