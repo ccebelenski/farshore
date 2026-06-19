@@ -295,3 +295,35 @@ def test_clear_pins_restores_movement(p1: Player, p2: Player) -> None:
     clear_movement_pins(m)
     assert not army.pinned
     assert army.moves_this_turn() == Army.speed
+
+
+def test_destroyed_unit_reveals_the_firing_city() -> None:
+    """A unit shelled to death still reveals the firing city to its owner.
+
+    Reactive fire and the opening barrage resolve BEFORE the scan phase, and a
+    destroyed unit scans nothing — so without an explicit reveal you die to a
+    city you never see on the map (playtest report). Being shelled tells you
+    where the gun is."""
+    from empire.contracts.controller import NullController
+    from empire.core.game import Game
+
+    p1 = Player(id=PlayerId(1), name="P1", is_ai=False, view=ViewMap(), color="red")
+    p2 = Player(id=PlayerId(2), name="P2", is_ai=True, view=ViewMap(), color="blue")
+    ncoord, p1c, p2c = Coord(2, 0), Coord(4, 4), Coord(0, 4)
+    cities = {
+        ncoord: City(id=CityId(1), coord=ncoord, owner=None),  # neutral gun
+        p1c: City(id=CityId(2), coord=p1c, owner=p1),          # keeps P1 alive
+        p2c: City(id=CityId(3), coord=p2c, owner=p2),
+    }
+    real_map = _map(["LLLLL"] * 5, cities=cities)
+    army = Army(UnitId(1), p1, Coord(0, 0))  # chebyshev 2 from the neutral = in range
+    army.hits = 1
+    real_map.place_unit(army, Coord(0, 0))
+    game = Game(rules=FORT, real_map=real_map, players=[p1, p2], seed=1)
+    game.attach_controller(p1.id, NullController())
+    game.attach_controller(p2.id, NullController())
+
+    assert not p1.view.seen(ncoord)  # gun unseen at the start
+    game.run_turn()
+    assert game.map.unit_by_id(UnitId(1)) is None, "1-HP army should be shelled to death"
+    assert p1.view.seen(ncoord), "a shelled-to-death unit must still reveal the firing city"

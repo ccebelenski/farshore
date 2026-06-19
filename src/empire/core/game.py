@@ -238,12 +238,19 @@ class TurnManager:
 
         for city in list(self.game.map.cities()):
             coords = {u.id: u.coord for u in self.game.map.all_units()}
+            owners = {u.id: u.owner for u in self.game.map.all_units()}
             result = execute_city_artillery(
                 city, self.game.map, self.game.rules, self.game.rng
             )
             if result.target_id is None:
                 continue
             tcoord = coords.get(result.target_id, city.coord)
+            # Being shelled reveals the gun (see reactive path): mark the firing
+            # city seen for the victim's owner, even if the salvo destroys the
+            # unit before any scan would have spotted the city.
+            victim_owner = owners.get(result.target_id)
+            if victim_owner is not None:
+                victim_owner.view.visible.add(city.coord)
             destroyed = result.outcome is ArtilleryOutcome.TARGET_DESTROYED
             hit = destroyed or result.outcome is ArtilleryOutcome.TARGET_DAMAGED
             self.game.event_bus.publish(
@@ -481,6 +488,15 @@ class TurnManager:
             ):
                 if result.target_id is None:
                     continue
+                # Being shelled reveals the gun: mark the firing city seen for
+                # the victim's owner. Reactive fire resolves DURING movement,
+                # before the scan phase, and a destroyed unit contributes no
+                # vision — so without this you die to a city you never see on
+                # the map (can't tell what hit you or where). The scan phase
+                # then commits it to `remembered`.
+                firing_city = self.game.map.city_by_id(city_id)
+                if firing_city is not None:
+                    player.view.visible.add(firing_city.coord)
                 destroyed = result.outcome is ArtilleryOutcome.TARGET_DESTROYED
                 hit = destroyed or result.outcome is ArtilleryOutcome.TARGET_DAMAGED
                 self.game.event_bus.publish(
