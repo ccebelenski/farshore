@@ -59,3 +59,16 @@ artillery targets the most dangerous *any* in-range enemy, so a **fighter** (or
 other non-army unit) within range 2 of a city gets shelled too. If it recurs,
 note WHICH unit was hit: a non-army unit = expected; genuinely nothing in range
 = a real targeting/range bug to chase.
+
+## AI behavior
+
+### SearchAI doesn't attack on opportunity
+When the AI has an army adjacent to an enemy unit it could profitably hit, it
+often doesn't — it slides past toward its plan's objective. Hypothesis: the
+PlanFollower executes plan objectives (assault target / scout / ferry) and moves
+units toward them, with no OPPORTUNISTIC-ENGAGEMENT pass — so an adjacent free
+hit off the current plan is ignored. (BaselineAI is greedy and takes it.) Fix
+direction: add an opportunistic-attack step to the follower — before/após a
+unit's planned move, if an adjacent enemy is a favorable target (odds/value),
+take the attack. Verify first that it's structural (follower never engages
+off-plan) vs the search declining unfavorable odds. Meatier than a UI fix.
