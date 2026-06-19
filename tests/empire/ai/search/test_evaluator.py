@@ -176,7 +176,9 @@ def test_exploration_rewards_information_gained() -> None:
     """Seeing more of the map raises the score — a monotone scouting gradient,
     the opposite of the old perimeter penalty."""
     e = Evaluator(_EXPLORE_ONLY)
-    g = _game(p1_cities=1, p2_cities=1)
+    # An army must exist for land reveals to count (the term is force-gated and
+    # reachability-gated — seeing ground you can't reach is worth nothing).
+    g = _game(p1_cities=1, p2_cities=1, p1_armies=1)
     p = g.player_by_id(P1)
     assert p is not None
     p.view.visible = {Coord(x, y) for x in range(3) for y in range(3)}

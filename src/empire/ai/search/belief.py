@@ -5,25 +5,32 @@ never the real map (design: `planning/03-ai-design.md` §9.2). The belief
 game contains:
 
 - **Terrain**: visible cells as they are, remembered cells as last seen,
-  never-seen cells as plain land ("optimistically empty" — the same
-  assumption `unknown_cost` encodes for pathfinding). The `on_board` frame
-  is structural knowledge (map dimensions are known a priori), not intel.
+  never-seen cells **inferred from the nearest seen cell's domain** (land vs
+  water). NOT blanket land — that turned unexplored ocean into walkable ground
+  and wrecked naval geometry (a crossing looked like a march). The `on_board`
+  frame is structural knowledge (map dimensions known a priori), not intel.
 - **Cities**: the view's own/known-enemy/neutral city sets (the same fog
   filter every other AI layer uses). Own production state is copied; a
   known enemy city is modeled as building armies from scratch — the horde
   opponent model's default.
 - **Units**: own units in full; enemy units at their last-known positions
   (visible sightings supersede remembered snapshots of the same unit).
-- **Information**: both belief players start all-seeing *of the belief
-  world*. Our knowledge is the world's entire content by construction, and
-  granting the opponent model full sight makes it the strongest version of
-  itself — a conservative assumption.
+- **Information**: the SEARCHER keeps its real fog (visible + remembered as
+  the player actually knows them), so the playout must *scout* to learn more —
+  reconnaissance has value, exploration is not free. (Previously both players
+  were all-seeing; because `update_from_scan` spills old-visible into
+  `remembered`, that left the whole map permanently "seen", so scouting could
+  never change the position and the search valued recon at zero.) The opponent
+  model is left all-seeing of the belief world — the strongest, most
+  conservative version of itself.
 
 Stale snapshots are trusted at face value in v1 (no decay); the projection
 of unseen enemy production is the opponent model's job during the playout.
 """
 
 from __future__ import annotations
+
+from collections import deque
 
 from empire.contracts.world_view import WorldView
 from empire.core.city import City, ProductionState
@@ -70,18 +77,18 @@ class BeliefBuilder:
         real_map = view.real_map()
         seen = view.own_player.view.seen
 
+        # Seen cells as known; unseen cells inferred from the nearest seen
+        # cell's domain (land/water) so unexplored ocean stays ocean.
+        inferred = self._infer_terrain(view, real_map, seen)
         tiles: dict[Coord, Tile] = {}
         for y in range(real_map.height):
             for x in range(real_map.width):
                 c = Coord(x, y)
-                on_board = real_map.tile(c).on_board
-                if seen(c):
-                    tile = view.terrain_at(c)
-                    assert tile is not None  # seen ⇒ terrain known
-                    terrain = tile.terrain
-                else:
-                    terrain = TerrainKind.LAND  # optimistically empty
-                tiles[c] = Tile(coord=c, terrain=terrain, on_board=on_board)
+                tiles[c] = Tile(
+                    coord=c,
+                    terrain=inferred[c],
+                    on_board=real_map.tile(c).on_board,
+                )
 
         # Cities — same fog filter the other AI layers read.
         for city in view.own_cities:
@@ -129,14 +136,18 @@ class BeliefBuilder:
             copy.hits = snap.hits
             belief_map.place_unit(copy, snap.coord)
 
-        # Both belief players see the whole belief world (see module doc).
-        everything = {
-            Coord(x, y)
-            for x in range(belief_map.width)
-            for y in range(belief_map.height)
-        }
-        for p in players:
-            p.view.visible = set(everything)
+        # Fog discipline (§9.2, corrected): the searcher keeps its REAL fog, so
+        # the playout must scout to learn more (recon has value). The opponent
+        # model is left all-seeing of the belief world — strongest, conservative.
+        me_view = view.own_player.view
+        belief_me.view.visible = set(me_view.visible)
+        belief_me.view.remembered = dict(me_view.remembered)
+        if belief_enemy is not None:
+            belief_enemy.view.visible = {
+                Coord(x, y)
+                for x in range(belief_map.width)
+                for y in range(belief_map.height)
+            }
 
         game = Game(
             rules=view.rules,
@@ -148,6 +159,43 @@ class BeliefBuilder:
         return game
 
     # ---- helpers ------------------------------------------------------------
+
+    @staticmethod
+    def _infer_terrain(
+        view: WorldView, real_map: Map, seen
+    ) -> dict[Coord, TerrainKind]:
+        """Terrain for every cell: seen cells as known; unseen cells take the
+        domain (land/water) of the nearest seen cell, via one multi-source BFS
+        seeded with all seen cells. Keeps unexplored ocean as ocean instead of
+        the old blanket-land guess. City tiles propagate as LAND (a city sits on
+        land); their own tile keeps CITY terrain (a city is re-placed later).
+        Cells with no seen cell anywhere (fully blind) default to land."""
+        width, height = real_map.width, real_map.height
+        terr: dict[Coord, TerrainKind] = {}
+        queue: deque[tuple[Coord, TerrainKind]] = deque()
+        for y in range(height):
+            for x in range(width):
+                c = Coord(x, y)
+                if seen(c):
+                    tile = view.terrain_at(c)
+                    assert tile is not None  # seen ⇒ terrain known
+                    terr[c] = tile.terrain
+                    domain = (
+                        TerrainKind.WATER
+                        if tile.terrain is TerrainKind.WATER
+                        else TerrainKind.LAND
+                    )
+                    queue.append((c, domain))
+        while queue:
+            c, domain = queue.popleft()
+            for n in c.neighbors():
+                if real_map.in_bounds(n) and n not in terr:
+                    terr[n] = domain  # nearest-seen domain wins (BFS order)
+                    queue.append((n, domain))
+        for y in range(height):
+            for x in range(width):
+                terr.setdefault(Coord(x, y), TerrainKind.LAND)  # fully blind
+        return terr
 
     @staticmethod
     def _place_city(tiles: dict[Coord, Tile], city: City) -> None:

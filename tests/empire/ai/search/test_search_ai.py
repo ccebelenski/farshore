@@ -65,13 +65,24 @@ def test_belief_contains_exactly_the_known_world() -> None:
     }
     assert belief_mine == own_coords
 
-    # Never-seen cells are optimistically plain land.
+    # The searcher keeps its REAL fog — no longer all-seeing (so the playout
+    # must scout to learn more; recon has value).
+    belief_me = belief.player_by_id(me.id)
+    assert belief_me is not None
+    real_seen = me.view.visible | me.view.remembered.keys()
+    belief_seen = belief_me.view.visible | belief_me.view.remembered.keys()
+    assert belief_seen == real_seen
+
+    # Never-seen cells are inferred to a plausible domain (land/water), not
+    # blanket land — so unexplored ocean stays ocean.
     seen = me.view.seen
     for y in range(belief.map.height):
         for x in range(belief.map.width):
             c = Coord(x, y)
             if not seen(c):
-                assert belief.map.terrain_at(c) is TerrainKind.LAND
+                assert belief.map.terrain_at(c) in (
+                    TerrainKind.LAND, TerrainKind.WATER
+                )
 
 
 def test_belief_is_deterministic_per_turn() -> None:
@@ -179,3 +190,40 @@ def test_search_prefers_capturing_a_defenseless_city() -> None:
     assert Coord(*path[0]).chebyshev_to(prize.coord) < Coord(2, 0).chebyshev_to(
         prize.coord
     ), "the army should close on the free city"
+
+
+def test_belief_infers_unseen_terrain_by_domain() -> None:
+    """Unseen cells take the nearest seen cell's domain: fog beside seen water
+    is water (the naval-geometry fix), fog beside seen land is land — not the
+    old blanket-land guess that turned ocean into walkable ground."""
+    from empire.core.city import City
+    from empire.core.identity import CityId, PlayerId
+    from empire.core.map import Map, ViewMap
+    from empire.core.ruleset import STANDARD
+    from empire.core.tile import Tile
+
+    p1 = Player(id=PlayerId(1), name="P1", is_ai=True, view=ViewMap(), color="red")
+    p2 = Player(id=PlayerId(2), name="P2", is_ai=True, view=ViewMap(), color="blue")
+    # 6x1 strip: cols 0-2 land, cols 3-5 water.
+    tiles = {
+        Coord(x, 0): Tile(
+            coord=Coord(x, 0),
+            terrain=TerrainKind.LAND if x < 3 else TerrainKind.WATER,
+        )
+        for x in range(6)
+    }
+    home = City(id=CityId(1), coord=Coord(0, 0), owner=p1)
+    tiles[Coord(0, 0)] = Tile(coord=Coord(0, 0), terrain=TerrainKind.CITY, city=home)
+    foe = City(id=CityId(2), coord=Coord(2, 0), owner=p2)
+    tiles[Coord(2, 0)] = Tile(coord=Coord(2, 0), terrain=TerrainKind.CITY, city=foe)
+    real_map = Map(width=6, height=1, tiles=tiles)
+    game = Game(rules=STANDARD, real_map=real_map, players=[p1, p2], seed=1)
+
+    # p1 has seen only col 0 (its land/city) and col 3 (water).
+    p1.view.visible = {Coord(0, 0), Coord(3, 0)}
+    belief = BeliefBuilder().build(_view(game, p1))
+
+    # Fog beside seen land -> land; fog beside seen water -> water.
+    assert belief.map.terrain_at(Coord(1, 0)) is TerrainKind.LAND
+    assert belief.map.terrain_at(Coord(4, 0)) is TerrainKind.WATER
+    assert belief.map.terrain_at(Coord(5, 0)) is TerrainKind.WATER

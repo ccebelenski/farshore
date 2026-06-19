@@ -434,7 +434,13 @@ def _landing_zone(
             )
             width = len(land_neighbors)
             march = min(target_land.steps_to(n) or 0 for n in land_neighbors)
-            key = (in_gun, screen, -width, march, sea_steps, s.y, s.x)
+            # Reachability is second only to gun-avoidance: each transport picks
+            # the nearest acceptable beach to ITSELF, so a fleet spreads across
+            # distinct landing cells instead of all converging on one globally-
+            # "best" cell — which made them block each other (stacking-off) and
+            # never complete the approach, so a loaded fleet hovered offshore
+            # forever without landing. Screen/width/march break ties after that.
+            key = (in_gun, sea_steps, screen, -width, march, s.y, s.x)
             if best_key is None or key < best_key:
                 best_key, best_sea = key, s
     return best_sea

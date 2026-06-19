@@ -53,9 +53,10 @@ from empire.core.city import City
 from empire.core.coord import Coord
 from empire.core.game import Game
 from empire.core.identity import PlayerId
+from empire.ai.search.naval import SEA_KINDS
 from empire.core.tile import TerrainKind
 from empire.core.unit import UNIT_REGISTRY, UnitKind
-from empire.pathfinding.cost import AIR, ARMY
+from empire.pathfinding.cost import AIR, ARMY, SEA
 from empire.pathfinding.distance_field import PassabilityGrid
 
 # Chebyshev radius and per-city cap for the local-force-balance (holdability)
@@ -82,8 +83,8 @@ class EvalWeights:
     # Exploration / information (§10.2): reward per seen cell, land worth more
     # than sea. Small — a ~100-cell home continent at 0.5/land ≈ 50, well under a
     # city; the point is a monotone scouting gradient, not territory rivalry.
-    explore_land: float = 0.5
-    explore_sea: float = 0.05
+    explore_land: float = 0.2
+    explore_sea: float = 0.5
     # Opportunity (§10.2): a known unowned reachable city is worth up to
     # `opportunity` when our force is adjacent, decaying with projection
     # distance. Below `city` so capturing always beats loitering. `opp_scale`
@@ -94,6 +95,20 @@ class EvalWeights:
     opp_decay: float = 0.85
     opp_scale: float = 5.0
     ferry_penalty: float = 6.0
+    # Potential, credited through PROGRESS (§10.2). A slow strategic unit's
+    # payoff lands past the horizon, so a realized-value-only evaluator can never
+    # see it; we credit progress toward the potential instead. `recon_potential`
+    # values an in-flight ship build (build-fraction) by the reachable
+    # sea-frontier it will be able to uncover (information potential — modest,
+    # it might be empty ocean). Strictly small so it only breaks ties once the
+    # land game offers nothing better, and it converts into the realized
+    # exploration term the moment the hull exists.
+    recon_potential: float = 0.5
+    # Realization potential (§10.2): an invasion forming toward a known overseas
+    # city, credited by commitment/build/load progress (front-loaded — committing
+    # production to a hull is the valued act). Below `city` even fully loaded
+    # (×1.3 max) so capturing is always a further gain. Odds-scaling deferred.
+    invade_potential: float = 60.0
     # Holdability / local force balance (Phase 15.9+ §10): conditions a city's
     # worth on whether the local situation supports keeping (own) or taking
     # (enemy/neutral) it. `recapture_risk` discounts an own city per net enemy
@@ -175,6 +190,34 @@ class Evaluator:
                             queue.append(j)
         return dist
 
+    def _has_overseas_prize(self, real_map, view, player_id: PlayerId) -> bool:
+        """True iff a known, unowned, ocean-coastal city exists that our armies
+        CANNOT walk to (it needs an amphibious landing) — the target that makes a
+        forming invasion worth crediting. A land-reachable city is an assault, not
+        an invasion, so it doesn't count here."""
+        anchors = [
+            u.coord for u in real_map.all_units()
+            if u.owner.id == player_id and u.kind is UnitKind.ARMY
+        ]
+        anchors += [
+            c.coord for c in real_map.cities()
+            if c.owner is not None and c.owner.id == player_id
+        ]
+        targets = [
+            c.coord for c in real_map.cities()
+            if not (c.owner is not None and c.owner.id == player_id)
+            and view.seen(c.coord)
+            and any(
+                real_map.in_bounds(n) and real_map.terrain_at(n) is TerrainKind.WATER
+                for n in c.coord.neighbors()
+            )
+        ]
+        if not anchors or not targets:
+            return False
+        land = self._multi_source_bfs(anchors, PassabilityGrid(real_map, ARMY))
+        width = real_map.width
+        return any(land[t.y * width + t.x] < 0 for t in targets)
+
     def _opportunity_and_exploration(
         self, game: Game, player_id: PlayerId, w: EvalWeights
     ) -> float:
@@ -187,14 +230,84 @@ class Evaluator:
         real_map = game.map
         total = 0.0
 
-        if w.explore_land or w.explore_sea:
-            land = sea = 0
-            for c in view.visible | view.remembered.keys():
-                if real_map.terrain_at(c) is TerrainKind.WATER:
-                    sea += 1
-                else:
-                    land += 1
-            total += w.explore_land * land + w.explore_sea * sea
+        # Exploration / information (§10.2, fog-interest): reward SEEN cells our
+        # MOBILE forces can actually reach, by domain — land for armies, water
+        # for ships. Force-gated (no ships ⇒ water reveals are worthless) and
+        # reachability-gated (an army boxed onto a fully-explored continent gains
+        # nothing more ⇒ idle hoarding can't beat going to look). The belief's
+        # neighbor-inferred terrain is what makes a scouted water tile read as
+        # water, so a patrol's reveals count for ships and an army's for land.
+        # Only meaningful now that the belief preserves fog; in a fog-free belief
+        # this was a constant. Scale is a tie-breaker, well under a city.
+        width = real_map.width
+        seen_cells = view.visible | view.remembered.keys()
+        if w.explore_land:
+            armies = [u.coord for u in real_map.all_units()
+                      if u.owner.id == player_id and u.kind is UnitKind.ARMY]
+            if armies:
+                reach = self._multi_source_bfs(armies, PassabilityGrid(real_map, ARMY))
+                n = sum(1 for c in seen_cells
+                        if real_map.terrain_at(c) is not TerrainKind.WATER
+                        and reach[c.y * width + c.x] >= 0)
+                total += w.explore_land * n
+        if w.explore_sea:
+            ships = [u.coord for u in real_map.all_units()
+                     if u.owner.id == player_id and u.kind in SEA_KINDS]
+            if ships:
+                reach = self._multi_source_bfs(ships, PassabilityGrid(real_map, SEA))
+                n = sum(1 for c in seen_cells
+                        if real_map.terrain_at(c) is TerrainKind.WATER
+                        and reach[c.y * width + c.x] >= 0)
+                total += w.explore_sea * n
+
+        # Information potential, credited through PROGRESS (§10.2): a ship being
+        # built earns a fraction of the reachable sea-frontier it will uncover —
+        # so STARTING a patrol registers value now, instead of being dominated by
+        # army-throughput because the hull (build 15) can't finish in-horizon.
+        # Converts into the realized explore_sea term once the hull exists.
+        if w.recon_potential:
+            frac = 0.0
+            for city in real_map.cities():
+                if city.owner is not None and city.owner.id == player_id:
+                    building = city.production.building
+                    if building in SEA_KINDS:
+                        bt = UNIT_REGISTRY[building].build_time
+                        if bt > 0:
+                            frac = max(frac, min(1.0, city.production.work / bt))
+            if frac > 0.0:
+                potential_tiles = {
+                    n
+                    for c in seen_cells
+                    if real_map.terrain_at(c) is TerrainKind.WATER
+                    for n in c.neighbors()
+                    if real_map.in_bounds(n) and not view.seen(n)
+                }
+                total += w.recon_potential * len(potential_tiles) * frac
+
+        # Realization potential, credited through PROGRESS (§10.2): an invasion
+        # FORMING toward a known overseas city earns a fraction of that prize as
+        # the fleet is committed/built/loaded — because the transport (build 30)
+        # cannot finish + load + sail + capture inside ANY honest horizon, so a
+        # realized-value-only evaluator would forever see invade as dominated
+        # (measured: it loses on material with zero in-horizon progress). The
+        # COMMITMENT is front-loaded (allocating a city's production to a hull is
+        # the valued act); it ramps with build/cargo and converts into the +city
+        # on capture. Kept below `city` so capturing is always a further gain.
+        if w.invade_potential and self._has_overseas_prize(real_map, view, player_id):
+            progress = 0.0
+            tbt = UNIT_REGISTRY[UnitKind.TRANSPORT].build_time
+            for city in real_map.cities():
+                if (city.owner is not None and city.owner.id == player_id
+                        and city.production.building is UnitKind.TRANSPORT
+                        and tbt > 0):
+                    # committing is 0.5; ramps to 1.0 as the hull completes.
+                    progress = max(progress, 0.5 + 0.5 * min(1.0, city.production.work / tbt))
+            for u in real_map.all_units():
+                if u.owner.id == player_id and u.kind is UnitKind.TRANSPORT:
+                    # built hull = 1.0; loaded cargo pushes toward the cap.
+                    cap = max(1, u.effective_capacity())
+                    progress = max(progress, 1.0 + 0.3 * min(1.0, len(u.cargo) / cap))
+            total += w.invade_potential * min(1.3, progress)
 
         if not w.opportunity:
             return total
@@ -220,7 +333,6 @@ class Evaluator:
         if not targets:
             return total
 
-        width = real_map.width
         land_d = self._multi_source_bfs(anchors, PassabilityGrid(real_map, ARMY))
         any_d = self._multi_source_bfs(anchors, PassabilityGrid(real_map, AIR))
         for city in targets:

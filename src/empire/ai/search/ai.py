@@ -36,6 +36,7 @@ from empire.contracts.turn_plan import TurnPlan, UnitMove
 from empire.contracts.world_view import WorldView
 from empire.core.game import Game
 from empire.core.identity import PlayerId, UnitId
+from empire.core.unit import UNIT_REGISTRY
 
 DEFAULT_HORIZON = 12
 DEFAULT_SAMPLES = 3
@@ -46,6 +47,16 @@ _SAMPLE_STRIDE = 104_729
 # every turn — the Phase 15.8 stall trace showed assault strength oscillating
 # 3↔5 each turn, reshuffling fist membership so no storm ever cohered.
 SWITCH_MARGIN = 10.0
+# Investment-scaled commitment stickiness (§10): a campaign part-way through a
+# slow strategic build resists abandonment so the search sees the 30-turn hull
+# through instead of oscillating off it. COMMIT_SLOW_BUILD is the build_time at
+# which production counts as a "campaign" (patrol 15 and up; armies build 5 and
+# stay freely switchable). COMMIT_BASE is the front-loaded stickiness the moment
+# any progress exists; COMMIT_SCALE ramps it with build fraction. A bar, not a
+# lock — an urgent higher-value plan still overrides by paying the cost.
+COMMIT_SLOW_BUILD = 15
+COMMIT_BASE = 25.0
+COMMIT_SCALE = 30.0
 
 
 class SearchAI:
@@ -107,15 +118,44 @@ class SearchAI:
             if plan == incumbent:
                 incumbent_score = score
         # Hysteresis: stick with the incumbent unless the challenger clearly
-        # beats it (see SWITCH_MARGIN). Only applies when the incumbent is
-        # still on offer — a vanished target dissolves the commitment.
+        # beats it. The bar is SWITCH_MARGIN PLUS an investment-scaled commitment
+        # bonus — a campaign with sunk investment in a slow strategic build (a
+        # half-built transport / warship) resists abandonment in proportion to
+        # what's already committed, so the search sees a 30-turn build through
+        # instead of oscillating away from it. It is a bar, not a lock: an urgent,
+        # higher-value plan (e.g. defending a threatened home city) can still pay
+        # the cost and override. Only applies while the incumbent is still on
+        # offer — a vanished target dissolves the commitment.
         if (
             incumbent_score is not None
             and best_plan != incumbent
-            and best_score < incumbent_score + SWITCH_MARGIN
+            and best_score
+            < incumbent_score + SWITCH_MARGIN + self._commitment_bonus(view, incumbent)
         ):
             return incumbent
         return best_plan
+
+    @staticmethod
+    def _commitment_bonus(view: WorldView, incumbent: Plan) -> float:
+        """Investment-scaled stickiness for a campaign mid-way through a slow
+        strategic build (build_time >= COMMIT_SLOW_BUILD). Front-loaded so a
+        just-started hull isn't dropped next turn, then ramps with build
+        progress (the assembled fleet IS progress — §10 'costs are strategy
+        costs'). Zero for fast/throwaway production, so ordinary army-building
+        stays freely switchable."""
+        prod = incumbent.production
+        if prod is None:
+            return 0.0
+        build_time = UNIT_REGISTRY[prod].build_time
+        if build_time < COMMIT_SLOW_BUILD:
+            return 0.0
+        best = 0.0
+        for c in view.own_cities:
+            if c.production.building is prod and c.production.work > 0:
+                best = max(best, min(1.0, c.production.work / build_time))
+        if best <= 0.0:
+            return 0.0
+        return COMMIT_BASE + COMMIT_SCALE * best
 
     def _score(self, belief: Game, plan: Plan, me: PlayerId) -> float:
         """Mean horizon evaluation of `plan` over `samples` playouts.
