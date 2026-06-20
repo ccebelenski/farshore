@@ -28,7 +28,7 @@ from empire.ai.search.belief import BeliefBuilder
 from empire.ai.search.evaluator import Evaluator
 from empire.ai.search.follower import PlanFollower
 from empire.ai.search.generator import CandidateGenerator
-from empire.ai.search.plan import Plan
+from empire.ai.search.plan import Plan, Role
 from empire.ai.search.playout import PlayoutModel
 from empire.contracts.controller import AIController
 from empire.contracts.surprise import Surprise
@@ -36,7 +36,7 @@ from empire.contracts.turn_plan import TurnPlan, UnitMove
 from empire.contracts.world_view import WorldView
 from empire.core.game import Game
 from empire.core.identity import PlayerId, UnitId
-from empire.core.unit import UNIT_REGISTRY
+from empire.core.unit import UNIT_REGISTRY, UnitKind
 
 DEFAULT_HORIZON = 12
 DEFAULT_SAMPLES = 3
@@ -57,6 +57,20 @@ SWITCH_MARGIN = 10.0
 COMMIT_SLOW_BUILD = 15
 COMMIT_BASE = 25.0
 COMMIT_SCALE = 30.0
+# Aggression temperament (planning/06-aggression-bias.md). A single scalar that
+# leans plan selection toward BOLD plans — those whose payoff tends to land past
+# the search horizon (assault/invade objectives; building projection units) — so
+# the search commits to expansion and naval projection it otherwise can't see
+# the payoff of. The lean REVERTS to honest evaluation when a caution signal
+# fires: a bold plan scoring more than CAUTION_TOL below the best stand-pat
+# (non-bold) option is losing ground in-horizon (known-bad), so the bias is
+# withdrawn and the smarter plan wins. Caution is read off the playout itself, so
+# every in-horizon danger is caught by construction. aggression=0.0 recovers the
+# pre-bias behavior exactly (used as the arena A/B baseline). Defaults are a
+# starting guess in evaluator units (city=100, army=10); the self-play arena
+# calibrates them.
+DEFAULT_AGGRESSION = 40.0
+DEFAULT_CAUTION_TOL = 20.0
 
 
 class SearchAI:
@@ -68,9 +82,13 @@ class SearchAI:
         samples: int = DEFAULT_SAMPLES,
         generator: CandidateGenerator | None = None,
         evaluator: Evaluator | None = None,
+        aggression: float = DEFAULT_AGGRESSION,
+        caution_tol: float = DEFAULT_CAUTION_TOL,
     ) -> None:
         self._horizon: int = horizon
         self._samples: int = max(1, samples)
+        self._aggression: float = aggression
+        self._caution_tol: float = caution_tol
         self._generator: CandidateGenerator = (
             generator if generator is not None else CandidateGenerator()
         )
@@ -107,12 +125,15 @@ class SearchAI:
         belief = self._belief_builder.build(view)
         me = view.own_player.id
 
+        # Honest playout score per candidate, then the aggression lean.
+        raw = [self._score(belief, plan, me) for plan in candidates]
+        eff = self._apply_aggression(candidates, raw)
+
         incumbent = self._committed.plan
         best_plan = candidates[0]
         best_score = float("-inf")
         incumbent_score: float | None = None
-        for plan in candidates:
-            score = self._score(belief, plan, me)
+        for plan, score in zip(candidates, eff):
             if score > best_score:
                 best_plan, best_score = plan, score
             if plan == incumbent:
@@ -134,6 +155,40 @@ class SearchAI:
         ):
             return incumbent
         return best_plan
+
+    def _apply_aggression(
+        self, candidates: tuple[Plan, ...], raw: list[float]
+    ) -> list[float]:
+        """Add the aggression lean to BOLD plans, reverting to flat when a
+        caution signal fires (planning/06-aggression-bias.md).
+
+        Caution is derived from the playout, not a hand list: the `floor` is the
+        best honest score among the NON-bold (stand-pat) plans, and a bold plan
+        scoring more than `caution_tol` below it is losing ground in-horizon
+        (known-bad) — so it keeps its flat score. A bold plan at or near the
+        floor is merely horizon-blind (slow payoff, no in-horizon loss) and gets
+        the bias. `aggression=0` leaves `raw` untouched."""
+        if self._aggression <= 0.0:
+            return list(raw)
+        bold = [self._is_bold(p) for p in candidates]
+        passive = [s for s, b in zip(raw, bold) if not b]
+        floor = max(passive) if passive else float("-inf")
+        cutoff = floor - self._caution_tol
+        return [
+            s + self._aggression if (b and s >= cutoff) else s
+            for s, b in zip(raw, bold)
+        ]
+
+    @staticmethod
+    def _is_bold(plan: Plan) -> bool:
+        """A plan is bold if it advances or invests in projection — the actions
+        whose payoff tends to land past the search horizon: an ASSAULT/INVADE
+        objective, or building a non-army unit (transport/patrol/fighter =
+        slow recon/projection investment). Hold, reserve, pure-defense, and
+        scout-on-foot-building-armies are the passive baseline, not bold."""
+        if any(o.role in (Role.ASSAULT, Role.INVADE) for o in plan.objectives):
+            return True
+        return plan.production is not UnitKind.ARMY
 
     @staticmethod
     def _commitment_bonus(view: WorldView, incumbent: Plan) -> float:

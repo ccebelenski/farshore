@@ -227,3 +227,56 @@ def test_belief_infers_unseen_terrain_by_domain() -> None:
     assert belief.map.terrain_at(Coord(1, 0)) is TerrainKind.LAND
     assert belief.map.terrain_at(Coord(4, 0)) is TerrainKind.WATER
     assert belief.map.terrain_at(Coord(5, 0)) is TerrainKind.WATER
+
+
+# --- aggression bias with caution-reversion (planning/06-aggression-bias.md) ---
+
+
+def test_is_bold_classifies_plans() -> None:
+    from empire.ai.search.plan import Objective, Plan, Role, SurplusPolicy
+    from empire.core.unit import UnitKind
+
+    assault = Plan(objectives=(Objective(Coord(2, 2), Role.ASSAULT, 3),))
+    invade = Plan(objectives=(Objective(Coord(2, 2), Role.INVADE, 3),))
+    defend = Plan(objectives=(Objective(Coord(2, 2), Role.DEFEND, 2),))
+    build_ship = Plan(objectives=(), production=UnitKind.TRANSPORT)
+    build_patrol = Plan(objectives=(), production=UnitKind.PATROL)
+    scout_army = Plan(objectives=(), surplus=SurplusPolicy.SCOUT, production=UnitKind.ARMY)
+
+    assert SearchAI._is_bold(assault) is True
+    assert SearchAI._is_bold(invade) is True
+    assert SearchAI._is_bold(build_ship) is True
+    assert SearchAI._is_bold(build_patrol) is True
+    assert SearchAI._is_bold(defend) is False  # defense is not aggression
+    assert SearchAI._is_bold(scout_army) is False
+    assert SearchAI._is_bold(Plan.hold()) is False
+
+
+def test_aggression_lifts_bold_plan_near_floor_but_reverts_on_loss() -> None:
+    """A bold plan that merely fails to gain in-horizon (score ~ stand-pat floor)
+    gets the lean; a bold plan that actively LOSES vs standing pat (score far
+    below floor) reverts to flat — the smarter move wins. Non-bold untouched."""
+    from empire.ai.search.plan import Objective, Plan, Role
+    from empire.core.unit import UnitKind
+
+    ai = SearchAI(aggression=40.0, caution_tol=20.0)
+    hold = Plan.hold()                                            # non-bold -> floor
+    transport = Plan(objectives=(), production=UnitKind.TRANSPORT)  # bold, near floor
+    suicide = Plan(objectives=(Objective(Coord(2, 2), Role.ASSAULT, 1),))  # bold, loses
+
+    candidates = (hold, transport, suicide)
+    raw = [10.0, 8.0, -50.0]  # floor=10, cutoff=10-20=-10
+    eff = ai._apply_aggression(candidates, raw)
+
+    assert eff[0] == 10.0            # non-bold unchanged
+    assert eff[1] == 8.0 + 40.0      # bold near floor: lean applied -> wins
+    assert eff[2] == -50.0           # bold but losing: reverted to flat (no horde)
+
+
+def test_aggression_zero_is_a_noop() -> None:
+    from empire.ai.search.plan import Objective, Plan, Role
+
+    ai = SearchAI(aggression=0.0)
+    candidates = (Plan.hold(), Plan(objectives=(Objective(Coord(2, 2), Role.ASSAULT, 3),)))
+    raw = [5.0, 3.0]
+    assert ai._apply_aggression(candidates, raw) == raw
