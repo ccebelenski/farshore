@@ -79,6 +79,18 @@ COMMIT_SCALE = 30.0
 # DIRECTIONAL successor may reuse the bold/reversion machinery, but it ships off.
 DEFAULT_AGGRESSION = 0.0
 DEFAULT_CAUTION_TOL = 20.0
+# Split-score base value (planning/07-portfolio-director.md). The 12-turn playout
+# is demoted to a PRIORITY signal; a plan's worth also includes the horizon-FREE
+# intrinsic value of achieving its goal. Applied ONLY to past-horizon goals the
+# playout structurally cannot see — INVADE objectives, whose overseas city pays
+# off 30+ turns out (transport build + ferry). In-horizon goals (home assault,
+# defense) are left to the playout, which already values them correctly, so this
+# can't inflate land plans / regress the land game (no INVADE objective there =
+# no base value). This is what lets a naval plan get STARTED despite zero
+# in-horizon payoff — the wall the concurrency gate proved is at selection.
+# Roughly a city's worth (evaluator city=100) tempered for distance/uncertainty;
+# 0.0 disables. Tuned against the amphibious probe.
+INVADE_BASE_VALUE = 60.0
 
 
 class SearchAI:
@@ -92,11 +104,13 @@ class SearchAI:
         evaluator: Evaluator | None = None,
         aggression: float = DEFAULT_AGGRESSION,
         caution_tol: float = DEFAULT_CAUTION_TOL,
+        invade_base: float = INVADE_BASE_VALUE,
     ) -> None:
         self._horizon: int = horizon
         self._samples: int = max(1, samples)
         self._aggression: float = aggression
         self._caution_tol: float = caution_tol
+        self._invade_base: float = invade_base
         self._generator: CandidateGenerator = (
             generator if generator is not None else CandidateGenerator()
         )
@@ -133,9 +147,11 @@ class SearchAI:
         belief = self._belief_builder.build(view)
         me = view.own_player.id
 
-        # Honest playout score per candidate, then the aggression lean.
+        # Honest playout score (the 12-turn PRIORITY signal), then add the
+        # horizon-free base value of any past-horizon goal the playout can't see.
         raw = [self._score(belief, plan, me) for plan in candidates]
-        eff = self._apply_aggression(candidates, raw)
+        aggr = self._apply_aggression(candidates, raw)
+        eff = [aggr[i] + self._base_value(candidates[i]) for i in range(len(candidates))]
 
         incumbent = self._committed.plan
         best_plan = candidates[0]
@@ -186,6 +202,22 @@ class SearchAI:
             s + self._aggression if (b and s >= cutoff) else s
             for s, b in zip(raw, bold)
         ]
+
+    def _base_value(self, plan: Plan) -> float:
+        """Horizon-free worth of the plan's PAST-HORIZON goals (planning/07).
+
+        Only INVADE objectives qualify: their overseas city pays off well past the
+        12-turn horizon, so the playout scores the build cost but never the prize
+        — leaving the plan unstartable on playout alone (the concurrency gate
+        proved selection is the wall). Crediting the intrinsic city worth here
+        lets a combined 'press-home + build-fleet' plan out-score pure-home (it
+        carries home's accurate playout value PLUS the overseas base value). In-
+        horizon goals get nothing — the playout already prices them, so land-only
+        games are untouched."""
+        if self._invade_base <= 0.0:
+            return 0.0
+        invade = sum(1 for o in plan.objectives if o.role is Role.INVADE)
+        return self._invade_base * invade
 
     @staticmethod
     def _is_bold(plan: Plan) -> bool:
