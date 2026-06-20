@@ -174,6 +174,14 @@ class CandidateGenerator:
         # trade-off (coastal production -> hulls; exploration value) beats
         # pressing the land fight.
         plans.extend(self._invade_plans(view, overseas))
+        # CONCURRENCY GATE (planning/07-portfolio-director.md, Step 1): a single
+        # plan that presses the home land fight AND builds/stages an invasion
+        # fleet at the same time. Production is a sea kind, so the follower splits
+        # it per-city (coastal -> transports, inland -> armies) — the inland armies
+        # storm the home target while the coast assembles the fleet. This is the
+        # cheap stateless test of "do concurrent strategies fix naval?" before
+        # building the stateful portfolio.
+        plans.extend(self._combined_plans(view, targets, overseas, fist))
         plans.extend(self._recon_plans(view))
         plans.extend(self._air_plans(view))
 
@@ -283,6 +291,42 @@ class CandidateGenerator:
             Plan(
                 objectives=(Objective(target, Role.INVADE, INVADE_STRENGTH),),
                 surplus=SurplusPolicy.RESERVE,
+                production=prod,
+            )
+        ]
+
+    def _combined_plans(
+        self, view: WorldView, targets: list[Coord], overseas: list[Coord], fist: int
+    ) -> list[Plan]:
+        """A concurrent land+sea plan: assault the nearest home target while
+        building/staging an invasion fleet for the nearest overseas coastal city.
+
+        Empty unless BOTH a land target and a coastal overseas target exist (else
+        the pure land or pure invade plans already cover it). Production is the
+        invade plan's choice (transports until the fleet exists, then armies); the
+        follower builds ships only at coastal cities and armies inland, so inland
+        production still feeds the home assault. This is the stateless concurrency
+        gate (planning/07); the stateful portfolio generalizes it."""
+        if not targets:
+            return []
+        coastal = [t for t in overseas if is_ocean_coastal(view, t)]
+        if not coastal:
+            return []
+        n_transports = sum(
+            1 for u in view.own_units if u.kind is UnitKind.TRANSPORT
+        )
+        prod = (
+            UnitKind.TRANSPORT
+            if n_transports < FLEET_TRANSPORTS
+            else UnitKind.ARMY
+        )
+        return [
+            Plan(
+                objectives=(
+                    Objective(targets[0], Role.ASSAULT, fist),
+                    Objective(coastal[0], Role.INVADE, INVADE_STRENGTH),
+                ),
+                surplus=SurplusPolicy.SCOUT,
                 production=prod,
             )
         ]
