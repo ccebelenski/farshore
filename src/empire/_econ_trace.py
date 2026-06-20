@@ -28,6 +28,7 @@ from empire._naval_arena import (
     _home_continent,
 )
 from empire.ai.baseline import BaselineAI
+from empire.ai.search import SearchAI
 from empire.ai.search.naval import SEA_KINDS
 from empire.core.game import Game
 from empire.core.player import Player
@@ -59,17 +60,23 @@ def _counts(game: Game, who: Player) -> dict[str, int]:
 def trace_game(
     seed: int, cap: int, rules: RuleSet, mode: str, verbose: bool,
     profile: MapProfile = NAVAL_PROFILE,
+    aggression: float | None = None,
 ) -> dict[str, object] | None:
     """Run one game, sampling both sides' economy every turn. Returns a summary
-    dict; prints a per-turn table when `verbose`."""
+    dict; prints a per-turn table when `verbose`. `aggression` overrides the
+    SearchAI temperament on BOTH search sides (None = library default)."""
     built = build_two_continent(profile, seed, rules)
     if built is None:
         return None
     game, players = built
     p0, p1 = players
-    game.attach_controller(p0.id, _challenger("search"))
+
+    def _search():
+        return SearchAI() if aggression is None else SearchAI(aggression=aggression)
+
+    game.attach_controller(p0.id, _search())
     if mode == "selfplay":
-        game.attach_controller(p1.id, _challenger("search"))
+        game.attach_controller(p1.id, _search())
     else:
         game.attach_controller(p1.id, BaselineAI())
 
@@ -155,12 +162,17 @@ def main() -> None:
         help="map profile: 'small' = play-tui's 50x30 board (default), "
         "'naval' = the 28x18 arena board",
     )
+    ap.add_argument(
+        "--aggression", type=float, default=None,
+        help="override SearchAI aggression on both sides (default: library default)",
+    )
     args = ap.parse_args()
     rules = FORTIFIED_CITIES if args.fortified else STANDARD
     profile = _PROFILES[args.profile]
 
     if args.seed is not None:
-        trace_game(args.seed, args.cap, rules, args.mode, verbose=True, profile=profile)
+        trace_game(args.seed, args.cap, rules, args.mode, verbose=True,
+                   profile=profile, aggression=args.aggression)
         return
 
     # Summary sweep: how often does the loser end with ~zero army, and did it
@@ -174,7 +186,8 @@ def main() -> None:
     decided = 0
     total = 0
     for seed in range(args.seeds):
-        s = trace_game(seed, args.cap, rules, args.mode, verbose=False, profile=profile)
+        s = trace_game(seed, args.cap, rules, args.mode, verbose=False,
+                       profile=profile, aggression=args.aggression)
         if s is None:
             continue
         total += 1

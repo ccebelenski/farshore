@@ -118,6 +118,28 @@ units: city=100, army=10); the self-play arena calibrates them.
    regress the land game. Aggression-on must not drop the STANDARD win-rate.
 4. Full unit-test suite.
 
+## Result — FAILED (uniform scalar), shipped off by default
+
+Tested via `_aggr_ab.py` (search-vs-search A/B, the only oracle that can measure
+this — BaselineAI can't invade):
+- **Naval (two-continent, FORTIFIED):** aggression-on vs -off → 16/16 still
+  unfinished, 0 projection. Same-seed econ trace (a=40 vs a=0) was ~identical.
+- **Land-brawl (STANDARD):** aggression-on LOST 17–3 to its plain self.
+
+Root cause: a uniform `+AGGRESSION` on every bold plan **cannot reorder
+bold-vs-bold — it only flips passive→bold.** So it can't make "sail overseas"
+beat "take another home neutral" (no naval help), and the only thing it *can* do
+is override correct passive/defensive choices on land (the regression). The
+caution-reversion didn't catch a "worse-than-the-patient-option" attack — exactly
+the `_bias_check` missing-signal sentinel, made real.
+
+Deeper discovery: even forced naval-only, projection is ~0; the vs-baseline arena
+built a navy 13/16 but held an off-home city only **1/16**. The real bottleneck
+is the **amphibious pipeline (land-and-HOLD)**, not plan selection. See memory
+`project_aggression_bias_failed`. `DEFAULT_AGGRESSION` reverted to 0.0; the
+bold/reversion machinery is kept param-exposed for a possible *directional*
+successor.
+
 ## Future (not now)
 
 This is step one of the two-step path. Step two: a thin **objective-director**

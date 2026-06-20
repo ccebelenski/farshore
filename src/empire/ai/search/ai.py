@@ -69,7 +69,15 @@ COMMIT_SCALE = 30.0
 # pre-bias behavior exactly (used as the arena A/B baseline). Defaults are a
 # starting guess in evaluator units (city=100, army=10); the self-play arena
 # calibrates them.
-DEFAULT_AGGRESSION = 40.0
+#
+# DISABLED BY DEFAULT (0.0): the uniform-scalar form was tested and FAILED — a
+# flat bonus to every bold plan only ever flips passive->bold, never bold->bold,
+# so it couldn't redirect land-consolidation toward naval projection (no naval
+# help) yet overrode correct passive/defensive choices on land (lost 17-3 to its
+# plain self). See planning/06-aggression-bias.md "Result" and memory
+# project_aggression_bias_failed. The mechanism is kept (param-exposed) because a
+# DIRECTIONAL successor may reuse the bold/reversion machinery, but it ships off.
+DEFAULT_AGGRESSION = 0.0
 DEFAULT_CAUTION_TOL = 20.0
 
 
