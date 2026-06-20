@@ -6,24 +6,10 @@ Feature requests and rough edges surfaced during human playtesting (vs the
 
 ## Features requested
 
-### City production tracker (panel/pop-up)
-A single view of all your cities and what they're building, so you don't have to
-walk the map city by city. Per city, show:
-- city (id / name) and **coordinates**
-- what it's **producing** (or idle)
-- **ETA** — the turn the unit completes (`current_turn + ceil((build_time -
-  work) / work_per_turn)`; show "idle" when nothing is building)
-
-Open question: a transient pop-up (hotkey) vs a persistent side panel. A sortable
-list (by ETA, or by city) would help once there are many cities. Likely a new
-modal or an extension of the status/side area in `play_screen`.
-
-### Deliberate disband command
-No way to scrap a unit on purpose today (only the automatic over-capacity and
-capture-consumption disbands exist). Proposed: a hotkey (`x`) on a selected own
-unit → confirm modal → remove it. Engine has no deliberate-disband hook yet.
-DECISION NEEDED: a loaded transport — **block** (unload first) or **disband with
-a warning** that the N aboard are lost too? (No silent cargo drowning.)
+(City production tracker and deliberate disband are DONE — see git history.
+The `c` city report pops a read-only, ETA-sorted list of your cities; `x`
+disbands the selected/hovered own unit behind a confirm that warns when a
+loaded carrier's cargo goes down with it.)
 
 ## Rough edges / pacing
 
@@ -105,6 +91,10 @@ arena re-validation (and a stronger oracle than BaselineAI — e.g. self-play or
 scripted aggressive bot — since BaselineAI can't measure "fights a human").
 
 ### Satellite motion is opaque + spec deviation
+FIXED (the order-queue bug): satellites were being offered for *manual* movement
+(`_units_needing_orders` didn't exclude them), so the player got prompted to
+"move" an auto-orbiting unit. They're now skipped from the order cycle. The two
+gaps below remain.
 Playtest: "I don't understand satellite motions." Satellites auto-orbit (hardcoded
 EAST from launch), bounce off edges, move 1/turn, 50-turn lifetime then deorbit,
 can't be steered (scan 10 = wide recon). Two gaps: (1) UX — nothing in-game

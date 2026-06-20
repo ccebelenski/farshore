@@ -54,13 +54,14 @@ from empire.core.standing_order import (
     Sentry,
     StandingOrder,
 )
-from empire.core.unit import Unit, UnitKind
+from empire.core.unit import UNIT_REGISTRY, Unit, UnitKind
 from empire.events.bus import EventBus
 from empire.pathfinding.bfs import BFSPathfinder
 from empire.pathfinding.cost import AIR, ARMY, SEA
 from empire.persistence.save_manager import SaveManager
 from empire.tui.human_controller import HumanController
 from empire.tui.modals import (
+    CityReportModal,
     ConfirmModal,
     DefaultOrderModal,
     HelpModal,
@@ -127,6 +128,8 @@ class PlayScreen(Screen[None]):
         Binding("tab", "peek_next_unit", "peek next"),
         Binding("p", "production", "production"),
         Binding("k", "city_orders", "city orders"),
+        Binding("c", "city_report", "cities"),
+        Binding("x", "disband", "disband"),
         Binding("full_stop", "sentry", "sentry"),
         Binding("r", "reset_path", "reset path"),
         Binding("escape", "deselect", "deselect"),
@@ -943,6 +946,74 @@ class PlayScreen(Screen[None]):
 
         self.app.push_screen(DefaultOrderModal(kind, current), _set_order)
 
+    def action_city_report(self) -> None:
+        """Pop up a read-only overview of every own city and its production ETA,
+        soonest-finishing first, so you don't have to walk the map city by city."""
+        rows: list[tuple[int, str]] = []
+        for city in self._game.map.cities():
+            if city.owner is not self._human:
+                continue
+            x, y = city.coord.x, city.coord.y
+            # Reflect a queued (not-yet-applied) production change if any.
+            building = self._pending_production.get(city.id, city.production.building)
+            if building is None:
+                rows.append((10**9, f"  city#{int(city.id)} ({x},{y}): idle"))
+                continue
+            build_time = UNIT_REGISTRY[building].build_time
+            # Accumulated work only counts toward the current target; a queued
+            # switch starts effectively from this turn's progress.
+            work = city.production.work if building is city.production.building else 0
+            left = max(0, build_time - work)
+            eta = self._game.turn + left
+            rows.append(
+                (
+                    eta,
+                    f"  city#{int(city.id)} ({x},{y}): {building.value} "
+                    f"— done t{eta} ({left} left)",
+                )
+            )
+        rows.sort(key=lambda r: r[0])  # soonest first; idle (sentinel) last
+        self.app.push_screen(CityReportModal([line for _, line in rows]))
+
+    def action_disband(self) -> None:
+        """Deliberately scrap the selected (or hovered) own unit, after a
+        confirm. A loaded carrier warns that the cargo goes down with it."""
+        unit = self._selected_unit() or next(
+            (u for u in self._game.map.units_at(self._cursor) if u.owner is self._human),
+            None,
+        )
+        if unit is None or unit.owner is not self._human:
+            self._hint = "no own unit to disband (select or hover one)"
+            self._refresh_view()
+            return
+
+        label = f"{unit.kind.value} #{int(unit.id)}"
+        cargo_n = len(unit.cargo)
+        if cargo_n:
+            prompt = f"Disband {label} AND the {cargo_n} unit(s) aboard? (Y/N)"
+        else:
+            prompt = f"Disband {label}? (Y/N)"
+        uid = unit.id
+
+        def _done(confirmed: bool | None) -> None:
+            if not confirmed:
+                self._hint = "disband cancelled"
+                self._refresh_view()
+                return
+            u = self._game.map.unit_by_id(uid)
+            if u is not None:
+                last = u.coord
+                self._game.map.remove_unit(u)
+                self._bus.publish(UnitRemovedEvent(unit_id=uid, last_coord=last))
+            self._handled.add(uid)
+            if self._selected_unit_id == uid:
+                self._selected_unit_id = None
+            self._hint = f"disbanded {label}"
+            self._advance_to_next_unit()
+            self._refresh_view()
+
+        self.app.push_screen(ConfirmModal(prompt), _done)
+
     def action_toggle_auto(self) -> None:
         self._auto_turn = not self._auto_turn
         self._hint = f"auto end-turn {'ON' if self._auto_turn else 'OFF'}"
@@ -1151,6 +1222,11 @@ class PlayScreen(Screen[None]):
         result: list[Unit] = []
         for unit in self._game.map.board_units():
             if unit.owner is not self._human:
+                continue
+            # Satellites are not player-commanded: the engine auto-orbits them
+            # (spec §2.4 — fixed heading, bounce off edges). They must never
+            # enter the order queue or the player gets prompted to "move" one.
+            if unit.kind is UnitKind.SATELLITE:
                 continue
             if unit.moves_this_turn() <= 0:
                 continue

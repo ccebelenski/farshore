@@ -654,3 +654,103 @@ async def test_load_command_full_does_not_enter_loading() -> None:
         await pilot.pause()
         assert len(carrier.cargo) == cap
         assert not isinstance(carrier.standing_order, Loading)  # not waiting
+
+
+async def test_satellite_never_enters_order_queue() -> None:
+    """Playtest bug: a satellite was being offered for manual movement. It
+    auto-orbits (spec §2.4) and must be excluded from the order cycle."""
+    from empire.core.identity import UnitId
+    from empire.core.unit import Satellite
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app()
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    capital = next(c for c in game.map.cities() if c.owner is human)
+    sat = Satellite(UnitId(950), human, capital.coord)
+    game.map.place_unit(sat, capital.coord)
+
+    async with app.run_test(size=(60, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        needing = screen._units_needing_orders(  # pyright: ignore[reportPrivateUsage]
+            include_handled=True
+        )
+        assert sat.id not in {u.id for u in needing}
+
+
+async def test_city_report_opens_and_dismisses() -> None:
+    """The 'c' city report pops a read-only modal that any key closes."""
+    from empire.tui.modals import CityReportModal
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app()
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("escape")  # free cursor (don't intercept 'c' elsewhere)
+        await pilot.press("c")
+        await pilot.pause()
+        assert isinstance(app.screen, CityReportModal)
+        await pilot.press("space")  # any key closes
+        await pilot.pause()
+        assert isinstance(app.screen, PlayScreen)
+
+
+async def test_disband_removes_own_unit_after_confirm() -> None:
+    """'x' on an own unit → confirm → the unit is gone from the map."""
+    from empire.core.identity import UnitId
+    from empire.core.unit import Army
+    from empire.tui.modals import ConfirmModal
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app()
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    capital = next(c for c in game.map.cities() if c.owner is human)
+    army = Army(UnitId(960), human, capital.coord)
+    game.map.place_unit(army, capital.coord)
+
+    async with app.run_test(size=(60, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        await pilot.press("escape")  # free cursor
+        screen._cursor = capital.coord  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("x")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmModal)
+        await pilot.press("y")  # confirm
+        await pilot.pause()
+        assert game.map.unit_by_id(army.id) is None
+
+
+async def test_disband_cancel_keeps_unit() -> None:
+    """Declining the disband confirm leaves the unit on the map."""
+    from empire.core.identity import UnitId
+    from empire.core.unit import Army
+    from empire.tui.modals import ConfirmModal
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app()
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    capital = next(c for c in game.map.cities() if c.owner is human)
+    army = Army(UnitId(961), human, capital.coord)
+    game.map.place_unit(army, capital.coord)
+
+    async with app.run_test(size=(60, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        await pilot.press("escape")  # free cursor
+        screen._cursor = capital.coord  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("x")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmModal)
+        await pilot.press("n")  # decline
+        await pilot.pause()
+        assert game.map.unit_by_id(army.id) is army
