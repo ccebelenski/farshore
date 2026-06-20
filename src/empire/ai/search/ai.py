@@ -28,7 +28,7 @@ from empire.ai.search.belief import BeliefBuilder
 from empire.ai.search.evaluator import Evaluator
 from empire.ai.search.follower import PlanFollower
 from empire.ai.search.generator import CandidateGenerator
-from empire.ai.search.plan import Plan, Role
+from empire.ai.search.plan import Plan, PlanGoal, Role
 from empire.ai.search.playout import PlayoutModel
 from empire.contracts.controller import AIController
 from empire.contracts.surprise import Surprise
@@ -91,6 +91,17 @@ DEFAULT_CAUTION_TOL = 20.0
 # Roughly a city's worth (evaluator city=100) tempered for distance/uncertainty;
 # 0.0 disables. Tuned against the amphibious probe.
 INVADE_BASE_VALUE = 60.0
+# Exploration base value: the horizon-free worth of SCOUTING THE SEA to discover
+# the enemy continent — the goal one level up from INVADE (without a discovered
+# target, no invade plan exists, so naval never starts on a real two-continent
+# map). Sea recon's payoff (finding a coastal city, then invading it) is also far
+# past the horizon, so the playout won't pick it on its own. Credited only when
+# it is genuinely the way forward — gated in `_choose_plan` to fire ONLY when no
+# land target remains AND home is fully explored — so it cannot pull the AI off
+# the land game or off scouting its own continent first (the regressions in
+# project_naval_regressed_land). Kept below INVADE_BASE_VALUE so a discovered
+# target supersedes more scouting. 0.0 disables.
+EXPLORE_BASE_VALUE = 30.0
 
 
 class SearchAI:
@@ -105,12 +116,14 @@ class SearchAI:
         aggression: float = DEFAULT_AGGRESSION,
         caution_tol: float = DEFAULT_CAUTION_TOL,
         invade_base: float = INVADE_BASE_VALUE,
+        explore_base: float = EXPLORE_BASE_VALUE,
     ) -> None:
         self._horizon: int = horizon
         self._samples: int = max(1, samples)
         self._aggression: float = aggression
         self._caution_tol: float = caution_tol
         self._invade_base: float = invade_base
+        self._explore_base: float = explore_base
         self._generator: CandidateGenerator = (
             generator if generator is not None else CandidateGenerator()
         )
@@ -206,18 +219,29 @@ class SearchAI:
     def _base_value(self, plan: Plan) -> float:
         """Horizon-free worth of the plan's PAST-HORIZON goals (planning/07).
 
-        Only INVADE objectives qualify: their overseas city pays off well past the
-        12-turn horizon, so the playout scores the build cost but never the prize
-        — leaving the plan unstartable on playout alone (the concurrency gate
-        proved selection is the wall). Crediting the intrinsic city worth here
-        lets a combined 'press-home + build-fleet' plan out-score pure-home (it
-        carries home's accurate playout value PLUS the overseas base value). In-
-        horizon goals get nothing — the playout already prices them, so land-only
-        games are untouched."""
-        if self._invade_base <= 0.0:
-            return 0.0
-        invade = sum(1 for o in plan.objectives if o.role is Role.INVADE)
-        return self._invade_base * invade
+        INVADE objectives: their overseas city pays off well past the 12-turn
+        horizon, so the playout scores the build cost but never the prize —
+        leaving the plan unstartable on playout alone (the concurrency gate proved
+        selection is the wall). Crediting the intrinsic city worth lets a combined
+        'press-home + build-fleet' plan out-score pure-home (it carries home's
+        accurate playout value PLUS the overseas base value).
+
+        SCOUT_SEA goal: discovering the enemy continent — also past-horizon, and
+        tagged by the generator (which knows the topology) ONLY when the enemy is
+        plausibly overseas, so it can't fire on a land map. Kept below the invade
+        base so a discovered target supersedes more scouting.
+
+        In-horizon goals (assault/defend) get nothing — the playout already prices
+        them, so land-only games are untouched. Both naval credits come via the
+        generator's goal tag, which it sets only when crossing water is the path
+        to victory (home explored + no land-reachable enemy), so neither fires on
+        a shared-continent map (the land-brawl regression)."""
+        value = 0.0
+        if self._invade_base > 0.0 and plan.goal is PlanGoal.INVADE:
+            value += self._invade_base
+        if self._explore_base > 0.0 and plan.goal is PlanGoal.SCOUT_SEA:
+            value += self._explore_base
+        return value
 
     @staticmethod
     def _is_bold(plan: Plan) -> bool:

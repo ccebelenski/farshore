@@ -282,26 +282,45 @@ def test_aggression_zero_is_a_noop() -> None:
     assert ai._apply_aggression(candidates, raw) == raw
 
 
-def test_base_value_credits_only_invade_objectives() -> None:
-    """Split-score (planning/07): horizon-free base value goes to INVADE goals
-    (past-horizon) only; in-horizon goals (assault/defend) get nothing, so the
-    land game is untouched."""
-    from empire.ai.search.plan import Objective, Plan, Role
-    from empire.core.unit import UnitKind
+def test_base_value_credits_only_tagged_invade_goal() -> None:
+    """Split-score (planning/07): horizon-free base value goes to the INVADE goal
+    TAG only (set by the generator when crossing water is the path to victory).
+    A bare INVADE objective with no tag gets nothing — so island sideshows on a
+    land map (untagged) can't pull the AI, the land-brawl-regression fix."""
+    from empire.ai.search.plan import Objective, Plan, PlanGoal, Role
 
     ai = SearchAI(invade_base=60.0)
     home_assault = Plan(objectives=(Objective(Coord(2, 2), Role.ASSAULT, 3),))
-    defend = Plan(objectives=(Objective(Coord(2, 2), Role.DEFEND, 2),))
-    invade = Plan(objectives=(Objective(Coord(9, 9), Role.INVADE, 3),))
-    combined = Plan(
-        objectives=(
-            Objective(Coord(2, 2), Role.ASSAULT, 3),
-            Objective(Coord(9, 9), Role.INVADE, 3),
-        )
+    untagged_invade = Plan(objectives=(Objective(Coord(9, 9), Role.INVADE, 3),))
+    tagged_invade = Plan(
+        objectives=(Objective(Coord(9, 9), Role.INVADE, 3),), goal=PlanGoal.INVADE
     )
 
-    assert ai._base_value(home_assault) == 0.0   # in-horizon -> playout handles it
-    assert ai._base_value(defend) == 0.0
-    assert ai._base_value(invade) == 60.0
-    assert ai._base_value(combined) == 60.0      # the INVADE goal it carries
-    assert SearchAI(invade_base=0.0)._base_value(invade) == 0.0  # disabled
+    assert ai._base_value(home_assault) == 0.0       # in-horizon -> playout handles it
+    assert ai._base_value(untagged_invade) == 0.0    # not warranted -> no bonus
+    assert ai._base_value(tagged_invade) == 60.0     # generator deemed it the path
+    assert SearchAI(invade_base=0.0)._base_value(tagged_invade) == 0.0  # disabled
+
+
+def test_base_value_credits_scout_sea_goal() -> None:
+    """The SCOUT_SEA goal tag (set by the generator only when the enemy is
+    plausibly overseas) earns the horizon-free discovery base value; an untagged
+    look-alike plan does not."""
+    from empire.ai.search.plan import Objective, Plan, PlanGoal, Role, SurplusPolicy
+    from empire.core.unit import UnitKind
+
+    ai = SearchAI(explore_base=30.0, invade_base=60.0)
+    scout = Plan(
+        objectives=(Objective(Coord(2, 2), Role.ASSAULT, 3),),
+        surplus=SurplusPolicy.SCOUT,
+        production=UnitKind.PATROL,
+        goal=PlanGoal.SCOUT_SEA,
+    )
+    look_alike = Plan(  # same shape but NOT tagged -> no discovery credit
+        objectives=(Objective(Coord(2, 2), Role.ASSAULT, 3),),
+        surplus=SurplusPolicy.SCOUT,
+        production=UnitKind.PATROL,
+    )
+    assert ai._base_value(scout) == 30.0
+    assert ai._base_value(look_alike) == 0.0
+    assert SearchAI(explore_base=0.0)._base_value(scout) == 0.0  # disabled

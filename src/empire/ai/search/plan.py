@@ -26,6 +26,19 @@ class Role(Enum):
     INVADE = "invade"  # ferry armies by transport and storm an overseas city
 
 
+class PlanGoal(Enum):
+    """The horizon-free strategic GOAL a plan serves, set by the generator (which
+    knows the land/sea topology) and read by the scorer's split-score base value
+    (planning/07). Most goals are read off the objectives; SCOUT_SEA must be
+    tagged because a 'press-home + scout-sea' plan looks structurally like an
+    assault plan that happens to build a patrol — only the generator knows it was
+    emitted to go find the enemy continent."""
+
+    NONE = "none"
+    INVADE = "invade"  # capture a city across the water (past-horizon payoff)
+    SCOUT_SEA = "scout_sea"  # discover the enemy continent (concurrent with home)
+
+
 class SurplusPolicy(Enum):
     """What armies left over after objective assignment do."""
 
@@ -58,6 +71,7 @@ class Plan:
     objectives: tuple[Objective, ...]
     surplus: SurplusPolicy = SurplusPolicy.SCOUT
     production: UnitKind = UnitKind.ARMY
+    goal: PlanGoal = PlanGoal.NONE
 
     @staticmethod
     def hold() -> Plan:

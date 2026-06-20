@@ -15,7 +15,7 @@ playout.
 from __future__ import annotations
 
 from empire.ai.search.naval import is_ocean_coastal
-from empire.ai.search.plan import Objective, Plan, Role, SurplusPolicy
+from empire.ai.search.plan import Objective, Plan, PlanGoal, Role, SurplusPolicy
 from empire.ai.vision import frontier_cells, sea_frontier_cells
 from empire.contracts.world_view import WorldView
 from empire.core.coord import Coord
@@ -67,6 +67,20 @@ class CandidateGenerator:
         targets, overseas, has_land_frontier = self._assess(view)
         defenses = self._threatened_home_cities(view)
 
+        # Naval base value (planning/07) is credited ONLY when crossing water is
+        # the genuine path to victory — home fully explored (no land frontier left
+        # to expand into) AND no enemy reachable by land. On a shared continent
+        # the enemy is land-reachable, so this is never true and naval goals stay
+        # uncredited (no chasing island sideshows — the land-brawl regression).
+        # On separate continents it's exactly right. The flag drives the goal tag
+        # the scorer reads; untagged naval plans still play, they just don't get
+        # the horizon-free bonus.
+        target_set = set(targets)
+        enemy_land_reachable = any(
+            c.coord in target_set for c in view.known_enemy_cities
+        )
+        naval_warranted = not has_land_frontier and not enemy_land_reachable
+
         # No land-reachable target left → decide between going overseas and
         # finishing the home continent, by priority:
         #   1. a known coastal enemy/neutral city overseas → INVADE it now
@@ -90,7 +104,7 @@ class CandidateGenerator:
             # `has_land_frontier` is the gate, but it reads False on turn 0-1
             # before the opening scan populates vision, so force exploration then.
             naval = [
-                *self._invade_plans(view, overseas),
+                *self._invade_plans(view, overseas, naval_warranted),
                 *self._recon_plans(view),
                 *self._air_plans(view),
             ]
@@ -173,15 +187,16 @@ class CandidateGenerator:
         # one. The search picks these only when a playout says the naval
         # trade-off (coastal production -> hulls; exploration value) beats
         # pressing the land fight.
-        plans.extend(self._invade_plans(view, overseas))
-        # CONCURRENCY GATE (planning/07-portfolio-director.md, Step 1): a single
-        # plan that presses the home land fight AND builds/stages an invasion
-        # fleet at the same time. Production is a sea kind, so the follower splits
-        # it per-city (coastal -> transports, inland -> armies) — the inland armies
-        # storm the home target while the coast assembles the fleet. This is the
-        # cheap stateless test of "do concurrent strategies fix naval?" before
-        # building the stateful portfolio.
-        plans.extend(self._combined_plans(view, targets, overseas, fist))
+        plans.extend(self._invade_plans(view, overseas, naval_warranted))
+        # CONCURRENCY (planning/07-portfolio-director.md): a single plan that
+        # presses the home land fight AND builds/stages an invasion fleet at once.
+        # Production is a sea kind, so the follower splits it per-city (coastal ->
+        # transports, inland -> armies) — the inland armies storm the home target
+        # while the coast assembles the fleet.
+        plans.extend(self._combined_plans(view, targets, overseas, fist, naval_warranted))
+        plans.extend(
+            self._scout_combined_plans(view, targets, overseas, fist, naval_warranted)
+        )
         plans.extend(self._recon_plans(view))
         plans.extend(self._air_plans(view))
 
@@ -265,7 +280,9 @@ class CandidateGenerator:
         )
         return land, overseas, has_frontier
 
-    def _invade_plans(self, view: WorldView, overseas: list[Coord]) -> list[Plan]:
+    def _invade_plans(
+        self, view: WorldView, overseas: list[Coord], naval_warranted: bool = False
+    ) -> list[Plan]:
         """A single INVADE plan against the nearest known coastal overseas city
         (empty if none is known).
 
@@ -274,7 +291,11 @@ class CandidateGenerator:
         several targets fragments the force and regressed projection to zero.
         Production builds hulls up to `FLEET_TRANSPORTS`, then armies to fill
         them — by the time an overseas city is known the home continent usually
-        holds an army surplus, so hulls are the bottleneck, not troops."""
+        holds an army surplus, so hulls are the bottleneck, not troops.
+
+        Goal=INVADE (earning the horizon-free base value) only when
+        `naval_warranted` — otherwise the plan still plays but gets no bonus, so
+        it can't pull the AI toward island sideshows on a land map."""
         coastal = [t for t in overseas if is_ocean_coastal(view, t)]
         if not coastal:
             return []
@@ -292,11 +313,13 @@ class CandidateGenerator:
                 objectives=(Objective(target, Role.INVADE, INVADE_STRENGTH),),
                 surplus=SurplusPolicy.RESERVE,
                 production=prod,
+                goal=PlanGoal.INVADE if naval_warranted else PlanGoal.NONE,
             )
         ]
 
     def _combined_plans(
-        self, view: WorldView, targets: list[Coord], overseas: list[Coord], fist: int
+        self, view: WorldView, targets: list[Coord], overseas: list[Coord], fist: int,
+        naval_warranted: bool = False,
     ) -> list[Plan]:
         """A concurrent land+sea plan: assault the nearest home target while
         building/staging an invasion fleet for the nearest overseas coastal city.
@@ -328,6 +351,39 @@ class CandidateGenerator:
                 ),
                 surplus=SurplusPolicy.SCOUT,
                 production=prod,
+                goal=PlanGoal.INVADE if naval_warranted else PlanGoal.NONE,
+            )
+        ]
+
+    def _scout_combined_plans(
+        self, view: WorldView, targets: list[Coord], overseas: list[Coord], fist: int,
+        naval_warranted: bool = False,
+    ) -> list[Plan]:
+        """A concurrent press-home + scout-the-sea plan, tagged SCOUT_SEA so the
+        scorer credits the horizon-free discovery goal (planning/07).
+
+        DISCOVERY is the wall on a two-continent map: the enemy is overseas and
+        undiscovered, so no invade plan can exist until a patrol finds the coast —
+        but a pure recon plan never wins selection (it abandons the home game).
+        This presses the nearest home target with inland armies WHILE a coastal
+        city builds a patrol that scouts the sea (production=PATROL splits
+        per-city in the follower). Emitted only when the enemy is plausibly
+        overseas: there is unexplored sea, no overseas city is known yet to invade
+        (else invade, don't scout), and no KNOWN enemy city is reachable by land
+        (else fight on land — keeps it off shared-continent maps once contact is
+        made)."""
+        if not naval_warranted:
+            return []  # crossing water isn't the path yet (home unexplored / land enemy)
+        if not targets or not sea_frontier_cells(view):
+            return []
+        if any(is_ocean_coastal(view, t) for t in overseas):
+            return []  # a target is known -> the invade plan covers it
+        return [
+            Plan(
+                objectives=(Objective(targets[0], Role.ASSAULT, fist),),
+                surplus=SurplusPolicy.SCOUT,
+                production=UnitKind.PATROL,
+                goal=PlanGoal.SCOUT_SEA,
             )
         ]
 

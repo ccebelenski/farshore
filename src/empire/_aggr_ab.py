@@ -28,7 +28,11 @@ from dataclasses import dataclass
 from empire._arena import ARENA_PROFILE, build_land_brawl
 from empire._naval_arena import NAVAL_PROFILE, build_two_continent, _home_continent
 from empire.ai.search import SearchAI
-from empire.ai.search.ai import DEFAULT_AGGRESSION
+from empire.ai.search.ai import (
+    DEFAULT_AGGRESSION,
+    EXPLORE_BASE_VALUE,
+    INVADE_BASE_VALUE,
+)
 from empire.core.player import Player
 from empire.core.ruleset import FORTIFIED_CITIES, SMALL, STANDARD, MapProfile, RuleSet
 
@@ -54,18 +58,28 @@ def _build(kind: str, profile: MapProfile, seed: int, rules: RuleSet):
 
 
 def play_match(
-    map_key: str, seed: int, aggr_first: bool, cap: int, rules: RuleSet, aggression: float
+    map_key: str, seed: int, aggr_first: bool, cap: int, rules: RuleSet,
+    aggression: float, invade_base: float = 0.0, explore_base: float = 0.0,
 ) -> tuple[str, int, int] | None:
-    """One game; return (winner, turns, aggr_peak_off_home). winner in
-    {'aggr','plain','draw','unfinished'}."""
+    """One game: side A (the new config) vs side B (all temperament off = the
+    pre-change baseline). Returns (winner, turns, A_peak_off_home); winner in
+    {'aggr','plain','draw','unfinished'} ('aggr' = side A wins, label kept for
+    ArenaResult reuse). On land-brawl this is the regression check: A should not
+    lose to B."""
     kind, profile = _MAPS[map_key]
     built = _build(kind, profile, seed, rules)
     if built is None:
         return None
     game, players = built
     ai = 0 if aggr_first else 1
-    game.attach_controller(players[ai].id, SearchAI(aggression=aggression))
-    game.attach_controller(players[1 - ai].id, SearchAI(aggression=0.0))
+    game.attach_controller(
+        players[ai].id,
+        SearchAI(aggression=aggression, invade_base=invade_base, explore_base=explore_base),
+    )
+    game.attach_controller(
+        players[1 - ai].id,
+        SearchAI(aggression=0.0, invade_base=0.0, explore_base=0.0),
+    )
     aggr_player: Player = players[ai]
 
     # Off-home projection telemetry only makes sense on the two-continent map.
@@ -101,7 +115,9 @@ def main() -> None:
     ap.add_argument("--map", choices=tuple(_MAPS), default="naval-small")
     ap.add_argument("--seeds", type=int, default=8, help="seeds, each played both ways")
     ap.add_argument("--cap", type=int, default=250)
-    ap.add_argument("--aggression", type=float, default=DEFAULT_AGGRESSION)
+    ap.add_argument("--aggression", type=float, default=0.0)
+    ap.add_argument("--invade-base", type=float, default=INVADE_BASE_VALUE)
+    ap.add_argument("--explore-base", type=float, default=EXPLORE_BASE_VALUE)
     ap.add_argument("--fortified", action="store_true")
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 1) - 1))
     args = ap.parse_args()
@@ -124,18 +140,25 @@ def main() -> None:
 
     print(
         f"A/B map={args.map} rules={'FORTIFIED' if rules is FORTIFIED_CITIES else 'STANDARD'} "
-        f"aggression={args.aggression} seeds={args.seeds} (x2 sides) cap={args.cap}",
+        f"A=(aggr={args.aggression},invade={args.invade_base},explore={args.explore_base}) "
+        f"vs B=baseline(0,0,0)  seeds={args.seeds} (x2) cap={args.cap}",
         flush=True,
     )
     if args.jobs <= 1:
         for seed, cf in specs:
-            consume(play_match(args.map, seed, cf, args.cap, rules, args.aggression))
+            consume(play_match(
+                args.map, seed, cf, args.cap, rules,
+                args.aggression, args.invade_base, args.explore_base,
+            ))
     else:
         from concurrent.futures import ProcessPoolExecutor, as_completed
 
         with ProcessPoolExecutor(max_workers=args.jobs) as ex:
             futs = [
-                ex.submit(play_match, args.map, s, cf, args.cap, rules, args.aggression)
+                ex.submit(
+                    play_match, args.map, s, cf, args.cap, rules,
+                    args.aggression, args.invade_base, args.explore_base,
+                )
                 for s, cf in specs
             ]
             step = max(1, len(futs) // 10)
