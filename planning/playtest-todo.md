@@ -103,3 +103,20 @@ order: (a) opportunistic engagement (biggest bang — makes it deal damage at al
 (b) defensive positioning, (c) revisit honest-fog planning strength. Each needs
 arena re-validation (and a stronger oracle than BaselineAI — e.g. self-play or a
 scripted aggressive bot — since BaselineAI can't measure "fights a human").
+
+### Satellite motion is opaque + spec deviation
+Playtest: "I don't understand satellite motions." Satellites auto-orbit (hardcoded
+EAST from launch), bounce off edges, move 1/turn, 50-turn lifetime then deorbit,
+can't be steered (scan 10 = wide recon). Two gaps: (1) UX — nothing in-game
+explains the auto-orbit / bounce / countdown, so the motion looks arbitrary (add
+a status hint: "orbiting E, N turns left" + a help line); (2) SPEC DEVIATION —
+§2.4 says a "chosen direction" but Satellite.__init__ hardcodes Direction.E with
+no UI to pick. Fix options: let the player set the orbit direction (e.g. set-
+heading on a satellite -> orbit_direction) to match the spec, and/or just surface
+the mechanic clearly. Decide steerable-vs-fixed before building.
+
+### (AI headline addendum) under-produced armies
+Playtest also: "the enemy didn't build many armies at all." So the passivity is
+partly a FORCE-ECONOMY failure — the AI didn't even build the army it needed to
+resist, not just mis-positioned what it had. Part of the core "make the AI fight"
+work: production/economy must field a real army.
