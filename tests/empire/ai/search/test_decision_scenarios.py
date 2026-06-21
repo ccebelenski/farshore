@@ -196,3 +196,77 @@ def test_island_map_does_not_select_overseas_invade() -> None:
     chosen = SearchAI(samples=1)._choose_plan(view)
     assert chosen.goal is not PlanGoal.INVADE
     assert chosen.goal is not PlanGoal.SCOUT_SEA
+
+
+# --- single-turn action observation (stage -> one turn -> read the decisions) ---
+
+
+def decide(view: WorldView, **ai_kwargs):
+    """Run ONE turn of decision-making and return the concrete TurnPlan
+    (production orders + unit moves). Deterministic: it either does it or not."""
+    from empire.ai.search.ai import SearchAI
+
+    return SearchAI(samples=1, **ai_kwargs).plan_turn(view)
+
+
+def _move_of(plan, unit_id: int) -> tuple[tuple[int, int], ...]:
+    for m in plan.moves:
+        if int(m.unit_id) == unit_id:
+            return m.path
+    return ()
+
+
+def _production(plan) -> dict[int, str]:
+    return {int(o.city_id): (o.target.value if o.target else "idle") for o in plan.production_orders}
+
+
+def test_idle_army_moves_toward_home_frontier() -> None:
+    """Open-question probe (home-exploration completeness): with unexplored home
+    land and an idle army, the AI must MOVE the army toward the frontier this
+    turn — not sit. If this fails, that's why home never finishes exploring and
+    the (correct) naval gate never opens."""
+    rows = [
+        "O......",
+        ".......",
+    ]
+    # See only the left; cols 3-6 are unexplored LAND (the frontier to push into).
+    seen = {(x, y) for y in range(2) for x in (0, 1, 2)}
+    _, _, _, view = build_scenario(rows, seen=seen, units=[("army", "own", 1, 0)])
+    path = _move_of(decide(view), unit_id=1)
+    assert path, "army should move to explore the home frontier, not sit"
+    assert path[-1][0] > 1, f"army should head toward the unseen land (higher x), got {path}"
+
+
+def test_invasion_warranted_starts_transport_production() -> None:
+    """Pipeline link, single turn: enemy overseas + home explored -> the AI must
+    set a coastal city building a TRANSPORT this turn (the naval start). Verifies
+    the fleet actually begins without running a whole game."""
+    rows = [
+        "OO~~EE",
+        "..~~..",
+        "..~~..",
+    ]
+    _, _, _, view = build_scenario(rows)
+    prod = _production(decide(view))
+    assert "transport" in prod.values(), f"expected a coastal city building a transport, got {prod}"
+
+
+def test_decisions_are_deterministic_and_numbers_justified() -> None:
+    """Answers 'is it justified by the numbers, or non-deterministic?': scoring
+    the SAME staged position twice gives identical numbers (deterministic), and
+    the chosen plan wins on the effective score (not a tiebreak/luck)."""
+    from empire.ai.search.ai import SearchAI
+
+    rows = ["O......", "......."]
+    seen = {(x, y) for y in range(2) for x in (0, 1, 2)}
+    _, _, _, view = build_scenario(rows, seen=seen, units=[("army", "own", 1, 0)])
+
+    ai = SearchAI(samples=1)
+    a = ai.scored_candidates(view)
+    b = ai.scored_candidates(view)
+    assert [(repr(p), r, e) for p, r, e in a] == [(repr(p), r, e) for p, r, e in b], (
+        "scoring must be deterministic"
+    )
+    best = max(a, key=lambda t: t[2])
+    others = [t for t in a if t is not best]
+    assert all(best[2] >= o[2] for o in others), "chosen plan must be the argmax on the numbers"

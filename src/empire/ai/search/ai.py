@@ -153,18 +153,31 @@ class SearchAI:
 
     # ---- search core ----------------------------------------------------------
 
-    def _choose_plan(self, view: WorldView) -> Plan:
+    def scored_candidates(
+        self, view: WorldView
+    ) -> list[tuple[Plan, float, float]]:
+        """Introspection: every candidate with its (raw playout score, effective
+        score). The numbers behind a decision — so a choice can be shown to win
+        ON THE NUMBERS, by a stated margin, deterministically, rather than by a
+        tiebreak or luck. Used by the set-piece tests and any decision tooling."""
         candidates = self._generator.generate(view)
-        if len(candidates) == 1:
-            return candidates[0]
+        if not candidates:
+            return []
         belief = self._belief_builder.build(view)
         me = view.own_player.id
-
         # Honest playout score (the 12-turn PRIORITY signal), then add the
         # horizon-free base value of any past-horizon goal the playout can't see.
         raw = [self._score(belief, plan, me) for plan in candidates]
         aggr = self._apply_aggression(candidates, raw)
         eff = [aggr[i] + self._base_value(candidates[i]) for i in range(len(candidates))]
+        return [(candidates[i], raw[i], eff[i]) for i in range(len(candidates))]
+
+    def _choose_plan(self, view: WorldView) -> Plan:
+        candidates = self._generator.generate(view)
+        if len(candidates) == 1:
+            return candidates[0]
+        scored = self.scored_candidates(view)
+        eff = [s[2] for s in scored]
 
         incumbent = self._committed.plan
         best_plan = candidates[0]
