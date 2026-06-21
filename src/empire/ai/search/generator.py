@@ -68,13 +68,18 @@ class CandidateGenerator:
         defenses = self._threatened_home_cities(view)
 
         # Naval base value (planning/07) is credited ONLY when crossing water is
-        # the genuine path to victory — home fully explored (no land frontier left
-        # to expand into) AND no enemy reachable by land. On a shared continent
-        # the enemy is land-reachable, so this is never true and naval goals stay
-        # uncredited (no chasing island sideshows — the land-brawl regression).
-        # On separate continents it's exactly right. The flag drives the goal tag
-        # the scorer reads; untagged naval plans still play, they just don't get
-        # the horizon-free bonus.
+        # the genuine path to victory: my home landmass is fully explored (no land
+        # frontier left — I'm boxed in by water) AND no enemy is reachable by land.
+        # Both matter, and the set-piece tests (test_decision_scenarios) pin why:
+        #   - has_land_frontier guards the PRE-CONTACT case — if there's still
+        #     unexplored land I might be on a shared continent, so explore the land
+        #     before chasing the sea (dropping this credited sea-hunts on land maps
+        #     pre-contact: the land-brawl regression);
+        #   - enemy-land-reachable guards POST-CONTACT — once the enemy is found on
+        #     my landmass, fight on land, don't sail to island sideshows.
+        # On separate continents both become true once home is scouted, so naval is
+        # credited; on a shared continent neither is (frontier remains, then the
+        # enemy is land-reachable). The flag drives the goal tag the scorer reads.
         target_set = set(targets)
         enemy_land_reachable = any(
             c.coord in target_set for c in view.known_enemy_cities
