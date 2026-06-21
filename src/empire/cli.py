@@ -249,8 +249,7 @@ def _launch_tui(
     """Build a game per the flags, attach controllers, run `EmpireApp`.
 
     `brawl` puts both capitals on one continent (the Phase-15.5 land-brawl
-    setup) — the meaningful way to playtest land-only AIs like `SearchAI`,
-    which cannot yet cross water to reach a separate-continent player.
+    setup) — the meaningful way to playtest AIs on a shared continent.
     """
     from empire.ai.baseline import BaselineAI
     from empire.core.engine import scan_set_for_player
@@ -372,7 +371,7 @@ def _build_parser() -> argparse.ArgumentParser:
     play_tui.add_argument("--seed", type=int, default=0, help="RNG seed (default: 0)")
     play_tui.add_argument(
         "--opponent",
-        choices=("baseline", "strategic", "search"),
+        choices=("baseline", "portfolio"),
         default="baseline",
         help="AI opponent (default: baseline)",
     )
@@ -406,7 +405,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     viewer.add_argument(
         "--opponent",
-        choices=("baseline", "strategic", "search"),
+        choices=("baseline", "portfolio"),
         default="baseline",
         help="AI in the P2 slot (default: baseline)",
     )

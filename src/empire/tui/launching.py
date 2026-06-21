@@ -26,7 +26,11 @@ from empire.core.ruleset import (
 )
 from empire.persistence.save_manager import SaveManager
 
-OPPONENTS: tuple[str, ...] = ("baseline", "strategic", "search")
+# The two shipped opponents: the classic greedy "horde" (BaselineAI) and the
+# stateful multi-focus "portfolio" (PortfolioAI). The old single-plan SearchAI and
+# the StrategicAI line are retired as playable opponents — the portfolio supersedes
+# them (planning/07). "baseline" stays the internal key for the horde.
+OPPONENTS: tuple[str, ...] = ("baseline", "portfolio")
 PROFILE_NAMES: tuple[str, ...] = ("SMALL", "STANDARD", "LARGE")
 
 _PROFILES: dict[str, MapProfile] = {
@@ -74,14 +78,13 @@ class GameLauncher:
     """Builds or restores games from player choices."""
 
     def make_opponent(self, kind: str) -> AIController:
-        if kind == "search":
-            from empire.ai.search import SearchAI
+        # "portfolio" is the smart opponent (PortfolioAI). Legacy save strings
+        # ("search"/"strategic") map to it too, so old games still load against a
+        # real AI rather than silently dropping to the horde.
+        if kind in ("portfolio", "search", "strategic"):
+            from empire.ai.search.portfolio import PortfolioAI
 
-            return SearchAI()
-        if kind == "strategic":
-            from empire.ai.strategic.ai import StrategicAI
-
-            return StrategicAI()
+            return PortfolioAI()
         from empire.ai.baseline import BaselineAI
 
         return BaselineAI()

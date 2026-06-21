@@ -29,9 +29,9 @@ async def test_new_game_menu_cycles_options() -> None:
         await pilot.press("enter")  # NEW GAME -> setup page
         screen = app.screen
         assert isinstance(screen, LauncherScreen)
-        # OPPONENT row is first; space cycles baseline -> strategic -> search.
-        await pilot.press("space", "space")
-        assert screen._config.opponent == "search"  # pyright: ignore[reportPrivateUsage]
+        # OPPONENT row is first; space cycles baseline -> portfolio.
+        await pilot.press("space")
+        assert screen._config.opponent == "portfolio"  # pyright: ignore[reportPrivateUsage]
         # Down to RULESET; right selects FORTIFIED CITIES.
         await pilot.press("down", "right")
         assert screen._config.fortified  # pyright: ignore[reportPrivateUsage]
@@ -52,10 +52,10 @@ async def test_tab_opens_choice_modal() -> None:
         from empire.tui.modals.choice_modal import ChoiceModal
 
         assert isinstance(app.screen, ChoiceModal)
-        await pilot.press("down", "down", "enter")  # pick SEARCH
+        await pilot.press("down", "enter")  # pick PORTFOLIO (2nd option)
         screen = app.screen
         assert isinstance(screen, LauncherScreen)
-        assert screen._config.opponent == "search"  # pyright: ignore[reportPrivateUsage]
+        assert screen._config.opponent == "portfolio"  # pyright: ignore[reportPrivateUsage]
 
 
 async def test_start_game_reaches_play_screen() -> None:
