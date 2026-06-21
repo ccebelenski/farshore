@@ -25,6 +25,7 @@ from empire.ai.search.belief import BeliefBuilder
 from empire.ai.search.follower import PlanFollower
 from empire.ai.search.generator import FLEET_TRANSPORTS
 from empire.ai.search.plan import Objective, Plan, PlanGoal, Role, SurplusPolicy
+from empire.ai.vision import sea_frontier_cells
 from empire.contracts.turn_plan import TurnPlan
 from empire.contracts.world_view import WorldView
 from empire.core.game import Game
@@ -37,6 +38,11 @@ from empire.core.unit import UnitKind
 # units (city=100, army=10).
 ADD_MARGIN = 8.0
 DROP_MARGIN = 8.0
+# Scouts to field for sea discovery before reverting production to armies. A
+# couple of patrols recon the ocean concurrently with the land game; building
+# them indefinitely would starve army production and abandon home (a real
+# failure observed in v1's discovery mode).
+SCOUT_QUOTA = 2
 # Cap concurrent foci so the per-turn hill-climb stays cheap and the follower
 # isn't fragmenting force across too many objectives at once.
 MAX_FOCI = 4
@@ -56,10 +62,15 @@ class PortfolioAI(SearchAI):
         # with the goal that earns its horizon-free base value.
         self._portfolio: tuple[Objective, ...] = ()
         self._goal_of: dict[tuple[int, int, str], PlanGoal] = {}
-        # Whether the generator deems sea-scouting warranted this turn (the
-        # SCOUT_SEA discovery focus lives in production, not an objective, so the
-        # portfolio carries it as a flag rather than a member).
+        # Discovery-driven naval doctrine, computed per turn (see _naval_warrants).
+        # _discovery: scout the sea now (cheap, CONCURRENT with the land game —
+        # the portfolio's whole point). _invade_ok: credit invasions, set only
+        # once an enemy city is actually found OVERSEAS (so island sideshows on a
+        # shared continent are never funded). Neither depends on home being fully
+        # explored — that gate stalled SearchAI into a turtle and must not bind
+        # the portfolio.
         self._discovery: bool = False
+        self._invade_ok: bool = False
 
     def name(self) -> str:
         return "Portfolio"
@@ -83,9 +94,6 @@ class PortfolioAI(SearchAI):
         (target, role); an INVADE tag wins over NONE for the same cell."""
         pool: dict[tuple[int, int, str], tuple[Objective, PlanGoal]] = {}
         plans = self._generator.generate(view)
-        # The discovery focus is production-borne (build a patrol to find the
-        # enemy), not an objective — capture it as a flag so `_to_plan` can scout.
-        self._discovery = any(p.goal is PlanGoal.SCOUT_SEA for p in plans)
         for plan in plans:
             for obj in plan.objectives:
                 k = _key(obj)
@@ -93,6 +101,30 @@ class PortfolioAI(SearchAI):
                 if prev is None or (prev[1] is PlanGoal.NONE and plan.goal is not PlanGoal.NONE):
                     pool[k] = (obj, plan.goal)
         return pool
+
+    def _naval_warrants(self, view: WorldView) -> None:
+        """Set the discovery-driven naval flags for this turn (planning/07).
+
+        Uses the generator's land/sea assessment (one flood) to classify the
+        enemy: reachable by land, found overseas, or not yet found.
+          - `_invade_ok`: an enemy city is known OVERSEAS — invasions toward the
+            discovered enemy are now worth their cost. False on a shared continent
+            (enemy is land-reachable, not overseas) -> no island sideshows, the
+            land-brawl guard, WITHOUT needing home fully explored.
+          - `_discovery`: there's unexplored sea, no enemy is land-reachable, and
+            we haven't found the enemy overseas yet -> scout to find them, NOW and
+            concurrently with the land game (not gated behind home exploration,
+            which never completes and turtled SearchAI)."""
+        land_targets, overseas, _ = self._generator._assess(view)
+        land = {(c.x, c.y) for c in land_targets}
+        sea = {(c.x, c.y) for c in overseas}
+        enemy = [(c.coord.x, c.coord.y) for c in view.known_enemy_cities]
+        enemy_land = any(e in land for e in enemy)
+        enemy_overseas = any(e in sea for e in enemy)
+        self._invade_ok = enemy_overseas
+        self._discovery = (
+            bool(sea_frontier_cells(view)) and not enemy_land and not enemy_overseas
+        )
 
     def _valid(self, obj: Objective, view: WorldView) -> bool:
         """Relevance check (planning/07): does the goal still matter? Assault/
@@ -111,6 +143,7 @@ class PortfolioAI(SearchAI):
         the whole-portfolio playout score, with hysteresis margins."""
         pool = self._candidate_objectives(view)
         self._goal_of = {k: g for k, (_, g) in pool.items()}
+        self._naval_warrants(view)
         belief = self._belief_builder.build(view)
         me = view.own_player.id
 
@@ -168,10 +201,11 @@ class PortfolioAI(SearchAI):
         plan = self._to_plan(tuple(objs), view)
         raw = self._score(belief, plan, me)
         bonus = 0.0
-        for obj in objs:
-            goal = self._goal_of.get(_key(obj), PlanGoal.NONE)
-            if goal is PlanGoal.INVADE and self._invade_base > 0.0:
-                bonus += self._invade_base
+        # Invasion credit when an enemy has been found overseas (discovery-driven,
+        # not the generator's home-explored gate) — so the fleet gets committed
+        # once we know where the enemy is.
+        if self._invade_ok and self._invade_base > 0.0:
+            bonus += self._invade_base * sum(1 for o in objs if o.role is Role.INVADE)
         # Discovery base value, when the rendered plan is in sea-scout mode.
         if plan.goal is PlanGoal.SCOUT_SEA and self._explore_base > 0.0:
             bonus += self._explore_base
@@ -196,10 +230,13 @@ class PortfolioAI(SearchAI):
                 UnitKind.TRANSPORT if n_transports < FLEET_TRANSPORTS else UnitKind.ARMY
             )
         elif self._discovery:
-            # No target to invade yet but the enemy is plausibly overseas: build a
-            # patrol and scout the sea to find it, concurrent with any land foci.
+            # No target to invade yet but the enemy is plausibly overseas: scout.
+            # Build patrols only up to the recon quota, then revert to armies so
+            # the land game continues — the scouts keep ranging meanwhile. This is
+            # the production-level concurrency (recon AND home), not all-in scouting.
             goal = PlanGoal.SCOUT_SEA
-            production = UnitKind.PATROL
+            n_patrols = sum(1 for u in view.own_units if u.kind is UnitKind.PATROL)
+            production = UnitKind.PATROL if n_patrols < SCOUT_QUOTA else UnitKind.ARMY
         return Plan(
             objectives=objs,
             surplus=SurplusPolicy.SCOUT,
