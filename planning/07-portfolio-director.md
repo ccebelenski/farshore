@@ -1,5 +1,35 @@
 # Portfolio director (concurrent plans for SearchAI)
 
+## STATUS / PICK UP HERE (session handoff)
+
+**Shipped (commit `2d5a594`):** PortfolioAI is the smart opponent, replacing
+SearchAI. Opponents = `("baseline", "portfolio")`. `src/empire/ai/search/
+portfolio.py` (subclasses SearchAI for its engine). Suite green (758).
+
+**It works and beats the old AI:** not-revealed discovery built 75% / loaded 75%
+/ landed 50% / captured 12% (SearchAI 50/50/0/12); land-brawl vs Search 8-8 (no
+regression); 3x faster (3.3s vs 10.6s/round). Doctrine: split-score (playout =
+priority, horizon-free base value invade=60/explore=30); discovery-driven naval
+(scout to find enemy, invade once found overseas); establish-first scout gate
+(MIN_CITIES_TO_SCOUT=3); SCOUT_QUOTA=2.
+
+**How to work on it (methodology, important):** stage a board → 1 turn → assert
+the decision, deterministically — `tests/empire/ai/search/test_decision_
+scenarios.py` (~0.06s). Use full-game probes only for emergent confirmation:
+`python -m empire._amphib_probe --ai portfolio [--reveal]` (land-and-hold chain),
+`python -m empire._aggr_ab --ai-a portfolio --map {naval-arena,land-brawl}`
+(head-to-head / land-regression). Self-play A/B is the oracle (BaselineAI can't
+measure defense). Distinguish regression (worse outcomes) from difference (slower
+/ different mix — fine). Run with `.venv/bin/python` (no `python` on PATH).
+
+**Next (parked, for supervised work):**
+1. Sustained-reinforcement waves to HOLD a beachhead under FORTIFIED (captured->
+   held ~0%). This is an ENHANCEMENT — hard-to-hold is CORRECT symmetric design
+   (no biased AI advantages); don't tune it away.
+2. Board-position-specific sub-strategies.
+3. Delete the dormant SearchAI/StrategicAI *controller* brains once the codebase
+   cleanup to "two AIs" is wanted (SearchAI class still needed as the engine base).
+
 ## Progress log (newest first)
 
 - **PortfolioAI is a viable SearchAI replacement** (`9b817ec`). The stateful
