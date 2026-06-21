@@ -43,6 +43,10 @@ DROP_MARGIN = 8.0
 # them indefinitely would starve army production and abandon home (a real
 # failure observed in v1's discovery mode).
 SCOUT_QUOTA = 2
+# Don't scout the sea until at least this many cities are held — establishing a
+# base first protects the early army buildup (scouting from the lone capital
+# regressed the land game on shared continents).
+MIN_CITIES_TO_SCOUT = 3
 # Cap concurrent foci so the per-turn hill-climb stays cheap and the follower
 # isn't fragmenting force across too many objectives at once.
 MAX_FOCI = 4
@@ -122,8 +126,15 @@ class PortfolioAI(SearchAI):
         enemy_land = any(e in land for e in enemy)
         enemy_overseas = any(e in sea for e in enemy)
         self._invade_ok = enemy_overseas
+        # Don't scout from the lone capital: building patrols before a base exists
+        # sacrifices the critical early army buildup and loses winnable land games
+        # (the real land-brawl regression). Establish a base first, then scout.
+        established = len(view.own_cities) >= MIN_CITIES_TO_SCOUT
         self._discovery = (
-            bool(sea_frontier_cells(view)) and not enemy_land and not enemy_overseas
+            established
+            and bool(sea_frontier_cells(view))
+            and not enemy_land
+            and not enemy_overseas
         )
 
     def _valid(self, obj: Objective, view: WorldView) -> bool:
