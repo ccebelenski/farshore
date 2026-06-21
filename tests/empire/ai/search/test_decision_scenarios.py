@@ -158,3 +158,41 @@ def test_unexplored_home_land_explores_land_before_sea() -> None:
     goals = _goals(_plans(view))
     assert PlanGoal.SCOUT_SEA not in goals, "unexplored land remains -> explore it first"
     assert PlanGoal.INVADE not in goals
+
+
+# --- selection-level (runs the real playout on a tiny board) -------------------
+
+
+def test_two_continent_actually_selects_naval() -> None:
+    """End-to-end: not just OFFERED — the search must actually CHOOSE a naval plan
+    when the enemy is overseas (no land target competes, invade carries the
+    horizon-free base value). Runs the real playout+score on a small board."""
+    from empire.ai.search.ai import SearchAI
+
+    rows = [
+        "OO~~EE",
+        "..~~..",
+        "..~~..",
+    ]
+    _, _, _, view = build_scenario(rows)
+    chosen = SearchAI(samples=1)._choose_plan(view)
+    is_naval = chosen.goal in (PlanGoal.INVADE, PlanGoal.SCOUT_SEA) or any(
+        o.role.name == "INVADE" for o in chosen.objectives
+    )
+    assert is_naval, f"expected a naval choice, got {chosen}"
+
+
+def test_island_map_does_not_select_overseas_invade() -> None:
+    """End-to-end: with the enemy reachable by land and only a neutral island
+    overseas, the search must NOT choose the island invasion (it earns no base
+    value) — it fights on land."""
+    from empire.ai.search.ai import SearchAI
+
+    rows = [
+        "O...E~N",
+        ".....~.",
+    ]
+    _, _, _, view = build_scenario(rows)
+    chosen = SearchAI(samples=1)._choose_plan(view)
+    assert chosen.goal is not PlanGoal.INVADE
+    assert chosen.goal is not PlanGoal.SCOUT_SEA
