@@ -270,3 +270,44 @@ def test_decisions_are_deterministic_and_numbers_justified() -> None:
     best = max(a, key=lambda t: t[2])
     others = [t for t in a if t is not best]
     assert all(best[2] >= o[2] for o in others), "chosen plan must be the argmax on the numbers"
+
+
+# --- stateful portfolio: multiple concurrent foci ------------------------------
+
+
+def test_portfolio_holds_land_and_naval_foci_at_once() -> None:
+    """The headline of the stateful portfolio (planning/07): with a home neutral
+    to take AND an enemy overseas, the AI must hold BOTH foci concurrently — a
+    land ASSAULT and an overseas INVADE in the same portfolio — which the
+    single-plan SearchAI structurally cannot do."""
+    from empire.ai.search.plan import Role
+    from empire.ai.search.portfolio import PortfolioAI
+
+    rows = [
+        "ON.~~E",
+        "...~~.",
+    ]
+    _, _, _, view = build_scenario(rows)
+    ai = PortfolioAI(samples=1)
+    ai.plan_turn(view)
+    roles = {o.role for o in ai._portfolio}
+    assert Role.ASSAULT in roles, f"expected a land assault focus, portfolio={ai._portfolio}"
+    assert Role.INVADE in roles, f"expected an overseas invade focus, portfolio={ai._portfolio}"
+
+
+def test_portfolio_is_deterministic() -> None:
+    """Same staged position -> same portfolio (no luck/nondeterminism)."""
+    from empire.ai.search.portfolio import PortfolioAI
+
+    rows = ["ON.~~E", "...~~."]
+    _, _, _, view1 = build_scenario(rows)
+    _, _, _, view2 = build_scenario(rows)
+    p1 = PortfolioAI(samples=1)
+    p1.plan_turn(view1)
+    p2 = PortfolioAI(samples=1)
+    p2.plan_turn(view2)
+    assert [_key(o) for o in p1._portfolio] == [_key(o) for o in p2._portfolio]
+
+
+def _key(o):  # local helper for the determinism check
+    return (o.target.x, o.target.y, o.role.value)
