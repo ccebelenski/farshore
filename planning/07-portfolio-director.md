@@ -2,6 +2,22 @@
 
 ## Progress log (newest first)
 
+- **PortfolioAI is a viable SearchAI replacement** (`9b817ec`). The stateful
+  portfolio (multiple concurrent foci) is built and tuned to: beat SearchAI on
+  build/discovery (not-revealed `built` 75% vs 50%), tie it on land (Portfolio-vs-
+  Search land-brawl 8-8), with NO land regression. Key fixes along the way:
+  discovery-driven naval doctrine (scout to find the enemy, invade only once found
+  overseas — keeps it off island sideshows without the home-explored gate that
+  turtled SearchAI); SCOUT_QUOTA so recon doesn't starve armies; and the
+  establish-first scout gate (>=3 cities before scouting) which fixed the land
+  regression AND lifted discovery (the early scouting had starved the economy).
+  Also fixed a real engine crash exposed at sea (transport-vs-transport, `79c05bb`).
+  PortfolioAI is a separate, opt-in controller; SearchAI stays the shipped default
+  until the portfolio fully surpasses it. End-state target: horde + portfolio.
+  REMAINING GAP: captured->held ~0% (a thin wave lands but can't hold a FORTIFIED
+  city) — landing-strength / sustained reinforcement waves is the next lever.
+
+
 - **Set-piece decision tests + strict gate confirmed** (`fbd8fb7`). Methodology
   shift (playtester's call): assert the AI picks the predicted plan in hand-built
   positions, deterministically, in one decision — `tests/.../test_decision_
