@@ -89,15 +89,24 @@ def _reveal(p0, game, target: Coord) -> None:
         )
 
 
+def _make_ai(kind: str):
+    if kind == "portfolio":
+        from empire.ai.search.portfolio import PortfolioAI
+
+        return PortfolioAI()
+    return SearchAI()
+
+
 def run_one(
-    seed: int, cap: int, rules: RuleSet, profile: MapProfile, reveal: bool
+    seed: int, cap: int, rules: RuleSet, profile: MapProfile, reveal: bool,
+    ai: str = "search",
 ) -> Probe | None:
     built = build_two_continent(profile, seed, rules)
     if built is None:
         return None
     game, players = built
     p0, p1 = players
-    game.attach_controller(p0.id, SearchAI())
+    game.attach_controller(p0.id, _make_ai(ai))
     game.attach_controller(p1.id, BaselineAI())
 
     target, landmass = _target_and_landmass(game, p0)
@@ -142,13 +151,14 @@ def main() -> None:
     ap.add_argument("--fortified", action="store_true")
     ap.add_argument("--reveal", action="store_true", help="pre-reveal the target (remove scouting)")
     ap.add_argument("--profile", choices=tuple(_PROFILES), default="naval")
+    ap.add_argument("--ai", choices=("search", "portfolio"), default="search")
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 1) - 1))
     args = ap.parse_args()
     rules = FORTIFIED_CITIES if args.fortified else STANDARD
     profile = _PROFILES[args.profile]
 
     print(
-        f"amphib probe: seeds={args.seeds} cap={args.cap} "
+        f"amphib probe: ai={args.ai} seeds={args.seeds} cap={args.cap} "
         f"rules={'FORTIFIED' if rules is FORTIFIED_CITIES else 'STANDARD'} "
         f"reveal={args.reveal} profile={args.profile}",
         flush=True,
@@ -165,13 +175,13 @@ def main() -> None:
 
     if args.jobs <= 1:
         for s in range(args.seeds):
-            consume(run_one(s, args.cap, rules, profile, args.reveal))
+            consume(run_one(s, args.cap, rules, profile, args.reveal, args.ai))
     else:
         from concurrent.futures import ProcessPoolExecutor, as_completed
 
         with ProcessPoolExecutor(max_workers=args.jobs) as ex:
             futs = [
-                ex.submit(run_one, s, args.cap, rules, profile, args.reveal)
+                ex.submit(run_one, s, args.cap, rules, profile, args.reveal, args.ai)
                 for s in range(args.seeds)
             ]
             for f in as_completed(futs):
