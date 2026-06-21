@@ -1,5 +1,28 @@
 # Portfolio director (concurrent plans for SearchAI)
 
+## Progress log (newest first)
+
+- **Set-piece decision tests + strict gate confirmed** (`fbd8fb7`). Methodology
+  shift (playtester's call): assert the AI picks the predicted plan in hand-built
+  positions, deterministically, in one decision — `tests/.../test_decision_
+  scenarios.py`, 0.03s vs 70-min games. Resolved the land "regression" as RESOURCE
+  DIVERSION (chasing the sea pre-contact on a land map), correctly prevented by the
+  STRICT gate: credit naval goals only when `no land frontier left AND no enemy
+  reachable by land`. Land A/B 50/50 under it.
+- **Discovery via concurrent recon** (`8ae0d19`). SCOUT_SEA-tagged press-home +
+  build-a-patrol plan → must-scout path off zero (built 12→50%, captured 0→12% in
+  the probe). Naval base value moved onto generator-set goal tags.
+- **Split-score** (`4f98526`). Horizon-free base value for the INVADE goal →
+  revealed land-and-hold doubled (12→25%). The playout is demoted to priority.
+- **Aggression bias FAILED** (`fef13f5`, reverted to off). Uniform scalar can't
+  reorder bold-vs-bold; see `project_aggression_bias_failed`.
+
+KNOWN REMAINING LIMITATION: the strict gate is correct but naval only *fires* when
+home is fully explored, and home exploration / consolidation doesn't always
+complete within a game — so projection is enabled in the right situations but not
+yet reliably reached. Next lever: home-exploration completeness (use the set-piece
+harness + a focused probe), then the stateful portfolio below.
+
 ## Why
 
 Every prior attempt to make the AI project across water failed because the
