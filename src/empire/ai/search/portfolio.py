@@ -56,6 +56,10 @@ class PortfolioAI(SearchAI):
         # with the goal that earns its horizon-free base value.
         self._portfolio: tuple[Objective, ...] = ()
         self._goal_of: dict[tuple[int, int, str], PlanGoal] = {}
+        # Whether the generator deems sea-scouting warranted this turn (the
+        # SCOUT_SEA discovery focus lives in production, not an objective, so the
+        # portfolio carries it as a flag rather than a member).
+        self._discovery: bool = False
 
     def name(self) -> str:
         return "Portfolio"
@@ -78,7 +82,11 @@ class PortfolioAI(SearchAI):
         objective from a naval-warranted plan keeps its INVADE credit). Deduped by
         (target, role); an INVADE tag wins over NONE for the same cell."""
         pool: dict[tuple[int, int, str], tuple[Objective, PlanGoal]] = {}
-        for plan in self._generator.generate(view):
+        plans = self._generator.generate(view)
+        # The discovery focus is production-borne (build a patrol to find the
+        # enemy), not an objective — capture it as a flag so `_to_plan` can scout.
+        self._discovery = any(p.goal is PlanGoal.SCOUT_SEA for p in plans)
+        for plan in plans:
             for obj in plan.objectives:
                 k = _key(obj)
                 prev = pool.get(k)
@@ -164,6 +172,9 @@ class PortfolioAI(SearchAI):
             goal = self._goal_of.get(_key(obj), PlanGoal.NONE)
             if goal is PlanGoal.INVADE and self._invade_base > 0.0:
                 bonus += self._invade_base
+        # Discovery base value, when the rendered plan is in sea-scout mode.
+        if plan.goal is PlanGoal.SCOUT_SEA and self._explore_base > 0.0:
+            bonus += self._explore_base
         return raw + bonus
 
     def _to_plan(self, objs: tuple[Objective, ...], view: WorldView) -> Plan:
@@ -184,6 +195,11 @@ class PortfolioAI(SearchAI):
             production = (
                 UnitKind.TRANSPORT if n_transports < FLEET_TRANSPORTS else UnitKind.ARMY
             )
+        elif self._discovery:
+            # No target to invade yet but the enemy is plausibly overseas: build a
+            # patrol and scout the sea to find it, concurrent with any land foci.
+            goal = PlanGoal.SCOUT_SEA
+            production = UnitKind.PATROL
         return Plan(
             objectives=objs,
             surplus=SurplusPolicy.SCOUT,
