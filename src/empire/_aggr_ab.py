@@ -57,12 +57,22 @@ def _build(kind: str, profile: MapProfile, seed: int, rules: RuleSet):
     return build_land_brawl(profile, seed, rules)
 
 
+def _side_a(aggression: float, invade_base: float, explore_base: float, ai_a: str):
+    if ai_a == "portfolio":
+        from empire.ai.search.portfolio import PortfolioAI
+
+        return PortfolioAI()
+    return SearchAI(aggression=aggression, invade_base=invade_base, explore_base=explore_base)
+
+
 def play_match(
     map_key: str, seed: int, aggr_first: bool, cap: int, rules: RuleSet,
     aggression: float, invade_base: float = 0.0, explore_base: float = 0.0,
+    ai_a: str = "search",
 ) -> tuple[str, int, int] | None:
-    """One game: side A (the new config) vs side B (all temperament off = the
-    pre-change baseline). Returns (winner, turns, A_peak_off_home); winner in
+    """One game: side A vs side B (SearchAI baseline, temperament off). With
+    --ai-a portfolio, side A is PortfolioAI — so this becomes Portfolio-vs-Search.
+    Returns (winner, turns, A_peak_off_home); winner in
     {'aggr','plain','draw','unfinished'} ('aggr' = side A wins, label kept for
     ArenaResult reuse). On land-brawl this is the regression check: A should not
     lose to B."""
@@ -73,8 +83,7 @@ def play_match(
     game, players = built
     ai = 0 if aggr_first else 1
     game.attach_controller(
-        players[ai].id,
-        SearchAI(aggression=aggression, invade_base=invade_base, explore_base=explore_base),
+        players[ai].id, _side_a(aggression, invade_base, explore_base, ai_a)
     )
     game.attach_controller(
         players[1 - ai].id,
@@ -118,6 +127,8 @@ def main() -> None:
     ap.add_argument("--aggression", type=float, default=0.0)
     ap.add_argument("--invade-base", type=float, default=INVADE_BASE_VALUE)
     ap.add_argument("--explore-base", type=float, default=EXPLORE_BASE_VALUE)
+    ap.add_argument("--ai-a", choices=("search", "portfolio"), default="search",
+                    help="controller for side A (B is always the SearchAI baseline)")
     ap.add_argument("--fortified", action="store_true")
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 1) - 1))
     args = ap.parse_args()
@@ -148,7 +159,7 @@ def main() -> None:
         for seed, cf in specs:
             consume(play_match(
                 args.map, seed, cf, args.cap, rules,
-                args.aggression, args.invade_base, args.explore_base,
+                args.aggression, args.invade_base, args.explore_base, args.ai_a,
             ))
     else:
         from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -157,7 +168,7 @@ def main() -> None:
             futs = [
                 ex.submit(
                     play_match, args.map, s, cf, args.cap, rules,
-                    args.aggression, args.invade_base, args.explore_base,
+                    args.aggression, args.invade_base, args.explore_base, args.ai_a,
                 )
                 for s, cf in specs
             ]
