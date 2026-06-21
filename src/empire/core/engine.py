@@ -250,6 +250,7 @@ class StepOutcome(Enum):
     ILLEGAL = "illegal"
     FRIENDLY_CITY = "friendly_city"  # an army may not enter a friendly city
     BLOCKED_BY_FRIENDLY = "blocked_by_friendly"
+    BLOCKED_BY_ENEMY = "blocked_by_enemy"  # non-combatant can't attack -> can't enter
     OUT_OF_MOVES = "out_of_moves"
     ATTACKER_DIED = "attacker_died"
     CAPTURE_FAILED = "capture_failed"
@@ -390,6 +391,16 @@ def _resolve_entry(
         None,
     )
     if defender is not None:
+        # A non-combatant (no attack preferences — a transport, strength 0) may
+        # not enter an enemy-occupied cell: the move is blocked, not a combat.
+        # Without this a transport ordered onto an enemy transport at sea reaches
+        # the resolver, which raises CombatError ("neither transport nor transport
+        # can engage the other") and crashes the turn. Combat units have every
+        # kind in their preference string, so this fires only for true
+        # non-combatants — exactly the crash case — and keeps the engine free of
+        # an `empire.combat` import (layering, see module docstring).
+        if not unit.attack_preferences():
+            return (StepOutcome.BLOCKED_BY_ENEMY, destroyed, captured)
         combat_resolver.resolve(unit, defender, rng)
         if unit.hits <= 0:
             real_map.remove_unit(unit)

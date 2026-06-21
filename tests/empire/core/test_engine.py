@@ -621,3 +621,32 @@ def test_city_can_produce_ships_only_at_a_port() -> None:
     for kind in (UnitKind.ARMY, UnitKind.FIGHTER):
         assert city_can_produce(kind, port, real_map)
         assert city_can_produce(kind, inland, real_map)
+
+
+def test_transport_blocked_by_enemy_unit_instead_of_crashing(p1: Player, p2: Player) -> None:
+    """Regression: a non-combatant (transport, strength 0) ordered onto an enemy
+    unit must be BLOCKED — it can't attack, so it can't enter. Before the fix the
+    resolver raised CombatError('neither transport nor transport can engage the
+    other') and crashed the turn (exposed by Portfolio-vs-Search at sea)."""
+    from empire.core.engine import StepOutcome
+    from empire.core.unit import Transport
+
+    m = _build_map(["WW"])  # two water cells
+    mover = Transport(UnitId(1), p1, Coord(0, 0))
+    blocker = Transport(UnitId(2), p2, Coord(1, 0))
+    m.place_unit(mover, Coord(0, 0))
+    m.place_unit(blocker, Coord(1, 0))
+
+    outcome = execute_unit_path(
+        unit=mover,
+        path=((1, 0),),
+        real_map=m,
+        rules=STANDARD,
+        combat_resolver=CombatResolver(),
+        rng=random.Random(0),
+    )
+    assert outcome.last_outcome is StepOutcome.BLOCKED_BY_ENEMY
+    assert outcome.steps_taken == 0
+    assert outcome.units_destroyed == ()
+    assert mover.coord == Coord(0, 0)  # stayed put
+    assert m.unit_by_id(UnitId(2)) is blocker  # enemy untouched
