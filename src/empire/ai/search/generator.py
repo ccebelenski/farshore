@@ -30,14 +30,21 @@ ALL_OUT_FAN = 6
 DEFEND_STRENGTH = 2
 # An enemy unit within this range of a home city marks it threatened.
 THREAT_RANGE = 6
-# Strength a single amphibious operation commits.
+# Strength a single amphibious operation commits. Tested 3/6/8 against the probe
+# (held_end): raising it REGRESSED capture+hold (62/33 -> 54/29 -> 54/25) — a
+# heavier invade objective is more expensive in the playout, so the portfolio's
+# contention pricing selects it LESS, yielding fewer captures. 3 is best; the
+# beachhead-hold problem is latency (waves arrive slower than counterattacks),
+# not assault strength.
 INVADE_STRENGTH = 3
-# Transports to assemble for a concentrated landing. One thin wave lands
-# outnumbered (~2 of ours vs ~6 defenders, per the projection probe) and is
-# retaken at once; a small fleet, staged and landed together, puts enough
-# ashore to win the landmass. Kept small and on ONE target — concentration,
-# not a fragmenting trickle to several (which regressed projection to zero).
-FLEET_TRANSPORTS = 2
+# Transports to build for the invasion. More hulls = more frequent landings
+# (higher throughput). Tuned vs the probe (landed/captured/held): FT 2/3/4 gave
+# landed 75/92/100, captured 62/79/75, held 33/29/25. Landing rises monotonically
+# but CAPTURES peak at 3 — a 4th hull starves army production, so waves get too
+# thin to take the city. Held is flat-to-down (it's latency-bound, not throughput-
+# bound). 3 is the sweet spot. Kept on ONE target — concentration, not a
+# fragmenting trickle to several (which regressed projection to zero).
+FLEET_TRANSPORTS = 3
 # Fighters to keep on hand for recon/strike. A couple of fast, far-seeing
 # scouts (scan 5, speed 8, fly anywhere) is plenty; more just starves ground
 # production. The follower builds them one base at a time (see PlanFollower).
