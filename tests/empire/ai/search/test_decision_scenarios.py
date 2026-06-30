@@ -311,3 +311,47 @@ def test_portfolio_is_deterministic() -> None:
 
 def _key(o):  # local helper for the determinism check
     return (o.target.x, o.target.y, o.role.value)
+
+
+# --- amphibious staging-commit (the loaded->landed wall) ----------------------
+
+
+def _staging_ready(cargo: int, army_x: int, army_y: int) -> bool:
+    """A transport carrying `cargo` of 6 off the home coast (x=5), target
+    overseas (x=7), and ONE free army at (army_x, army_y). Returns whether the
+    hull commits to sail its wave. Isolates `_wave_ready`'s commit rules."""
+    from empire.ai.search.naval import _wave_ready
+    from empire.pathfinding.cost import ARMY as ARMY_COST
+    from empire.pathfinding.distance_field import PassabilityGrid
+
+    rows = ["O....~~E", "O....~~E", "O....~~E", "O....~~E", "O....~~E"]
+    real_map, own, _enemy, _view = build_scenario(
+        rows, units=[("transport", "own", 5, 2)]
+    )
+    transport = next(u for u in real_map.all_units() if u.owner is own)
+    transport.cargo = [UnitId(900 + i) for i in range(cargo)]
+    army = Army(UnitId(800), own, Coord(army_x, army_y))
+    real_map.place_unit(army, Coord(army_x, army_y))
+    land_grid = PassabilityGrid(real_map, ARMY_COST, own.view)
+    return _wave_ready(transport, Coord(7, 2), [army], land_grid, set())
+
+
+def test_staging_commits_when_straggler_is_distant() -> None:
+    """A part-loaded fleet must SAIL once its remaining reinforcement is too far
+    to board soon — waiting for the whole continent's production to funnel in
+    stranded loaded fleets at home forever (the staging-commit deadlock)."""
+    assert _staging_ready(3, 0, 2) is True, "distant straggler must not stall the fleet"
+
+
+def test_staging_waits_for_imminent_boarder() -> None:
+    """But a part-loaded hull still waits a turn for an army about to board
+    (within patience), so a coast-massed wave fills before it sails."""
+    assert _staging_ready(3, 4, 2) is False, "an adjacent boarder should still be waited for"
+
+
+def test_staging_commits_near_full_despite_imminent_boarder() -> None:
+    """A near-full wave (within one seat) commits even with an army alongside:
+    insisting on the LAST seat deadlocked a 5/6 hull a few cells from the target
+    forever when the boarding cells were too crowded to fill it (the mid-approach
+    freeze). One seat of slack lets it sail; the straggler rides the next wave."""
+    assert _staging_ready(5, 4, 2) is True, "5/6 is force enough — don't wait on the last seat"

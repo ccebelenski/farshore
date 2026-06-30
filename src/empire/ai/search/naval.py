@@ -74,20 +74,23 @@ def plan_naval(view: WorldView, plan: Plan) -> NavalResult:
         o.target for o in plan.objectives if o.role is Role.INVADE
     ]
     if invade_targets:
-        # Concentrate the whole transport fleet on the primary target and land
-        # it together. A lone transport's wave lands outnumbered and is retaken
-        # at once; a fleet that *stages* — full hulls loiter at the embark coast
-        # until the rest have loaded, then all sail together — puts enough
-        # ashore in one blow to win the landmass. Staging is read off the board
-        # (all loaded, or no army can still board), so no cross-turn state.
+        # All transports run the same operation against the primary target, but
+        # each sails AUTONOMOUSLY once IT carries a near-full wave (`_run_operation`
+        # commits at >= _OP_FORCE - _SEAT_SLACK, a 5-6 army wave — no thin
+        # trickle). We deliberately do NOT hold the whole fleet until every hull
+        # assembles: fleet-wide staging deadlocked with multiple hulls + ongoing
+        # army production (there was always one underfilled hull with an army
+        # "imminent" that could never actually board, so the fleet never
+        # committed and full hulls idled near home — measured 38% -> 75% landed
+        # when dropped). Same-coast hulls still fill at the same time (implicit
+        # concentration), and the return-and-reload recycling turns the cadence
+        # into sustained reinforcement waves.
         target = invade_targets[0]
         fleet = [s for s in ships if s.kind is UnitKind.TRANSPORT]
-        ready = _fleet_ready(view, target, fleet, armies, land_grid)
         for transport in fleet:
             used_ships.add(transport.id)
             _run_operation(
                 view, target, transport, armies, land_grid, sea_grid, result,
-                hold=not ready,
             )
 
     # Every other ship scouts the sea frontier.
@@ -101,36 +104,40 @@ def plan_naval(view: WorldView, plan: Plan) -> NavalResult:
     return result
 
 
-def _fleet_ready(
-    view: WorldView,
+def _wave_ready(
+    transport: Unit,
     target: Coord,
-    fleet: list[Unit],
     armies: list[Unit],
     land_grid: PassabilityGrid,
+    claimed: set[UnitId],
 ) -> bool:
-    """Should the assembled fleet sail now? Yes once every transport is full,
-    or once no free army can still reach a not-yet-full hull (don't wait for
-    reinforcements that will never come). Fleet-scope mirror of the
-    single-transport `loaded_enough` test."""
-    if not fleet:
-        return False
-
-    def full(t: Unit) -> bool:
-        return len(t.cargo) >= min(t.effective_capacity(), _OP_FORCE)
-
-    if all(full(t) for t in fleet):
+    """Should THIS transport sail its wave now? Two commit rules, each curing a
+    staging deadlock that stranded loaded hulls near home:
+      - NEAR-FULL: it carries within `_SEAT_SLACK` of a full wave. Insisting on
+        the LAST seat deadlocked a 5/6 hull forever when the boarding cells were
+        too crowded to fill it (armies stay "imminent" yet can never board) — a
+        5-6 army wave is force enough; stragglers ride the next recycled wave.
+      - NO IMMINENT: it has >=1 aboard and no free army is *imminent* — within
+        `_BOARD_PATIENCE` land-steps of the hull (excluding troops already on the
+        target landmass). An unbounded "any reachable army" test never committed
+        while the home continent kept producing armies. We wait only for armies
+        about to arrive; distant ones ride the next recycled wave."""
+    want = min(transport.effective_capacity(), _OP_FORCE)
+    aboard = len(transport.cargo)
+    if aboard >= want - _SEAT_SLACK:
         return True
-    # Free armies not already on the target's landmass (those are landed troops,
-    # not boarders) that could still march to a hull with room.
+    if aboard < 1:
+        return False
     target_land = DistanceField(target, land_grid)
-    free = [a for a in armies if target_land.steps_to(a.coord) is None]
-    for transport in fleet:
-        if full(transport):
-            continue
-        reach = DistanceField(transport.coord, land_grid)
-        if any(reach.steps_to(a.coord) is not None for a in free):
-            return False  # someone can still board; keep assembling
-    return any(t.cargo for t in fleet)
+    reach = DistanceField(transport.coord, land_grid)
+    imminent = any(
+        a.id not in claimed
+        and target_land.steps_to(a.coord) is None
+        and (s := reach.steps_to(a.coord)) is not None
+        and s <= _BOARD_PATIENCE
+        for a in armies
+    )
+    return not imminent
 
 
 # ---- amphibious operation ----------------------------------------------------
@@ -144,13 +151,11 @@ def _run_operation(
     land_grid: PassabilityGrid,
     sea_grid: PassabilityGrid,
     result: NavalResult,
-    hold: bool = False,
 ) -> None:
-    """Drive one transport's invasion of `target` this turn.
-
-    `hold` is the staging brake: while the fleet isn't assembled, a hull that is
-    already full waits in place (it still loads if it has room) instead of
-    sailing off alone — so the wave lands concentrated, not piecemeal."""
+    """Drive one transport's invasion of `target` this turn — load, sail and
+    storm ashore, or return-and-reload if emptied. The hull sails autonomously
+    once it carries a near-full wave (`_wave_ready`); there is no fleet-wide
+    staging brake (it deadlocked — see `plan_naval`)."""
     want = min(transport.effective_capacity(), _OP_FORCE)
     aboard = len(transport.cargo)
 
@@ -171,15 +176,7 @@ def _run_operation(
         ),
     )
 
-    # Sail once we have the force we want, OR once we have *someone* aboard
-    # and no further reinforcement can reach the boat (don't wait forever for
-    # a third army that doesn't exist).
-    loaded_enough = aboard >= want or (aboard >= 1 and not boarders)
-    # Staging brake: a full hull holds station until the rest of the fleet is
-    # ready (it has nothing left to load, so it simply waits this turn).
-    if loaded_enough and hold and aboard >= want:
-        return
-    if loaded_enough and not hold:
+    if _wave_ready(transport, target, armies, land_grid, result.claimed_armies):
         # Storm ashore onto the chosen landing zone — army-passable cells on the
         # target's landmass beside the transport, one per cargo (stacking-off
         # lands one per cell). Landing *away* from the city (not against its
@@ -199,35 +196,32 @@ def _run_operation(
         # "gauntlet beats abandonment" pattern the land follower uses. The
         # engine moves the transport through real water cells, peeling back the
         # fog as it goes.
-        raw_sea = PassabilityGrid(view.real_map(), SEA_COST)
-        # Route around our own ships: stacking-off means a recon patrol idling
-        # in a strait would block the transport indefinitely (its grid is
-        # terrain-only and can't see the occupant).
-        others = frozenset(
-            u.coord
-            for u in view.own_units
-            if u.kind in _SEA_KINDS
-            and u.carried_by is None
-            and u.id != transport.id
-        )
-        nav = sea_grid.with_blocked(others) if others else sea_grid
-        raw_nav = raw_sea.with_blocked(others) if others else raw_sea
+        nav, raw_nav = _nav_grids(view, transport, sea_grid)
         beach = _landing_zone(view, target, transport, nav, land_grid, target_land)
         if beach is None:
             beach = _landing_zone(
                 view, target, transport, raw_nav, land_grid, target_land
             )
         if beach is not None:
-            move = _step_toward(
-                transport, beach, DistanceField(transport.coord, nav)
-            )
-            if move is None:
-                move = _step_toward(
-                    transport, beach, DistanceField(transport.coord, raw_nav)
-                )
+            move = _sail(view, transport, beach, sea_grid)
             if move is not None:
                 result.moves[transport.id] = move
         return
+
+    # RETURN-AND-RELOAD (the recycling that turns one doomed wave into sustained
+    # reinforcement). An empty hull with nothing to board *here* has delivered
+    # its wave and drifted off the target coast — its reachable land is the enemy
+    # continent, so the home army surplus is unreachable and it would otherwise
+    # sit forever (the seed-16 deadlock). Sail it back to a home embark coast
+    # where free armies wait, then it re-enters LOADING next turn. Cheaper than
+    # building a fresh transport: reuse the hull we already paid for.
+    if aboard == 0 and not boarders and not _in_drydock(view, transport):
+        dest = _reload_destination(view, transport, armies, land_grid, target_land)
+        if dest is not None:
+            move = _sail(view, transport, dest, sea_grid)
+            if move is not None:
+                result.moves[transport.id] = move
+            return
 
     # LOADING. A transport in dry-dock (on its city cell) can neither be
     # boarded nor unload (spec §5.4), so first float it to an adjacent sea
@@ -244,6 +238,80 @@ def _run_operation(
         move = _board_move(army, transport, land_grid)
         if move is not None:
             result.moves[army.id] = move
+
+
+def _nav_grids(
+    view: WorldView, transport: Unit, sea_grid: PassabilityGrid
+) -> tuple[PassabilityGrid, PassabilityGrid]:
+    """The (fog-masked, true-geography) sea grids for routing this transport,
+    both with our other ships blocked out. Stacking-off means an idle patrol in
+    a strait would otherwise block the transport indefinitely (the grid is
+    terrain-only and can't see the occupant); the raw grid braves fogged ocean
+    the masked one can't route through ("gauntlet beats abandonment")."""
+    others = frozenset(
+        u.coord
+        for u in view.own_units
+        if u.kind in _SEA_KINDS and u.carried_by is None and u.id != transport.id
+    )
+    raw_sea = PassabilityGrid(view.real_map(), SEA_COST)
+    nav = sea_grid.with_blocked(others) if others else sea_grid
+    raw_nav = raw_sea.with_blocked(others) if others else raw_sea
+    return nav, raw_nav
+
+
+def _sail(
+    view: WorldView, transport: Unit, dest_sea: Coord, sea_grid: PassabilityGrid
+) -> UnitMove | None:
+    """Step the transport toward `dest_sea`, fog-masked field first then the
+    true-geography fallback (so a fogged crossing is braved, not abandoned)."""
+    nav, raw_nav = _nav_grids(view, transport, sea_grid)
+    move = _step_toward(transport, dest_sea, DistanceField(transport.coord, nav))
+    if move is None:
+        move = _step_toward(
+            transport, dest_sea, DistanceField(transport.coord, raw_nav)
+        )
+    return move
+
+
+def _reload_destination(
+    view: WorldView,
+    transport: Unit,
+    armies: list[Unit],
+    land_grid: PassabilityGrid,
+    target_land: DistanceField,
+) -> Coord | None:
+    """A sea cell to sail an emptied hull back to so it can reload: open water
+    beside an own city whose landmass holds free armies (not ones already landed
+    overseas — those are the assault, not the next wave). Nearest to the
+    transport by straight-line distance; ties break on (y, x). None when no such
+    embark coast exists (nothing left to ferry)."""
+    best: tuple[int, int, int] | None = None
+    best_sea: Coord | None = None
+    for city in view.own_cities:
+        # Only coastal cities can be an embark point; skip inland ones before
+        # paying for a land flood (an inland city has no water neighbour, so it
+        # could never contribute a sea cell anyway).
+        sea_cells = [
+            n
+            for n in city.coord.neighbors()
+            if view.in_bounds(n)
+            and view.real_map().terrain_at(n) is TerrainKind.WATER
+        ]
+        if not sea_cells:
+            continue
+        city_land = DistanceField(city.coord, land_grid)
+        has_waiting = any(
+            target_land.steps_to(a.coord) is None
+            and city_land.steps_to(a.coord) is not None
+            for a in armies
+        )
+        if not has_waiting:
+            continue
+        for n in sea_cells:
+            key = (transport.coord.chebyshev_to(n), n.y, n.x)
+            if best is None or key < best:
+                best, best_sea = key, n
+    return best_sea
 
 
 def _in_drydock(view: WorldView, transport: Unit) -> bool:
@@ -315,6 +383,24 @@ def _board_move(
 # survivors to both capture and garrison. `want` is still min()'d with the
 # transport's damage-scaled capacity, so this just stops under-filling.
 _OP_FORCE = 6
+
+# How close (Chebyshev, land steps) a free army must be to a not-yet-full hull
+# to count as "still boarding" and justify the fleet waiting another turn.
+# Armies march ~1 cell/turn, so this is roughly "arrives within N turns." Small
+# enough that the fleet commits and sails its imminent force instead of idling
+# for the whole continent's production to funnel in (the staging-commit deadlock
+# that stranded loaded fleets at home — the loaded->landed wall); large enough
+# that a coast-massed wave still fills before sailing. Stragglers ride the next
+# recycled wave. Tunable via the amphib probe.
+_BOARD_PATIENCE = 3
+
+# How many seats short of full still counts as a committable wave. Armies massed
+# at the embark coast can be near a hull yet unable to actually board (boarding
+# cells crowded, or the hull floated a cell too far), so insisting on the LAST
+# seat deadlocks a 5/6 hull a few cells from the target forever. One seat of
+# slack lets a near-full wave commit; the recycled return-and-reload brings the
+# rest. Tunable via the amphib probe.
+_SEAT_SLACK = 1
 
 # Landing-zone selection (§10.1.2). `_LAND_MARCH`: how far from the target a
 # landing cell may be (the fist marches the rest on foot) — keeps the beachhead
