@@ -38,14 +38,19 @@ if TYPE_CHECKING:
 # letterforms at terminal cell resolution. Left-aligned with explicit padding
 # (see #title CSS), so line widths don't affect alignment.
 _TITLE = r"""
-███████╗███╗   ███╗██████╗ ██╗██████╗ ███████╗
-██╔════╝████╗ ████║██╔══██╗██║██╔══██╗██╔════╝
-█████╗  ██╔████╔██║██████╔╝██║██████╔╝█████╗
-██╔══╝  ██║╚██╔╝██║██╔═══╝ ██║██╔══██╗██╔══╝
-███████╗██║ ╚═╝ ██║██║     ██║██║  ██║███████╗
-╚══════╝╚═╝     ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝
+███████╗ █████╗ ██████╗ ███████╗██╗  ██╗ ██████╗ ██████╗ ███████╗
+██╔════╝██╔══██╗██╔══██╗██╔════╝██║  ██║██╔═══██╗██╔══██╗██╔════╝
+█████╗  ███████║██████╔╝███████╗███████║██║   ██║██████╔╝█████╗
+██╔══╝  ██╔══██║██╔══██╗╚════██║██╔══██║██║   ██║██╔══██╗██╔══╝
+██║     ██║  ██║██║  ██║███████║██║  ██║╚██████╔╝██║  ██║███████╗
+╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝
 """
-_SUBTITLE = "Wargame of the Century"
+_SUBTITLE = "· T E R R A   I N C O G N I T A ·"
+_CREDIT = (
+    "Inspired by Walter Bright's EMPIRE: Wargame of the Century\n"
+    "An independent implementation — no original code; "
+    "not affiliated or endorsed."
+)
 
 
 class _Page(Enum):
@@ -96,7 +101,7 @@ class LauncherScreen(Screen[None]):
         align: center middle;
     }
     LauncherScreen Vertical {
-        width: 64;
+        width: 72;
         height: auto;
     }
     #title, #subtitle, #menu, #hint {
@@ -111,13 +116,19 @@ class LauncherScreen(Screen[None]):
         color: $accent;
         text-style: bold;
         /* Explicit padding, not text-align center: per-line centering can
-           shift lines whose art has trailing spaces. (64 - 46) / 2 = 9. */
+           shift lines whose art has trailing spaces. (72 - 65) / 2 = 3. */
         text-align: left;
-        padding-left: 9;
+        padding-left: 3;
     }
     #subtitle, #hint {
         color: $text-muted;
         text-align: center;
+    }
+    #credit {
+        color: $text-muted;
+        text-style: dim;
+        text-align: center;
+        margin-bottom: 1;
     }
     """
 
@@ -142,6 +153,7 @@ class LauncherScreen(Screen[None]):
         with Vertical():
             yield Static(_TITLE, id="title")
             yield Static(_SUBTITLE, id="subtitle")
+            yield Static(_CREDIT, id="credit", markup=False)
             # markup=False: row labels like "[ START GAME ]" are literal
             # text, not Rich markup tags (which silently swallow the line).
             yield Static("", id="menu", markup=False)

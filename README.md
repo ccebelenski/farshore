@@ -1,10 +1,19 @@
-# Empire
+# FARSHORE — Terra Incognita
 
 A turn-based wargame in Python.
 
-Gameplay: a turn-based, single-player-vs-AI wargame on a grid map. Cities produce military units; players capture each other's cities until one side controls the world. Fog of war is in effect.
+Gameplay: a turn-based, single-player-vs-AI wargame on a grid map. Cities
+produce military units; players capture each other's cities until one side
+controls the world. Fog of war is in effect: the world starts unknown, and
+the enemy is always on the far shore.
 
-**Status:** Phase 0 — project skeleton. Implementation in progress.
+> Inspired by Walter Bright's *EMPIRE: Wargame of the Century*.
+> FARSHORE is an independent, from-scratch implementation — it contains no
+> original Empire code and is not affiliated with or endorsed by Walter
+> Bright.
+
+**Status:** playable — classic ruleset, TUI, two AI opponents (greedy horde
+and the search-based portfolio commander).
 
 See [`planning/`](planning/) for design docs and the phased implementation plan.
 
