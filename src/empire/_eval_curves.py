@@ -13,10 +13,9 @@ Not a game; a probe of the value function. Run: python _eval_curves.py
 """
 from __future__ import annotations
 
-from empire._naval_arena import NAVAL_PROFILE, build_two_continent, _home_continent
+from empire._naval_arena import NAVAL_PROFILE, _home_continent, build_two_continent
 from empire.ai.search.evaluator import Evaluator, EvalWeights
 from empire.core.coord import Coord
-from empire.core.tile import TerrainKind
 from empire.core.unit import UNIT_REGISTRY, UnitKind
 
 # OLD = the pre-§10.2 surface (perimeter penalty, no opportunity/exploration).
@@ -59,7 +58,7 @@ def add_army(game, me, c):
 def bar(v, lo, hi, width=40):
     if hi <= lo:
         return ""
-    n = int(round((v - lo) / (hi - lo) * width))
+    n = round((v - lo) / (hi - lo) * width)
     return "#" * max(0, min(width, n))
 
 

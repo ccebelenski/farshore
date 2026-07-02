@@ -49,11 +49,11 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 
+from empire.ai.search.naval import SEA_KINDS
 from empire.core.city import City
 from empire.core.coord import Coord
 from empire.core.game import Game
 from empire.core.identity import PlayerId
-from empire.ai.search.naval import SEA_KINDS
 from empire.core.tile import TerrainKind
 from empire.core.unit import UNIT_REGISTRY, UnitKind
 from empire.pathfinding.cost import AIR, ARMY, SEA
@@ -107,7 +107,7 @@ class EvalWeights:
     # Realization potential (§10.2): an invasion forming toward a known overseas
     # city, credited by commitment/build/load progress (front-loaded — committing
     # production to a hull is the valued act). Below `city` even fully loaded
-    # (×1.3 max) so capturing is always a further gain. Odds-scaling deferred.
+    # (x1.3 max) so capturing is always a further gain. Odds-scaling deferred.
     invade_potential: float = 60.0
     # Holdability / local force balance (§10): conditions a city's
     # worth on whether the local situation supports keeping (own) or taking

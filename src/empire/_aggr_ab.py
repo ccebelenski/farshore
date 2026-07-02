@@ -26,10 +26,9 @@ import time
 from dataclasses import dataclass
 
 from empire._arena import ARENA_PROFILE, build_land_brawl
-from empire._naval_arena import NAVAL_PROFILE, build_two_continent, _home_continent
+from empire._naval_arena import NAVAL_PROFILE, _home_continent, build_two_continent
 from empire.ai.search import SearchAI
 from empire.ai.search.ai import (
-    DEFAULT_AGGRESSION,
     EXPLORE_BASE_VALUE,
     INVADE_BASE_VALUE,
 )

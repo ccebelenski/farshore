@@ -1,8 +1,7 @@
 """Phase-7 canary tests for `BFSPathfinder` on handcrafted small maps."""
 
 from empire.core.coord import Coord
-from empire.core.map import Map, ViewMap
-from empire.core.tile import TerrainKind, Tile
+from empire.core.map import ViewMap
 from empire.pathfinding.bfs import BFSPathfinder
 from empire.pathfinding.cost import ARMY, SEA, PathCostProfile
 from tests.empire.support import build_map as _build_map

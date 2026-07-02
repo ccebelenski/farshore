@@ -183,7 +183,7 @@ class SearchAI:
         best_plan = candidates[0]
         best_score = float("-inf")
         incumbent_score: float | None = None
-        for plan, score in zip(candidates, eff):
+        for plan, score in zip(candidates, eff, strict=True):
             if score > best_score:
                 best_plan, best_score = plan, score
             if plan == incumbent:
@@ -221,12 +221,12 @@ class SearchAI:
         if self._aggression <= 0.0:
             return list(raw)
         bold = [self._is_bold(p) for p in candidates]
-        passive = [s for s, b in zip(raw, bold) if not b]
+        passive = [s for s, b in zip(raw, bold, strict=True) if not b]
         floor = max(passive) if passive else float("-inf")
         cutoff = floor - self._caution_tol
         return [
             s + self._aggression if (b and s >= cutoff) else s
-            for s, b in zip(raw, bold)
+            for s, b in zip(raw, bold, strict=True)
         ]
 
     def _base_value(self, plan: Plan) -> float:

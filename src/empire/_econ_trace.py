@@ -24,8 +24,6 @@ import argparse
 from empire._naval_arena import (
     NAVAL_PROFILE,
     build_two_continent,
-    _challenger,
-    _home_continent,
 )
 from empire.ai.baseline import BaselineAI
 from empire.ai.search import SearchAI

@@ -22,7 +22,6 @@ from empire.core.identity import CityId, PlayerId, UnitId
 from empire.core.map import Map, ViewMap
 from empire.core.player import Player
 from empire.core.ruleset import STANDARD
-from empire.core.tile import TerrainKind, Tile
 from empire.core.unit import Army, Carrier, Destroyer, Fighter, Satellite
 from tests.empire.support import build_map as _build_map
 

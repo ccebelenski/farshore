@@ -22,7 +22,7 @@ import os
 import time
 from dataclasses import dataclass
 
-from empire._naval_arena import NAVAL_PROFILE, build_two_continent, _home_continent
+from empire._naval_arena import NAVAL_PROFILE, _home_continent, build_two_continent
 from empire.ai.baseline import BaselineAI
 from empire.ai.search import SearchAI
 from empire.core.coord import Coord
@@ -163,7 +163,7 @@ def main() -> None:
         f"reveal={args.reveal} profile={args.profile}",
         flush=True,
     )
-    agg = {k: 0 for k in ("n", "built", "loaded", "landed", "captured", "held_end")}
+    agg = dict.fromkeys(("n", "built", "loaded", "landed", "captured", "held_end"), 0)
     start = time.time()
 
     def consume(pr: Probe | None) -> None:

@@ -164,7 +164,6 @@ def test_opportunity_decays_with_distance() -> None:
     far = _game(p1_cities=1, p2_cities=1)
     # add one neutral city, near vs far from P1's anchor at (0, 0)
     for g, at in ((near, Coord(2, 0)), (far, Coord(9, 9))):
-        tile = g.map.tile(at)
         city = City(id=CityId(99), coord=at, owner=None,
                     production=ProductionState(building=None, work=0))
         g.map._tiles[at] = Tile(coord=at, terrain=TerrainKind.CITY, city=city)

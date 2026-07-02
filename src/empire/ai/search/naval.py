@@ -184,7 +184,7 @@ def _run_operation(
         # it fed them to the defenders piecemeal and never converted (§10.1.1).
         landings = _landing_cells(view, transport, target, land_grid, target_land)
         if landings:
-            for cargo_id, cell in zip(list(transport.cargo), landings):
+            for cargo_id, cell in zip(list(transport.cargo), landings, strict=False):
                 result.unloads.append(
                     UnloadOrder(cargo_id=cargo_id, to=(cell.x, cell.y))
                 )

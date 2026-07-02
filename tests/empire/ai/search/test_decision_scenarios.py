@@ -24,11 +24,10 @@ from empire.contracts.world_view import WorldView
 from empire.core.city import City
 from empire.core.coord import Coord
 from empire.core.identity import CityId, PlayerId, UnitId
-from empire.core.map import Map
+from empire.core.map import Map, ViewMap
 from empire.core.player import Player
 from empire.core.ruleset import FORTIFIED_CITIES, RuleSet
 from empire.core.tile import TerrainKind, Tile
-from empire.core.map import ViewMap
 from empire.core.unit import Army, Patrol, Transport, Unit
 
 _TERRAIN = {".": TerrainKind.LAND, "~": TerrainKind.WATER}

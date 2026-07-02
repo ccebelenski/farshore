@@ -66,7 +66,7 @@ def _fighter_move(
     grid: PassabilityGrid,
 ) -> UnitMove | None:
     rng = fighter.range
-    nearest_city = min(cities, key=lambda c: fighter.coord.chebyshev_to(c))
+    nearest_city = min(cities, key=fighter.coord.chebyshev_to)
     home = fighter.coord.chebyshev_to(nearest_city)
     field = DistanceField(fighter.coord, grid)
 

@@ -14,7 +14,6 @@ from empire.core.coord import Coord
 from empire.core.identity import CityId
 from empire.core.map import Map
 from empire.core.ruleset import SMALL
-from empire.core.tile import TerrainKind, Tile
 from empire.setup import build_game, capital_eligible_continents
 from tests.empire.support import build_map
 

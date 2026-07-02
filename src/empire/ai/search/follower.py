@@ -114,9 +114,7 @@ class PlanFollower:
         production: list[ProductionOrder] = []
         for c in view.own_cities:
             target = self._plan.production
-            if sea_prod and not is_ocean_coastal(view, c.coord):
-                target = UnitKind.ARMY
-            elif air_prod and c.id != air_base:
+            if (sea_prod and not is_ocean_coastal(view, c.coord)) or (air_prod and c.id != air_base):
                 target = UnitKind.ARMY
             # Re-target only when the city isn't already building the desired
             # kind. `building` is never cleared to None once set (production

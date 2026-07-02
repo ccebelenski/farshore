@@ -15,11 +15,10 @@ from empire.core.engine import (
     run_production_tick,
 )
 from empire.core.identity import CityId, PlayerId, UnitId
-from empire.core.map import Map, ViewMap
+from empire.core.map import ViewMap
 from empire.core.player import Player
 from empire.core.ruleset import STANDARD
 from empire.core.standing_order import PatrolPath, Sentry
-from empire.core.tile import TerrainKind, Tile
 from empire.core.unit import Army, UnitKind
 from tests.empire.support import land_map as _land_map
 

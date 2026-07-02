@@ -15,7 +15,6 @@ import pytest
 from empire.core.coord import Coord
 from empire.core.map import Map, ViewMap
 from empire.core.ruleset import MapProfile
-from empire.core.tile import TerrainKind, Tile
 from empire.mapgen.height_field import HeightFieldMapGenerator
 from empire.pathfinding.bfs import BFSPathfinder
 from empire.pathfinding.cost import ARMY, SEA, PathCostProfile
