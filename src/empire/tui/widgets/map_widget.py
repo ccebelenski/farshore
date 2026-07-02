@@ -70,10 +70,13 @@ _STYLE_BORDER = Style(color="bright_black")
 _STYLE_OWN_UNIT = Style(color="cyan", bold=True)
 _STYLE_ENEMY_UNIT = Style(color="red", bold=True)
 
-# Hostile-artillery danger overlay: a dark-red background tinge on visible
-# cells inside a discovered hostile city's gun range —
-# the player needs to see the gauntlet to plan the storm.
+# Hostile-artillery danger overlay: a dark-red background tinge on cells
+# inside a discovered hostile city's gun range — the player needs to see the
+# gauntlet to plan the storm. Discovered threat intel persists under fog like
+# every other remembered fact (the city itself stays on the map), so remembered
+# cells keep a dimmer version of the tinge; never-seen cells stay blank.
 _STYLE_DANGER_BG = Style(bgcolor="#4A1212")
+_STYLE_DANGER_BG_REMEMBERED = Style(bgcolor="#2A0A0A")  # stale-intel dim red
 
 # Cursor tint by mode. Reverse-video so the underlying char stays readable.
 _STYLE_CURSOR_FREE = Style(color="yellow", bold=True, reverse=True)
@@ -166,18 +169,22 @@ class MapWidget(Static):
         if is_visible:
             char, style = self._visible_char_and_style(mv, c)
             if c in mv.danger_cells:
-                # Hostile artillery covers this square (only ever shown on
-                # currently visible cells — fog hides the threat picture).
+                # Hostile artillery covers this square.
                 style = style + _STYLE_DANGER_BG
             return char, style
 
         # Remembered only: stale state from RememberedTile.
         remembered = mv.viewer.view.remembered[c]
         if remembered.terrain is TerrainKind.CITY:
-            return _CITY, _STYLE_CITY_REMEMBERED
-        if remembered.terrain is TerrainKind.WATER:
-            return _WATER, _STYLE_WATER_REMEMBERED
-        return _LAND, _STYLE_LAND_REMEMBERED
+            char, style = _CITY, _STYLE_CITY_REMEMBERED
+        elif remembered.terrain is TerrainKind.WATER:
+            char, style = _WATER, _STYLE_WATER_REMEMBERED
+        else:
+            char, style = _LAND, _STYLE_LAND_REMEMBERED
+        if c in mv.danger_cells:
+            # Discovered gun range persists under fog, dimmed (stale intel).
+            style = style + _STYLE_DANGER_BG_REMEMBERED
+        return char, style
 
     def _visible_char_and_style(self, mv: MapView, c: Coord) -> tuple[str, Style]:
         units = mv.real_map.units_at(c)

@@ -1,9 +1,9 @@
 """`MapView` danger-overlay semantics (hostile artillery range tinge).
 
-The fog contract (playtest request, 2026-06-12): the ring exists for any
-*discovered* hostile city (enemy or neutral), but the tinge is only ever
-painted on currently *visible* cells — `MapView.danger_cells` carries the
-threat picture, `MapWidget` applies the visibility filter.
+The fog contract: the ring exists for any *discovered* hostile city (enemy
+or neutral). Visible cells get the full tinge; remembered (fogged) cells get
+a dimmer stale-intel tinge — discovered threat intel persists under fog like
+any other remembered fact; never-seen cells stay blank.
 """
 
 from empire.core.city import City
@@ -12,7 +12,12 @@ from empire.core.identity import CityId, PlayerId
 from empire.core.map import Map, RememberedTile, ViewMap
 from empire.core.player import Player
 from empire.core.tile import TerrainKind, Tile
-from empire.tui.widgets.map_widget import MapView
+from empire.tui.widgets.map_widget import (
+    _STYLE_DANGER_BG,
+    _STYLE_DANGER_BG_REMEMBERED,
+    MapView,
+    MapWidget,
+)
 
 
 def _flat_map(width: int = 12, height: int = 8) -> Map:
@@ -80,3 +85,33 @@ def test_own_city_and_no_artillery_rules_project_nothing() -> None:
     # And hostile city under classic rules (range 0): no overlay at all.
     _with_city(m, City(id=CityId(2), coord=Coord(8, 4), owner=None))
     assert not MapView(real_map=m, viewer=viewer, artillery_range=0).danger_cells
+
+
+def test_ring_renders_dimmed_under_fog_and_blank_when_never_seen() -> None:
+    """A discovered ring persists in fog (dim tinge on remembered cells);
+    cells never seen show no tinge at all (no intel leak)."""
+    m = _flat_map()
+    viewer = _viewer()
+    _with_city(m, City(id=CityId(1), coord=Coord(5, 4), owner=None))
+    # The city + one ring cell are remembered; another ring cell is visible;
+    # the far ring corner was never seen.
+    viewer.view.visible = {Coord(4, 4)}
+    for c in (Coord(5, 4), Coord(6, 4)):
+        viewer.view.remembered[c] = RememberedTile(
+            coord=c,
+            terrain=m.tile(c).terrain,
+            remembered_at=3,
+        )
+
+    mv = MapView(real_map=m, viewer=viewer, artillery_range=2)
+    widget = MapWidget(lambda: mv)
+
+    _, visible_style = widget._cell_char_and_style(mv, Coord(4, 4))
+    assert visible_style.bgcolor == _STYLE_DANGER_BG.bgcolor
+
+    _, fogged_style = widget._cell_char_and_style(mv, Coord(6, 4))
+    assert fogged_style.bgcolor == _STYLE_DANGER_BG_REMEMBERED.bgcolor
+
+    ch, never_style = widget._cell_char_and_style(mv, Coord(3, 3))  # in ring, never seen
+    assert ch == " "
+    assert never_style.bgcolor is None
