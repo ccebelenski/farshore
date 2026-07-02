@@ -19,7 +19,8 @@ from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import ScrollableContainer, Vertical
+from textual.geometry import Region, Spacing
 from textual.screen import Screen
 from textual.widgets import Footer
 
@@ -72,6 +73,7 @@ from empire.tui.widgets import (
     StatusBar,
     StatusState,
 )
+from empire.tui.widgets.map_widget import _GUTTER
 
 # Map keyboard keys to Direction. Numpad first (the design choice in the
 # minimal-TUI plan), then vi-keys as a fallback.
@@ -102,9 +104,14 @@ class PlayScreen(Screen[None]):
     PlayScreen {
         layout: vertical;
     }
-    #map {
-        height: 1fr;
-        overflow: auto;
+    #map-scroll {
+        /* Natural size when the map fits (the log's 1fr takes the surplus);
+           a viewport that scrolls — following the cursor — when the map is
+           bigger than the terminal (STANDARD/LARGE profiles). The max-height
+           that reserves the status/footer/log-minimum rows is set
+           programmatically in `_cap_map_viewport` (CSS has no calc()). */
+        height: auto;
+        scrollbar-size: 1 1;
     }
     """
 
@@ -208,13 +215,22 @@ class PlayScreen(Screen[None]):
     # ---- composition ------------------------------------------------------
 
     def compose(self) -> ComposeResult:
+        # The scroller must not take focus: it would grab the arrow keys from
+        # the screen bindings (cursor movement). Scrolling is driven by the
+        # cursor instead — see `_scroll_cursor_into_view`.
+        scroller = ScrollableContainer(id="map-scroll")
+        scroller.can_focus = False
         with Vertical():
-            yield MapWidget(provider=self._map_view, id="map")
+            with scroller:
+                yield MapWidget(provider=self._map_view, id="map")
             yield StatusBar(provider=self._status_state, id="status")
             yield LogPanel(id="log")
             yield Footer()
 
     def on_mount(self) -> None:
+        self._cap_map_viewport()
+        # First scroll must wait for layout (sizes are 0 during mount).
+        self.call_after_refresh(self._scroll_cursor_into_view)
         log = self.query_one(LogPanel)
         log.attach_to(self._bus, self._game.map, self._human)
         # Run an initial scan for the human (prior to first turn) so the
@@ -1421,7 +1437,34 @@ class PlayScreen(Screen[None]):
         map_widget.cursor = self._cursor
         map_widget.cursor_mode = self._cursor_mode()
         map_widget.refresh()
+        self._scroll_cursor_into_view()
         self.query_one("#status", StatusBar).refresh_text()
+
+    def on_resize(self) -> None:
+        self._cap_map_viewport()
+        self._scroll_cursor_into_view()
+
+    def _cap_map_viewport(self) -> None:
+        """Cap the map viewport so the status bar, footer and the log's
+        minimum height always keep their rows when the map is bigger than
+        the terminal. (When the map fits, height:auto keeps it at natural
+        size and the log's 1fr absorbs the surplus.)"""
+        reserved = 2 + 8  # status + footer + LogPanel min-height
+        scroller = self.query_one("#map-scroll", ScrollableContainer)
+        scroller.styles.max_height = max(10, self.size.height - reserved)
+
+    def _scroll_cursor_into_view(self) -> None:
+        """Keep the cursor inside the map viewport (with a margin of context)
+        when the map is bigger than the terminal — the viewport follows the
+        cursor / auto-cycle selection instead of the player driving scrollbars.
+        Instant (no animation): turn-based play wants a snappy jump."""
+        scroller = self.query_one("#map-scroll", ScrollableContainer)
+        # Cursor cell in the MapWidget's coordinates: x offset by the row-label
+        # gutter, y offset by the column ruler (widget row 0).
+        cell = Region(self._cursor.x + _GUTTER, self._cursor.y + 1, 1, 1)
+        scroller.scroll_to_region(
+            cell, spacing=Spacing(4, 8, 4, 8), animate=False, force=True
+        )
 
     def _cursor_mode(self) -> CursorMode:
         """Tri-state cursor color hint:
