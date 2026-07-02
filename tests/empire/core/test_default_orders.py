@@ -21,19 +21,7 @@ from empire.core.ruleset import STANDARD
 from empire.core.standing_order import PatrolPath, Sentry
 from empire.core.tile import TerrainKind, Tile
 from empire.core.unit import Army, UnitKind
-
-
-def _land_map(width: int, height: int, cities: dict[Coord, City] | None = None) -> Map:
-    cities = cities or {}
-    tiles: dict[Coord, Tile] = {}
-    for y in range(height):
-        for x in range(width):
-            c = Coord(x, y)
-            if c in cities:
-                tiles[c] = Tile(coord=c, terrain=TerrainKind.CITY, city=cities[c])
-            else:
-                tiles[c] = Tile(coord=c, terrain=TerrainKind.LAND)
-    return Map(width=width, height=height, tiles=tiles)
+from tests.empire.support import land_map as _land_map
 
 
 @pytest.fixture()

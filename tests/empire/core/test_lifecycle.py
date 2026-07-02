@@ -24,24 +24,9 @@ from empire.core.player import Player
 from empire.core.ruleset import STANDARD
 from empire.core.tile import TerrainKind, Tile
 from empire.core.unit import Army, Carrier, Destroyer, Fighter, Satellite
+from tests.empire.support import build_map as _build_map
 
 # --- helpers -----------------------------------------------------------------
-
-
-def _build_map(rows: list[str], cities: dict[Coord, City] | None = None) -> Map:
-    cities = cities or {}
-    height = len(rows)
-    width = len(rows[0])
-    terrain_for = {"L": TerrainKind.LAND, "W": TerrainKind.WATER, "C": TerrainKind.CITY}
-    tiles: dict[Coord, Tile] = {}
-    for y in range(height):
-        for x in range(width):
-            c = Coord(x, y)
-            if c in cities:
-                tiles[c] = Tile(coord=c, terrain=TerrainKind.CITY, city=cities[c])
-            else:
-                tiles[c] = Tile(coord=c, terrain=terrain_for[rows[y][x]])
-    return Map(width=width, height=height, tiles=tiles)
 
 
 @pytest.fixture()

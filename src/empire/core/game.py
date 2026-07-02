@@ -27,15 +27,14 @@ from empire.core.engine import (
     ArtilleryResult,
     CombatResolverProtocol,
     MoveOutcome,
-    StepOutcome,
     advance_satellites,
     apply_standing_orders,
     crash_out_of_fuel_fighters,
     disband_overcrowded_city_units,
     execute_unit_path,
+    refresh_player_view,
     repair_in_cities,
     run_production_tick,
-    scan_set_for_player,
     wake_sentried_units,
 )
 from empire.core.event_bus import EventBusProtocol, NullEventBus
@@ -471,43 +470,16 @@ class TurnManager:
     def _publish_move_outcome(
         self, player: Player, unit_id: UnitId, start: Coord, outcome: MoveOutcome
     ) -> None:
-        """Publish the bus events for one resolved step/landing: movement,
-        destructions, captures, and the conqueror's capture-time disband.
-        Shared by `moves` and amphibious `unloads`. City artillery is no longer
-        reactive to the move — it fires in the deferred `_city_artillery_phase`
-        after the scan."""
-        from empire.core.events import (
-            CityCapturedEvent,
-            UnitDisbandedEvent,
-            UnitMovedEvent,
-            UnitRemovedEvent,
+        """Shared by `moves` and amphibious `unloads`. City artillery is not
+        part of a move — it fires in the deferred `_city_artillery_phase`."""
+        from empire.core.reporting import publish_move_outcome
+
+        publish_move_outcome(
+            self.game.event_bus, self.game.map, player.id, unit_id, start, outcome
         )
 
-        unit = self.game.map.unit_by_id(unit_id)
-        if outcome.steps_taken > 0 and unit is not None:
-            self.game.event_bus.publish(
-                UnitMovedEvent(unit_id=unit_id, from_=start, to=unit.coord)
-            )
-        for uid in outcome.units_destroyed:
-            self.game.event_bus.publish(UnitRemovedEvent(unit_id=uid, last_coord=start))
-        for cid in outcome.cities_captured:
-            self.game.event_bus.publish(
-                CityCapturedEvent(
-                    city_id=cid, new_owner_id=player.id, previous_owner_id=None
-                )
-            )
-        if outcome.last_outcome is StepOutcome.CAPTURED:
-            city = self.game.map.city_by_id(outcome.cities_captured[-1])
-            self.game.event_bus.publish(
-                UnitDisbandedEvent(
-                    unit_id=unit_id,
-                    last_coord=city.coord if city is not None else start,
-                )
-            )
-
     def _scan_phase(self, player: Player) -> None:
-        scanned = scan_set_for_player(player, self.game.map)
-        player.view.update_from_scan(scanned, self.game.map, self.game.turn)
+        refresh_player_view(player, self.game.map, self.game.turn)
 
     def _end_of_round(self) -> None:
         from empire.core.events import UnitMovedEvent, UnitRemovedEvent

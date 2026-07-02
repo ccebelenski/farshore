@@ -102,7 +102,7 @@ def capital_eligible_continents(
     """
     ocean = _open_ocean(real_map)
     eligible: list[set[tuple[int, int]]] = []
-    for comp in _land_continents(real_map):
+    for comp in land_continents(real_map):
         on_continent = [c for c in cities if (c.coord.x, c.coord.y) in comp]
         if len(on_continent) < MIN_CAPITAL_CITIES:
             continue
@@ -135,9 +135,6 @@ def land_continents(real_map: Map) -> list[set[tuple[int, int]]]:
     map-analysis helpers and validation harnesses."""
     return _components(real_map, lambda t: t in LAND_TERRAINS)
 
-
-# Internal alias retained for existing call sites.
-_land_continents = land_continents
 
 
 def _open_ocean(real_map: Map) -> set[tuple[int, int]]:

@@ -37,19 +37,7 @@ from empire.core.tile import TerrainKind, Tile
 from empire.core.unit import Army
 from empire.events.bus import EventBus
 from empire.tui.widgets import LogPanel
-
-
-def _land_map(w: int, h: int, cities: dict[Coord, City] | None = None) -> Map:
-    cities = cities or {}
-    tiles: dict[Coord, Tile] = {}
-    for x in range(w):
-        for y in range(h):
-            c = Coord(x, y)
-            if c in cities:
-                tiles[c] = Tile(coord=c, terrain=TerrainKind.CITY, city=cities[c])
-            else:
-                tiles[c] = Tile(coord=c, terrain=TerrainKind.LAND)
-    return Map(width=w, height=h, tiles=tiles)
+from tests.empire.support import land_map as _land_map
 
 
 class _LogHost(App[None]):

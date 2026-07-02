@@ -23,27 +23,8 @@ from empire.core.ruleset import STANDARD
 from empire.core.standing_order import Heading, Loading, PatrolPath, Sentry
 from empire.core.tile import TerrainKind, Tile
 from empire.core.unit import Army, Patrol, Transport
-
-
-def _land_map(width: int, height: int) -> Map:
-    tiles: dict[Coord, Tile] = {}
-    for y in range(height):
-        for x in range(width):
-            c = Coord(x, y)
-            tiles[c] = Tile(coord=c, terrain=TerrainKind.LAND)
-    return Map(width=width, height=height, tiles=tiles)
-
-
-def _mixed_map(rows: list[str]) -> Map:
-    terrain = {"L": TerrainKind.LAND, "W": TerrainKind.WATER}
-    height = len(rows)
-    width = len(rows[0])
-    tiles: dict[Coord, Tile] = {}
-    for y in range(height):
-        for x in range(width):
-            c = Coord(x, y)
-            tiles[c] = Tile(coord=c, terrain=terrain[rows[y][x]])
-    return Map(width=width, height=height, tiles=tiles)
+from tests.empire.support import build_map as _mixed_map
+from tests.empire.support import land_map as _land_map
 
 
 @pytest.fixture()

@@ -23,7 +23,7 @@ from __future__ import annotations
 from empire.ai.search.ai import SearchAI
 from empire.ai.search.belief import BeliefBuilder
 from empire.ai.search.follower import PlanFollower
-from empire.ai.search.generator import FLEET_TRANSPORTS
+from empire.ai.search.generator import fleet_production
 from empire.ai.search.plan import Objective, Plan, PlanGoal, Role, SurplusPolicy
 from empire.ai.vision import sea_frontier_cells
 from empire.contracts.turn_plan import TurnPlan
@@ -234,12 +234,7 @@ class PortfolioAI(SearchAI):
         production = UnitKind.ARMY
         if has_invade:
             goal = PlanGoal.INVADE
-            n_transports = sum(
-                1 for u in view.own_units if u.kind is UnitKind.TRANSPORT
-            )
-            production = (
-                UnitKind.TRANSPORT if n_transports < FLEET_TRANSPORTS else UnitKind.ARMY
-            )
+            production = fleet_production(view)
         elif self._discovery:
             # No target to invade yet but the enemy is plausibly overseas: scout.
             # Build patrols only up to the recon quota, then revert to armies so

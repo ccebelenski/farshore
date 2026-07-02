@@ -32,22 +32,9 @@ from empire.core.unit import (
     Transport,
     Unit,
 )
+from tests.empire.support import build_map as _map
 
 _TERRAIN = {"L": TerrainKind.LAND, "W": TerrainKind.WATER, "C": TerrainKind.CITY}
-
-
-def _map(rows: list[str], cities: dict[Coord, City] | None = None) -> Map:
-    cities = cities or {}
-    height, width = len(rows), len(rows[0])
-    tiles: dict[Coord, Tile] = {}
-    for y in range(height):
-        for x in range(width):
-            c = Coord(x, y)
-            if c in cities:
-                tiles[c] = Tile(coord=c, terrain=TerrainKind.CITY, city=cities[c])
-            else:
-                tiles[c] = Tile(coord=c, terrain=_TERRAIN[rows[y][x]])
-    return Map(width=width, height=height, tiles=tiles)
 
 
 @pytest.fixture()

@@ -123,35 +123,11 @@ def play_game(
     # Assign the two largest-continent cities as starting capitals (a stand-in
     # for full capital-selection logic in planning/01 §9.2 — those checks
     # land with the game-setup phase).
-    from empire.core.tile import TerrainKind
+    from empire.setup import land_continents
 
-    visited: set[tuple[int, int]] = set()
-    continents: list[tuple[int, set[tuple[int, int]]]] = []  # (size, cells)
-    for y in range(real_map.height):
-        for x in range(real_map.width):
-            if (x, y) in visited:
-                continue
-            tile = real_map.tile(_Coord(x, y))
-            if tile.terrain not in {TerrainKind.LAND, TerrainKind.CITY}:
-                continue
-            comp: set[tuple[int, int]] = set()
-            stack: list[tuple[int, int]] = [(x, y)]
-            while stack:
-                cx, cy = stack.pop()
-                if (cx, cy) in comp or not real_map.in_bounds(_Coord(cx, cy)):
-                    continue
-                t = real_map.terrain_at(_Coord(cx, cy))
-                if t not in {TerrainKind.LAND, TerrainKind.CITY}:
-                    continue
-                comp.add((cx, cy))
-                for dy in (-1, 0, 1):
-                    for dx in (-1, 0, 1):
-                        if dx == 0 and dy == 0:
-                            continue
-                        stack.append((cx + dx, cy + dy))
-            visited.update(comp)
-            continents.append((len(comp), comp))
-    continents.sort(reverse=True)
+    continents = sorted(
+        ((len(comp), comp) for comp in land_continents(real_map)), reverse=True
+    )
 
     assigned: list[bool] = [False] * len(players)
     for size, comp in continents:
@@ -234,7 +210,6 @@ def play_game(
 
 
 # Local import alias to avoid name shadowing inside play_game.
-from empire.core.coord import Coord as _Coord  # noqa: E402
 
 
 def _launch_tui(
@@ -252,7 +227,7 @@ def _launch_tui(
     setup) — the meaningful way to playtest AIs on a shared continent.
     """
     from empire.ai.baseline import BaselineAI
-    from empire.core.engine import scan_set_for_player
+    from empire.core.engine import refresh_player_view
     from empire.events.bus import EventBus
     from empire.tui import EmpireApp, HumanController
     from empire.tui.launching import GameConfig, GameLauncher
@@ -286,8 +261,7 @@ def _launch_tui(
         game.attach_controller(human_player.id, BaselineAI())
 
     # Initial scan for the rendered player so the opening view isn't blank.
-    scanned = scan_set_for_player(human_player, game.map)
-    human_player.view.update_from_scan(scanned, game.map, game.turn)
+    refresh_player_view(human_player, game.map, game.turn)
 
     app = EmpireApp(
         game=game,

@@ -20,24 +20,9 @@ from empire.mapgen.height_field import HeightFieldMapGenerator
 from empire.pathfinding.bfs import BFSPathfinder
 from empire.pathfinding.cost import ARMY, SEA, PathCostProfile
 from empire.pathfinding.distance_field import DistanceField, PassabilityGrid
+from tests.empire.support import build_map as _build_map
 
 # --- helpers -----------------------------------------------------------------
-
-
-def _build_map(rows: list[str]) -> Map:
-    """ASCII map builder. Each char: L=land, W=water, C=city."""
-    height = len(rows)
-    width = len(rows[0])
-    tiles: dict[Coord, Tile] = {}
-    for y in range(height):
-        for x in range(width):
-            terrain = {
-                "L": TerrainKind.LAND,
-                "W": TerrainKind.WATER,
-                "C": TerrainKind.CITY,
-            }[rows[y][x]]
-            tiles[Coord(x, y)] = Tile(coord=Coord(x, y), terrain=terrain)
-    return Map(width=width, height=height, tiles=tiles)
 
 
 def _assert_field_matches_find_path(

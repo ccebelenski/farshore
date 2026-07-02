@@ -144,6 +144,16 @@ def scan_set_for_player(player: Player, real_map: Map) -> set[Coord]:
     return visible
 
 
+def refresh_player_view(player: Player, real_map: Map, turn: int) -> None:
+    """Rescan for `player` and commit the result to their fog-of-war view.
+
+    The one scan-then-update pair — every fog refresh (turn phases, TUI
+    immediate moves, game setup) goes through here so scan semantics can't
+    drift between call sites."""
+    scanned = scan_set_for_player(player, real_map)
+    player.view.update_from_scan(scanned, real_map, turn)
+
+
 # -----------------------------------------------------------------------------
 # Production
 # -----------------------------------------------------------------------------
@@ -382,14 +392,8 @@ def _resolve_entry(
     destroyed: list[UnitId] = []
     captured: list[CityId] = []
 
-    defender = next(
-        (
-            o
-            for o in real_map.units_at(target)
-            if o.owner is not unit.owner and not _is_intangible(o)
-        ),
-        None,
-    )
+    hostiles = _tangible_enemies_at(target, unit.owner, real_map)
+    defender = hostiles[0] if hostiles else None
     if defender is not None:
         # A non-combatant (no attack preferences — a transport, strength 0) may
         # not enter an enemy-occupied cell: the move is blocked, not a combat.
@@ -558,6 +562,18 @@ def _is_intangible(unit: Unit) -> bool:
     return unit.kind is UnitKind.SATELLITE
 
 
+def _tangible_enemies_at(target: Coord, owner: Player | None, real_map: Map) -> list[Unit]:
+    """Units at `target` hostile to `owner` that can be fought/blocked. The one
+    hostile-and-tangible occupancy test (satellite rule in `_is_intangible`),
+    shared by combat resolution, bombardment eligibility and the
+    never-auto-attack guard."""
+    return [
+        u
+        for u in real_map.units_at(target)
+        if u.owner is not owner and not _is_intangible(u)
+    ]
+
+
 # -----------------------------------------------------------------------------
 # Ground bombardment: surface warships strike adjacent shore/air targets (§4.6)
 # -----------------------------------------------------------------------------
@@ -646,11 +662,7 @@ def _bombard_target(ship: Unit, target: Coord, real_map: Map) -> Unit | None:
     **army** (transient, since armies can't garrison). Intangible units
     (satellites) are never targets.
     """
-    enemies = [
-        u
-        for u in real_map.units_at(target)
-        if u.owner is not ship.owner and not _is_intangible(u)
-    ]
+    enemies = _tangible_enemies_at(target, ship.owner, real_map)
     if not enemies:
         return None
     predicates: list[Callable[[Unit], bool]] = []
@@ -1101,10 +1113,7 @@ def step_would_attack(unit: Unit, target: Coord, real_map: Map) -> bool:
     attempt, which is combat). Used to keep order-driven movement from
     auto-attacking: combat is always a deliberate human action, never
     something a heading / go-to / patrol sleepwalks into."""
-    if any(
-        o.owner is not unit.owner and not _is_intangible(o)
-        for o in real_map.units_at(target)
-    ):
+    if _tangible_enemies_at(target, unit.owner, real_map):
         return True
     city = real_map.tile(target).city
     return city is not None and city.owner is not unit.owner

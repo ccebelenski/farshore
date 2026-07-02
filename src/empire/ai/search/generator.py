@@ -51,6 +51,15 @@ FLEET_TRANSPORTS = 3
 AIR_QUOTA = 2
 
 
+def fleet_production(view) -> UnitKind:
+    """What an invasion plan should build: transports until the fleet is
+    `FLEET_TRANSPORTS` hulls, then armies to fill them. The ONE place the
+    fleet-size knob is applied (generator invade/combined plans and the
+    portfolio all call this)."""
+    n_transports = sum(1 for u in view.own_units if u.kind is UnitKind.TRANSPORT)
+    return UnitKind.TRANSPORT if n_transports < FLEET_TRANSPORTS else UnitKind.ARMY
+
+
 class CandidateGenerator:
     """Proposes candidate `Plan`s from one fog view."""
 
@@ -312,14 +321,7 @@ class CandidateGenerator:
         if not coastal:
             return []
         target = coastal[0]
-        n_transports = sum(
-            1 for u in view.own_units if u.kind is UnitKind.TRANSPORT
-        )
-        prod = (
-            UnitKind.TRANSPORT
-            if n_transports < FLEET_TRANSPORTS
-            else UnitKind.ARMY
-        )
+        prod = fleet_production(view)
         return [
             Plan(
                 objectives=(Objective(target, Role.INVADE, INVADE_STRENGTH),),
@@ -347,14 +349,7 @@ class CandidateGenerator:
         coastal = [t for t in overseas if is_ocean_coastal(view, t)]
         if not coastal:
             return []
-        n_transports = sum(
-            1 for u in view.own_units if u.kind is UnitKind.TRANSPORT
-        )
-        prod = (
-            UnitKind.TRANSPORT
-            if n_transports < FLEET_TRANSPORTS
-            else UnitKind.ARMY
-        )
+        prod = fleet_production(view)
         return [
             Plan(
                 objectives=(

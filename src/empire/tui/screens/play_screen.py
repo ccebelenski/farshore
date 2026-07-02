@@ -35,19 +35,15 @@ from empire.core.engine import (
     execute_unit_path,
     execute_unload,
     load_adjacent_cargo,
-    scan_set_for_player,
+    refresh_player_view,
     step_would_attack,
     step_would_enter_artillery_zone,
 )
-from empire.core.events import (
-    CityCapturedEvent,
-    UnitDisbandedEvent,
-    UnitMovedEvent,
-    UnitRemovedEvent,
-)
+from empire.core.events import UnitRemovedEvent
 from empire.core.game import Game
 from empire.core.identity import CityId, UnitId
 from empire.core.player import Player
+from empire.core.reporting import publish_move_outcome
 from empire.core.standing_order import (
     Heading,
     Loading,
@@ -224,10 +220,7 @@ class PlayScreen(Screen[None]):
         # Run an initial scan for the human (prior to first turn) so the
         # capital and its surroundings are visible. The engine does this
         # at end-of-round, but the very first render is before any round.
-        from empire.core.engine import scan_set_for_player
-
-        scanned = scan_set_for_player(self._human, self._game.map)
-        self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)
+        refresh_player_view(self._human, self._game.map, self._game.turn)
         # Auto-select the first unit (if any) so the player doesn't have to
         # hunt for it. On turn 0 there are no units yet (capital is still
         # producing), so this is a no-op — the player presses `e` to advance.
@@ -409,41 +402,18 @@ class PlayScreen(Screen[None]):
             rng=self._game.rng,
         )
 
-        # Publish the engine's outcome events on the bus so the log picks
-        # them up (engine.execute_unit_path doesn't publish; TurnManager
-        # is what normally does, and we're bypassing it for immediate moves).
+        # Publish the outcome events via the shared reporter (execute_unit_path
+        # doesn't publish; TurnManager normally does, and we're bypassing it
+        # for immediate moves). City artillery is not part of the step — it
+        # fires in the deferred phase at end of the human's segment, AFTER the
+        # fog update below, so the fort is discovered before it fires (§4.7).
         unit_died = self._game.map.unit_by_id(unit.id) is None
-        if outcome.steps_taken > 0 and not unit_died:
-            self._bus.publish(
-                UnitMovedEvent(unit_id=unit.id, from_=start, to=unit.coord),
-            )
-        for uid in outcome.units_destroyed:
-            self._bus.publish(UnitRemovedEvent(unit_id=uid, last_coord=start))
-        for cid in outcome.cities_captured:
-            self._bus.publish(
-                CityCapturedEvent(
-                    city_id=cid,
-                    new_owner_id=self._human.id,
-                    previous_owner_id=None,
-                ),
-            )
-        if outcome.last_outcome is StepOutcome.CAPTURED:
-            # The conqueror disbanded into the city at capture (§4.5). It
-            # never physically entered the cell, so report the CITY as the
-            # disband site, not the square it attacked from — the from-square
-            # version read like the army was still standing there.
-            self._bus.publish(
-                UnitDisbandedEvent(unit_id=unit.id, last_coord=target),
-            )
-
-        # City artillery is no longer reactive to the step: a hostile city
-        # shells this unit in the deferred artillery phase at end of the
-        # human's segment (`Game._city_artillery_phase`), AFTER the fog update
-        # below — so the fort is discovered before it ever fires (spec §4.7).
+        publish_move_outcome(
+            self._bus, self._game.map, self._human.id, unit.id, start, outcome
+        )
 
         # Update fog: a step may have revealed (or hidden) tiles.
-        scanned = scan_set_for_player(self._human, self._game.map)
-        self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)
+        refresh_player_view(self._human, self._game.map, self._game.turn)
         return outcome, unit_died
 
     def _order_first_step(
@@ -744,8 +714,7 @@ class PlayScreen(Screen[None]):
         alive = self._game.map.unit_by_id(ship.id)
         if alive is not None:
             self._moves_used[ship.id] = alive.moves_this_turn()
-        scanned = scan_set_for_player(self._human, self._game.map)
-        self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)
+        refresh_player_view(self._human, self._game.map, self._game.turn)
         if result.outcome is BombardmentOutcome.ATTACKER_SUNK:
             self._hint = f"bombardment lost the duel at ({target.x},{target.y})"
         elif alive is not None:
@@ -1139,8 +1108,7 @@ class PlayScreen(Screen[None]):
         self._awaiting_goto_target = False
         self._awaiting_unload = False
         self._cursor = self._home_cursor()
-        scanned = scan_set_for_player(self._human, self._game.map)
-        self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)
+        refresh_player_view(self._human, self._game.map, self._game.turn)
         self._hint = f"loaded from {path}"
         self._refresh_view()
 
@@ -1359,6 +1327,7 @@ class PlayScreen(Screen[None]):
             self._refresh_view()
             return
         to = carrier.coord.step(d)
+        start = carrier.coord
         outcome = execute_unload(
             cargo=cargo,
             to=to,
@@ -1367,16 +1336,15 @@ class PlayScreen(Screen[None]):
             combat_resolver=self._game.combat_resolver,
             rng=self._game.rng,
         )
+        # Events via the shared reporter — an unload can move, die in a landing
+        # fight, or CAPTURE the city it disembarks onto (§4.5); all outcomes
+        # publish the same way the engine turn loop does.
+        publish_move_outcome(
+            self._bus, self._game.map, self._human.id, cargo.id, start, outcome
+        )
+        refresh_player_view(self._human, self._game.map, self._game.turn)
+
         if outcome.last_outcome is StepOutcome.OK:
-            self._bus.publish(UnitMovedEvent(unit_id=cargo.id, from_=carrier.coord, to=to))
-            for cid in outcome.cities_captured:
-                self._bus.publish(
-                    CityCapturedEvent(
-                        city_id=cid, new_owner_id=self._human.id, previous_owner_id=None
-                    )
-                )
-            scanned = scan_set_for_player(self._human, self._game.map)
-            self._human.view.update_from_scan(scanned, self._game.map, self._game.turn)
             # The disembark IS the landed unit's move for the turn (spec §3.4):
             # mark it spent + handled so it can't also move after landing.
             landed = self._game.map.unit_by_id(cargo.id)
@@ -1385,11 +1353,19 @@ class PlayScreen(Screen[None]):
                 self._handled.add(cargo.id)
             remaining = len(carrier.cargo)
             self._hint = f"unloaded to ({to.x},{to.y}); {remaining} still aboard"
+        elif outcome.last_outcome is StepOutcome.CAPTURED and outcome.cities_captured:
+            # Amphibious capture: the cargo stormed ashore and took the city
+            # (consumed into it, §4.5). Prompt production right away, same as
+            # a land capture.
+            self._handled.add(cargo.id)
+            captured = self._game.map.city_by_id(outcome.cities_captured[-1])
+            remaining = len(carrier.cargo)
+            self._hint = f"city captured from the sea! {remaining} still aboard"
+            if captured is not None:
+                self._prompt_capture_production(captured)
         elif outcome.last_outcome is StepOutcome.NO_UNLOAD_YET:
             self._hint = "can't unload the same turn it loaded — try next turn"
         else:
-            for uid in outcome.units_destroyed:
-                self._bus.publish(UnitRemovedEvent(unit_id=uid, last_coord=to))
             self._hint = f"unload failed ({outcome.last_outcome.value})"
         self._refresh_view()
 

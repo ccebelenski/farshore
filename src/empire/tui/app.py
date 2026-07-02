@@ -77,16 +77,13 @@ class EmpireApp(App[None]):
 
     def start_play(self, launched: LaunchedGame) -> None:
         """Launcher handoff: wire the human seat and enter the playfield."""
-        from empire.core.engine import scan_set_for_player
+        from empire.core.engine import refresh_player_view
 
         bus = EventBus()
         launched.game.event_bus = bus
         human_ctrl = HumanController()
         launched.game.attach_controller(launched.human.id, human_ctrl)
-        scanned = scan_set_for_player(launched.human, launched.game.map)
-        launched.human.view.update_from_scan(
-            scanned, launched.game.map, launched.game.turn
-        )
+        refresh_player_view(launched.human, launched.game.map, launched.game.turn)
 
         self.game = launched.game
         self._human = launched.human

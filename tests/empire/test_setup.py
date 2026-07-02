@@ -16,23 +16,12 @@ from empire.core.map import Map
 from empire.core.ruleset import SMALL
 from empire.core.tile import TerrainKind, Tile
 from empire.setup import build_game, capital_eligible_continents
+from tests.empire.support import build_map
 
 
 def _build_map(rows: list[str], city_coords: list[Coord]) -> tuple[Map, list[City]]:
-    terrain_for = {"L": TerrainKind.LAND, "W": TerrainKind.WATER, "C": TerrainKind.CITY}
-    height = len(rows)
-    width = len(rows[0])
     cities = [City(id=CityId(i + 1), coord=c, owner=None) for i, c in enumerate(city_coords)]
-    by_coord = {c.coord: c for c in cities}
-    tiles: dict[Coord, Tile] = {}
-    for y in range(height):
-        for x in range(width):
-            c = Coord(x, y)
-            if c in by_coord:
-                tiles[c] = Tile(coord=c, terrain=TerrainKind.CITY, city=by_coord[c])
-            else:
-                tiles[c] = Tile(coord=c, terrain=terrain_for[rows[y][x]])
-    return Map(width=width, height=height, tiles=tiles), cities
+    return build_map(rows, {c.coord: c for c in cities}), cities
 
 
 # --- eligibility predicate ---------------------------------------------------

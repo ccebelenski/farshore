@@ -5,25 +5,9 @@ from empire.core.map import Map, ViewMap
 from empire.core.tile import TerrainKind, Tile
 from empire.pathfinding.bfs import BFSPathfinder
 from empire.pathfinding.cost import ARMY, SEA, PathCostProfile
+from tests.empire.support import build_map as _build_map
 
 # --- helpers -----------------------------------------------------------------
-
-
-def _build_map(rows: list[str]) -> Map:
-    """ASCII map builder. Each char: L=land, W=water, C=city."""
-    height = len(rows)
-    width = len(rows[0])
-    tiles: dict[Coord, Tile] = {}
-    for y in range(height):
-        for x in range(width):
-            ch = rows[y][x]
-            terrain = {
-                "L": TerrainKind.LAND,
-                "W": TerrainKind.WATER,
-                "C": TerrainKind.CITY,
-            }[ch]
-            tiles[Coord(x, y)] = Tile(coord=Coord(x, y), terrain=terrain)
-    return Map(width=width, height=height, tiles=tiles)
 
 
 # --- basic paths -------------------------------------------------------------
