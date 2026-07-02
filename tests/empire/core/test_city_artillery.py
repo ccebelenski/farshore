@@ -19,8 +19,9 @@ from empire.core.engine import (
     city_can_fire_at,
     clear_movement_pins,
     execute_city_artillery,
-    reactive_city_fire,
     reset_city_artillery,
+    resolve_city_artillery,
+    step_would_enter_artillery_zone,
 )
 from empire.core.identity import CityId, PlayerId, UnitId
 from empire.core.map import Map, ViewMap
@@ -241,33 +242,95 @@ def test_neutral_city_fires_on_any_player(p2: Player) -> None:
     assert m.unit_by_id(army.id) is None
 
 
-# --- reactive (overwatch) fire ----------------------------------------------
+# --- the volley routine (opening barrage + per-segment) ----------------------
 
 
-def test_reactive_fire_from_all_cities_in_range(p1: Player, p2: Player) -> None:
-    """A unit that ends a move inside two cities' range draws a salvo from
-    each that still has its shot."""
+def test_volley_from_all_cities_in_range(p1: Player, p2: Player) -> None:
+    """A unit inside two cities' range is shelled by the volley; the first
+    salvo (hit_prob 1.0) destroys it, so it's gone afterwards."""
     c1 = City(id=CityId(1), coord=Coord(0, 0), owner=p1)
     c2 = City(id=CityId(2), coord=Coord(2, 0), owner=None)
     m = _map(["CLC"], cities={Coord(0, 0): c1, Coord(2, 0): c2})
     army = _place(m, Army(UnitId(1), p2, Coord(1, 0)))  # in range of both
 
-    results = reactive_city_fire(army, m, FORT, _rng())
-    # reactive_city_fire returns (city_id, result) pairs. The first salvo
-    # (hit_prob 1.0) destroys the army, so at least one result is decisive and
-    # the army is gone.
+    results = resolve_city_artillery(m, FORT, _rng())
+    # resolve_city_artillery returns (city_id, result, target_coord) triples.
     assert any(
         result.outcome is ArtilleryOutcome.TARGET_DESTROYED
-        for _city_id, result in results
+        for _city_id, result, _coord in results
     )
     assert m.unit_by_id(army.id) is None
 
 
-def test_reactive_fire_disabled_under_standard(p1: Player, p2: Player) -> None:
+def test_volley_disabled_under_standard(p1: Player, p2: Player) -> None:
     city = City(id=CityId(1), coord=Coord(0, 0), owner=p1)
     m = _map(["CL"], cities={Coord(0, 0): city})
-    army = _place(m, Army(UnitId(1), p2, Coord(1, 0)))
-    assert reactive_city_fire(army, m, STANDARD, _rng()) == []
+    _place(m, Army(UnitId(1), p2, Coord(1, 0)))
+    assert resolve_city_artillery(m, STANDARD, _rng()) == []
+
+
+def test_volley_restricted_to_target_owner(p1: Player, p2: Player) -> None:
+    """`target_owner=P` (the per-segment defensive volley) fires only at P's
+    units — a closer enemy of another player is ignored, because a city shells
+    the player whose segment just resolved, not whoever is nearest."""
+    city = City(id=CityId(1), coord=Coord(0, 0), owner=None)  # neutral: hostile to both
+    m = _map(["CLL"], cities={Coord(0, 0): city})
+    p1_army = _place(m, Army(UnitId(1), p1, Coord(1, 0)))  # closer
+    p2_army = _place(m, Army(UnitId(2), p2, Coord(2, 0)))  # farther
+
+    resolve_city_artillery(m, FORT, _rng(), target_owner=p2)
+    assert m.unit_by_id(p2_army.id) is None  # p2's unit shelled
+    assert m.unit_by_id(p1_army.id) is not None  # closer p1 unit ignored
+
+
+def test_volley_reveals_gun_to_victim(p1: Player, p2: Player) -> None:
+    """Every fire path reveals the firing city to the victim's owner — the
+    invariant now lives in `_fire_artillery`, so the volley reveals too."""
+    city = City(id=CityId(1), coord=Coord(0, 0), owner=None)
+    m = _map(["CL"], cities={Coord(0, 0): city})
+    _place(m, Army(UnitId(1), p2, Coord(1, 0)))
+    assert not p2.view.seen(city.coord)
+
+    resolve_city_artillery(m, FORT, _rng())
+    assert p2.view.seen(city.coord)
+
+
+# --- auto-move halts at the zone edge (never sleepwalks into range) ----------
+
+
+def test_step_into_zone_is_blocked_from_outside(p1: Player, p2: Player) -> None:
+    """Stepping from outside a hostile city's range to inside it is blocked —
+    the guard that stops an order at the red-zone edge (spec §4.7)."""
+    city = City(id=CityId(1), coord=Coord(0, 0), owner=p2)
+    m = _map(["CLLLL"], cities={Coord(0, 0): city})
+    army = _place(m, Army(UnitId(1), p1, Coord(3, 0)))  # chebyshev 3: outside
+    # (3,0)->(2,0): chebyshev 2 == range -> entering.
+    assert step_would_enter_artillery_zone(army, Coord(2, 0), m, FORT)
+
+
+def test_step_outside_to_outside_not_blocked(p1: Player, p2: Player) -> None:
+    city = City(id=CityId(1), coord=Coord(0, 0), owner=p2)
+    m = _map(["CLLLL"], cities={Coord(0, 0): city})
+    army = _place(m, Army(UnitId(1), p1, Coord(4, 0)))  # chebyshev 4
+    # (4,0)->(3,0): chebyshev 3, still outside range 2.
+    assert not step_would_enter_artillery_zone(army, Coord(3, 0), m, FORT)
+
+
+def test_move_within_zone_not_blocked(p1: Player, p2: Player) -> None:
+    """A unit ALREADY inside range may keep moving — only the outside→inside
+    transition halts an order, not movement within the zone."""
+    city = City(id=CityId(1), coord=Coord(0, 0), owner=p2)
+    m = _map(["CLLL"], cities={Coord(0, 0): city})
+    army = _place(m, Army(UnitId(1), p1, Coord(2, 0)))  # already in range (2)
+    assert not step_would_enter_artillery_zone(army, Coord(1, 0), m, FORT)
+
+
+def test_own_city_zone_does_not_block(p1: Player) -> None:
+    city = City(id=CityId(1), coord=Coord(0, 0), owner=p1)
+    m = _map(["CLLLL"], cities={Coord(0, 0): city})
+    army = _place(m, Army(UnitId(1), p1, Coord(3, 0)))
+    # Own city's guns are friendly — never a movement barrier.
+    assert not step_would_enter_artillery_zone(army, Coord(2, 0), m, FORT)
 
 
 # --- round-level housekeeping ------------------------------------------------

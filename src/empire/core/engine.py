@@ -717,8 +717,15 @@ def city_can_fire_at(city: City, victim: Unit, rules: RuleSet) -> bool:
     )
 
 
-def _best_artillery_target(city: City, real_map: Map, rules: RuleSet) -> Unit | None:
-    candidates = [u for u in real_map.all_units() if city_can_fire_at(city, u, rules)]
+def _best_artillery_target(
+    city: City, real_map: Map, rules: RuleSet, target_owner: Player | None = None
+) -> Unit | None:
+    candidates = [
+        u
+        for u in real_map.all_units()
+        if city_can_fire_at(city, u, rules)
+        and (target_owner is None or u.owner is target_owner)
+    ]
     if not candidates:
         return None
     return min(candidates, key=lambda u: _artillery_danger(city, u))
@@ -735,7 +742,16 @@ def _fire_artillery(
     its movement (naval: halved) — with `city_artillery_pin_prob` chance, hit or
     miss. A chance, not a certainty: an unsupported attacker usually stalls but
     can slip through, so cities stay capturable by a coordinated assault.
+
+    Being shelled reveals the gun: the firing city is marked seen for the
+    victim's owner HERE — the single chokepoint every fire path funnels
+    through — so no caller can shell a unit without showing it what fired.
+    (This reveal used to be duplicated per call site and was silently missing
+    from two of the five, so a unit could die to a city it never saw on the
+    map — the "hit from nowhere" playtest bug.)
     """
+    if victim.owner is not None:
+        victim.owner.view.visible.add(city.coord)
     city.artillery_ready = False
     if rng.random() < rules.city_artillery_pin_prob:
         victim.pinned = True
@@ -749,48 +765,65 @@ def _fire_artillery(
 
 
 def execute_city_artillery(
-    city: City, real_map: Map, rules: RuleSet, rng: random.Random
+    city: City,
+    real_map: Map,
+    rules: RuleSet,
+    rng: random.Random,
+    target_owner: Player | None = None,
 ) -> ArtilleryResult:
     """Proactive fire: `city` picks its most dangerous in-range enemy and
     fires one salvo (spec §4.7).
 
-    Used on the owner's turn to shell attackers massing in range. Auto-targets
-    the highest-priority threat; an explicit owner-chosen target (human / AI
-    in the turn plan) is a later refinement layered over this.
+    Auto-targets the highest-priority threat. `target_owner=None` considers
+    every player's units; `target_owner=P` restricts the city to firing at
+    P's units only (the per-segment defensive volley — see
+    `resolve_city_artillery`). An explicit owner-chosen target (human / AI in
+    the turn plan) is a later refinement layered over this.
     """
     if rules.city_artillery_range <= 0:
         return ArtilleryResult(ArtilleryOutcome.DISABLED)
     if not city.artillery_ready:
         return ArtilleryResult(ArtilleryOutcome.NOT_READY)
-    victim = _best_artillery_target(city, real_map, rules)
+    victim = _best_artillery_target(city, real_map, rules, target_owner)
     if victim is None:
         return ArtilleryResult(ArtilleryOutcome.NO_TARGET)
     return _fire_artillery(city, victim, real_map, rules, rng)
 
 
-def reactive_city_fire(
-    mover: Unit, real_map: Map, rules: RuleSet, rng: random.Random
-) -> list[tuple[CityId, ArtilleryResult]]:
-    """Overwatch fire: every hostile city (enemy-owned or neutral) that can
-    bear on `mover` and still has its shot fires one salvo at it (spec §4.7).
+def resolve_city_artillery(
+    real_map: Map,
+    rules: RuleSet,
+    rng: random.Random,
+    target_owner: Player | None = None,
+) -> list[tuple[CityId, ArtilleryResult, Coord]]:
+    """One coordinated round of city artillery (spec §4.7): every city with a
+    ready shot fires one salvo at its highest-priority in-range hostile unit.
 
-    Called after `mover` finishes a move during its owner's movement phase —
-    this is what lets a *neutral* city defend itself (it has no turn of its
-    own) and what makes massing inside city range costly. Stops once the mover
-    is destroyed. Returns (city_id, result) for each city that fired.
+    The SINGLE entry point for both firing occasions, replacing the old
+    reactive per-step overwatch (which fired *before* the mover scanned, so it
+    could hit from an undiscovered city):
+
+    - `target_owner=None` — the symmetric opening barrage: a city may shell
+      the most dangerous enemy of any player, before anyone moves.
+    - `target_owner=P` — the deferred per-segment volley: cities fire only at
+      P's units, run AFTER P's movement and scan, so P has already discovered
+      any gun about to shell it (the shells "take time to walk in"; a city
+      fires as its own action, never as a pre-emptive interrupt of P's move).
+
+    Being shelled reveals the firing city to the victim (in `_fire_artillery`).
+    Returns (city_id, result, target_coord-at-fire-time) per city that fired,
+    for event publication. One shot per city per round (`artillery_ready`).
     """
-    results: list[tuple[CityId, ArtilleryResult]] = []
-    if rules.city_artillery_range <= 0 or _is_intangible(mover):
+    results: list[tuple[CityId, ArtilleryResult, Coord]] = []
+    if rules.city_artillery_range <= 0:
         return results
     for city in real_map.cities():
-        if city.owner is mover.owner:
+        victim = _best_artillery_target(city, real_map, rules, target_owner)
+        if victim is None:
             continue
-        if not city_can_fire_at(city, mover, rules):
-            continue
-        result = _fire_artillery(city, mover, real_map, rules, rng)
-        results.append((city.id, result))
-        if result.outcome is ArtilleryOutcome.TARGET_DESTROYED:
-            break
+        target_coord = victim.coord
+        result = _fire_artillery(city, victim, real_map, rules, rng)
+        results.append((city.id, result, target_coord))
     return results
 
 
@@ -1012,9 +1045,6 @@ class StandingOrderResult:
     moved_unit_ids: tuple[UnitId, ...]
     interrupted_unit_ids: tuple[UnitId, ...]
     woken_sentry_ids: tuple[UnitId, ...]
-    # Reactive overwatch shots drawn by order-driven movement, for event
-    # publishing: (city_id, result, target_coord-at-fire-time).
-    reactive_fire: tuple[tuple[CityId, ArtilleryResult, Coord], ...] = ()
 
 
 def enemy_in_scan_range(unit: Unit, real_map: Map) -> bool:
@@ -1032,21 +1062,43 @@ def enemy_in_scan_range(unit: Unit, real_map: Map) -> bool:
     return False
 
 
-def in_hostile_artillery_zone(unit: Unit, real_map: Map, rules: RuleSet) -> bool:
-    """True if `unit`'s cell is covered by ANY hostile city's guns (enemy or
-    neutral — both fire, spec §4.7). Any unit kind: armies, fighters, ships.
-
-    A wake/interruption trigger for autonomous moves: walking into the red
-    zone is a decision the player must make, not one an old order may
-    sleepwalk through."""
+def _coord_in_hostile_artillery_zone(
+    owner: Player | None, coord: Coord, real_map: Map, rules: RuleSet
+) -> bool:
+    """True if `coord` is covered by ANY city's guns hostile to `owner` (enemy
+    or neutral — both fire, spec §4.7)."""
     if rules.city_artillery_range <= 0:
         return False
     for city in real_map.cities():
-        if city.owner is unit.owner:
+        if city.owner is owner:
             continue
-        if unit.coord.chebyshev_to(city.coord) <= rules.city_artillery_range:
+        if coord.chebyshev_to(city.coord) <= rules.city_artillery_range:
             return True
     return False
+
+
+def in_hostile_artillery_zone(unit: Unit, real_map: Map, rules: RuleSet) -> bool:
+    """True if `unit`'s cell is covered by ANY hostile city's guns (enemy or
+    neutral — both fire, spec §4.7). Any unit kind: armies, fighters, ships."""
+    return _coord_in_hostile_artillery_zone(unit.owner, unit.coord, real_map, rules)
+
+
+def step_would_enter_artillery_zone(
+    unit: Unit, target: Coord, real_map: Map, rules: RuleSet
+) -> bool:
+    """True if stepping to `target` would carry `unit` from OUTSIDE any hostile
+    city's gun range to INSIDE it (spec §4.7).
+
+    Used to STOP auto-move orders (heading / go-to / patrol) at the edge of the
+    red zone — walking into artillery range is a deliberate decision the player
+    makes, never something an order sleepwalks into. The mirror of
+    `step_would_attack`, and checked in every auto-move step path (the engine's
+    `apply_standing_orders` AND the TUI's immediate first step) so the two can't
+    drift apart. A unit already inside a zone isn't blocked from moving within
+    it — only the outside→inside transition halts the order."""
+    return _coord_in_hostile_artillery_zone(
+        unit.owner, target, real_map, rules
+    ) and not _coord_in_hostile_artillery_zone(unit.owner, unit.coord, real_map, rules)
 
 
 def step_would_attack(unit: Unit, target: Coord, real_map: Map) -> bool:
@@ -1128,7 +1180,6 @@ def apply_standing_orders(
     moved: list[UnitId] = []
     interrupted: list[UnitId] = []
     sentried: list[UnitId] = []
-    fired: list[tuple[CityId, ArtilleryResult, Coord]] = []
 
     # Snapshot the list so removals during iteration don't trip us up.
     own_units = [u for u in real_map.board_units() if u.owner is player]
@@ -1177,6 +1228,16 @@ def apply_standing_orders(
             interrupted.append(unit.id)
             continue
 
+        # Never sleepwalk into artillery range: an order halts at the EDGE of a
+        # hostile city's gun range (spec §4.7) and wakes, exactly like it stops
+        # before an attack. Entering the red zone is a deliberate manual step,
+        # never something a heading / go-to / patrol walks into. (The mirror
+        # guard runs on the TUI's immediate first step, via the same predicate.)
+        if step_would_enter_artillery_zone(unit, target, real_map, rules):
+            unit.standing_order = None
+            interrupted.append(unit.id)
+            continue
+
         # Friendly-blocking interrupt: don't fight your way through your own.
         occupants = real_map.units_at(target)
         if (
@@ -1188,7 +1249,6 @@ def apply_standing_orders(
             interrupted.append(unit.id)
             continue
 
-        was_in_zone = in_hostile_artillery_zone(unit, real_map, rules)
         outcome = execute_unit_path(
             unit=unit,
             path=((target.x, target.y),),
@@ -1206,25 +1266,13 @@ def apply_standing_orders(
             interrupted.append(unit.id)
             continue
 
-        # Overwatch (spec §4.7): entering a hostile city's gun range
-        # mid-round draws reactive fire — order-driven movement included.
-        for city_id, shot in reactive_city_fire(unit, real_map, rules, rng):
-            fired.append((city_id, shot, unit.coord))
-        if real_map.unit_by_id(unit.id) is None:
-            interrupted.append(unit.id)
-            moved.append(unit.id)
-            continue
-
-        # Step succeeded. Post-step wake triggers — autonomous movement
-        # stops on news the player must react to: an enemy in scan, the
-        # unit ENTERING a hostile artillery zone, or discovering a city.
-        # Applies to every unit kind (armies, fighters, ships alike).
-        entered_zone = (
-            not was_in_zone and in_hostile_artillery_zone(unit, real_map, rules)
-        )
+        # Step succeeded. Post-step wake triggers — autonomous movement stops
+        # on news the player must react to: an enemy in scan, or discovering a
+        # city. (Entering a hostile artillery zone is handled BEFORE the step
+        # now — the order halts at the edge — so there's no post-step zone
+        # wake.) Applies to every unit kind (armies, fighters, ships alike).
         if (
             enemy_in_scan_range(unit, real_map)
-            or entered_zone
             or unseen_city_in_scan(unit, real_map)
         ):
             unit.standing_order = None
@@ -1242,7 +1290,6 @@ def apply_standing_orders(
         moved_unit_ids=tuple(moved),
         interrupted_unit_ids=tuple(interrupted),
         woken_sentry_ids=(),
-        reactive_fire=tuple(fired),
     )
 
 

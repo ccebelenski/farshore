@@ -248,14 +248,16 @@ def _city_at(m: Map, coord: Coord, owner: Player | None, cid: int) -> City:
     return city
 
 
-def test_heading_wakes_on_entering_hostile_artillery_zone(
+def test_heading_halts_at_edge_of_hostile_artillery_zone(
     p1: Player, p2: Player, resolver: CombatResolver
 ) -> None:
-    """A unit on auto-move stops the moment it ENTERS a hostile city's gun
-    range under artillery rules — the player decides about the red zone."""
+    """A unit on auto-move HALTS AT THE EDGE of a hostile city's gun range —
+    it refuses the step that would carry it in, and wakes, exactly as it stops
+    before an attack. An order never sleepwalks into the red zone (spec §4.7);
+    entering is a deliberate manual step."""
     m = _land_map(10, 3)
     _city_at(m, Coord(7, 1), p2, 1)
-    # Owner has seen the city (it's on the map view); the wake is real-map
+    # Owner has seen the city (it's on the map view); the guard is real-map
     # based either way, matching enemy_in_scan_range's convention.
     p1.view.visible = {Coord(x, y) for x in range(10) for y in range(3)}
     army = Army(UnitId(1), p1, Coord(3, 1))
@@ -272,13 +274,14 @@ def test_heading_wakes_on_entering_hostile_artillery_zone(
     assert army.standing_order is not None
     assert army.id in result.moved_unit_ids
 
-    # Step 2: (4,1)->(5,1), chebyshev 2: ENTERED the zone -> wake.
+    # Step 2: (4,1)->(5,1) would ENTER the zone (chebyshev 2) -> refuse the
+    # step and wake. The army stays put at the edge, never entering range.
     result = apply_standing_orders(p1, m, fortified, resolver, random.Random(0))
-    assert army.coord == Coord(5, 1)
+    assert army.coord == Coord(4, 1)  # did NOT step in
     assert army.standing_order is None
     assert army.id in result.interrupted_unit_ids
-    # And entering range drew the overwatch shot (hit_prob 0: a miss).
-    assert result.reactive_fire, "entering range must draw reactive fire"
+    assert army.id not in result.moved_unit_ids
+    assert army.hits == Army.max_hits  # unharmed — never entered range
 
 
 def test_heading_wakes_on_discovering_a_city(
