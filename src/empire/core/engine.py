@@ -1304,6 +1304,11 @@ def _explore_passable(unit: Unit, player: Player, real_map: Map, c: Coord) -> bo
     if t is None or t not in type(unit).legal_terrain:
         return False
     if t is TerrainKind.CITY:
+        if unit.kind is UnitKind.ARMY:
+            # Armies can never route through ANY city: entering their own is
+            # barred outright (§5.4 garrison rule) and entering anyone
+            # else's is a capture attempt — never an explore side effect.
+            return False
         if c in player.view.visible:
             city = real_map.tile(c).city
             return city is not None and city.owner is player
@@ -1333,10 +1338,14 @@ def _is_shore(player: Player, real_map: Map, c: Coord) -> bool:
 def _explore_flood(
     unit: Unit, player: Player, real_map: Map
 ) -> tuple[dict[Coord, int], dict[Coord, Coord]]:
-    """BFS over the unit's known-passable cells from its position, avoiding
-    cells occupied by visible units (can't finish a move on/through them).
+    """BFS over the unit's known-passable cells from its position.
     Returns (distance, parent) maps. Deterministic: neighbors expand in
-    Direction-enum order. (Local BFS — core must not import pathfinding.)"""
+    Direction-enum order. (Local BFS — core must not import pathfinding.)
+
+    Units do NOT wall the graph: occupancy is transient (a fresh produce or
+    a fellow explorer moves next turn), and treating it as terrain boxed
+    explorers into their own cell and woke them with "nothing to explore".
+    Traffic is handled at EXECUTION time — sidestep or hold for a turn."""
     from collections import deque
 
     dist: dict[Coord, int] = {unit.coord: 0}
@@ -1349,8 +1358,6 @@ def _explore_flood(
                 continue
             if not _explore_passable(unit, player, real_map, nb):
                 continue
-            if nb in player.view.visible and real_map.units_at(nb):
-                continue  # occupied (own or seen enemy) — route around
             dist[nb] = dist[cur] + 1
             parent[nb] = cur
             q.append(nb)
@@ -1363,25 +1370,37 @@ def _pick_explore_target(
     real_map: Map,
     claims: set[Coord],
     dist: dict[Coord, int],
-) -> Coord | None:
-    """The nearest reachable, unclaimed FRONTIER cell — known, passable, with
-    an in-bounds neighbor never seen. Shore frontier takes absolute priority
-    (spec of the Explore order: reveal coastline first). Ties break (dist, y,
-    x) for determinism."""
+) -> tuple[Coord | None, bool]:
+    """(nearest reachable unclaimed FRONTIER cell, any-frontier-reachable).
+
+    A frontier cell is known, passable, with an in-bounds neighbor never
+    seen. Shore frontier takes absolute priority (reveal coastline first);
+    ties break (dist, y, x) for determinism.
+
+    The second flag distinguishes "everything reachable is CLAIMED by a
+    fellow explorer" (hold and wait — early on, the known world is one thin
+    trail and may hold a single reachable frontier cell) from "no frontier
+    at all" (exploration genuinely finished -> wake)."""
     seen = player.view.seen
     best: tuple[bool, int, int, int] | None = None
     best_cell: Coord | None = None
+    any_frontier = False
     for c, d in dist.items():
-        if d == 0 or c in claims:
+        if d == 0:
             continue
         if not any(
             real_map.in_bounds(nb) and not seen(nb) for nb in c.neighbors()
         ):
             continue  # not frontier
+        any_frontier = True
+        if c in claims:
+            continue
+        if c in player.view.visible and real_map.units_at(c):
+            continue  # can't finish a move on an occupied cell
         key = (not _is_shore(player, real_map, c), d, c.y, c.x)
         if best is None or key < best:
             best, best_cell = key, c
-    return best_cell
+    return best_cell, any_frontier
 
 
 def _fighter_at_bingo(unit: Unit, player: Player, real_map: Map, at: Coord) -> int:
@@ -1422,9 +1441,15 @@ def _run_explore(
         ):
             return wake()  # bingo fuel: just enough to fly home
         dist, parent = _explore_flood(unit, player, real_map)
-        target = _pick_explore_target(unit, player, real_map, claims, dist)
+        target, any_frontier = _pick_explore_target(
+            unit, player, real_map, claims, dist
+        )
         if target is None:
-            return wake()  # no reachable frontier left — exploration done
+            if any_frontier:
+                # Everything reachable is claimed (or momentarily occupied):
+                # hold — a fellow explorer is on it; the world opens next turn.
+                return (stepped, False)
+            return wake()  # no reachable frontier at all — exploration done
         claims.add(target)
         # Reconstruct the path start->target (exclusive of start).
         path: list[Coord] = []
@@ -1433,18 +1458,47 @@ def _run_explore(
             path.append(cur)
             cur = parent[cur]
         path.reverse()
-        for cell in path:
+        replan = False
+        for planned in path:
+            step_cell = planned
             if budget <= 0:
                 return (stepped, False)
             # Standard standing-order guards: never auto-attack, halt at the
             # edge of a hostile artillery ring (both wake the unit).
-            if step_would_attack(unit, cell, real_map):
+            if step_would_attack(unit, step_cell, real_map):
                 return wake()
-            if step_would_enter_artillery_zone(unit, cell, real_map, rules):
+            if step_would_enter_artillery_zone(unit, step_cell, real_map, rules):
                 return wake()
+            if real_map.units_at(step_cell):
+                # Transient traffic on the planned cell (a fresh produce, a
+                # fellow explorer). Sidestep if a free known-passable cell
+                # still closes on the target; otherwise hold for a turn —
+                # do NOT wake, the world isn't explored, the jam will move.
+                side = next(
+                    (
+                        nb
+                        for nb in sorted(
+                            unit.coord.neighbors(),
+                            key=lambda c: (c.chebyshev_to(target), c.y, c.x),
+                        )
+                        if real_map.in_bounds(nb)
+                        and nb.chebyshev_to(target) < unit.coord.chebyshev_to(target)
+                        and _explore_passable(unit, player, real_map, nb)
+                        and not real_map.units_at(nb)
+                        and not step_would_attack(unit, nb, real_map)
+                        and not step_would_enter_artillery_zone(
+                            unit, nb, real_map, rules
+                        )
+                    ),
+                    None,
+                )
+                if side is None:
+                    return (stepped, False)  # boxed in by traffic: wait it out
+                step_cell = side
+                replan = True  # off the planned path: recompute after the step
             outcome = execute_unit_path(
                 unit=unit,
-                path=((cell.x, cell.y),),
+                path=((step_cell.x, step_cell.y),),
                 real_map=real_map,
                 rules=rules,
                 combat_resolver=combat_resolver,
@@ -1453,7 +1507,7 @@ def _run_explore(
             if real_map.unit_by_id(unit.id) is None:
                 return (stepped, True)  # died en route (order dies with it)
             if outcome.last_outcome is not StepOutcome.OK:
-                return wake()  # blocked (stale intel, transient jam): stop
+                return wake()  # blocked (stale intel): stop
             stepped = True
             budget -= 1
             # Post-step wake triggers: contact or discovery is exactly the
@@ -1468,7 +1522,11 @@ def _run_explore(
                 <= _fighter_at_bingo(unit, player, real_map, unit.coord) + 1
             ):
                 return wake()
-        # Reached the target with budget left: re-pick and keep going.
+            if replan:
+                # The unit's own claim stays valid for the re-pick.
+                claims.discard(target)
+                break
+        # Path done or diverged: re-flood and continue with remaining budget.
     return (stepped, False)
 
 

@@ -772,3 +772,77 @@ def test_fighter_lands_at_own_city_with_parked_fighter(
     )
     assert outcome.last_outcome is StepOutcome.OK
     assert jet.coord == Coord(0, 0)
+
+
+# --- Explore: the three second-explorer deadlocks (playtest, seed-4 shape) ----
+
+
+def test_explore_army_routes_around_own_city(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """Armies can never enter a city, so explore must PLAN around them: an
+    army whose shortest known route runs through its own capital used to wake
+    with 'nothing to explore' on the first step (the seed-4 playtest bug)."""
+    from empire.core.city import City
+    from empire.core.standing_order import Explore
+
+    m = _land_map(5, 2)
+    city = City(id=CityId(1), coord=Coord(1, 0), owner=p1)
+    _city_tile(m, city)
+    army = Army(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(army, Coord(0, 0))
+    army.standing_order = Explore()
+    _see(p1, [Coord(x, y) for x in range(4) for y in range(2)])  # col 4 unseen
+
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert isinstance(army.standing_order, Explore)  # did NOT falsely wake
+    assert army.coord == Coord(1, 1)  # detoured around the city
+
+
+def test_explore_holds_when_all_frontier_is_claimed(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """One reachable frontier cell, two explorers: the second HOLDS (a fellow
+    explorer claimed it — the world opens next turn) instead of waking with
+    'exploration done'."""
+    from empire.core.standing_order import Explore
+
+    m = _land_map(4, 1)
+    a = Army(UnitId(1), p1, Coord(1, 0))
+    b = Army(UnitId(2), p1, Coord(0, 0))
+    m.place_unit(a, Coord(1, 0))
+    m.place_unit(b, Coord(0, 0))
+    a.standing_order = Explore()
+    b.standing_order = Explore()
+    _see(p1, [Coord(x, 0) for x in range(3)])  # (3,0) unseen -> frontier (2,0)
+
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert a.coord == Coord(2, 0)  # A took the only frontier cell
+    assert b.coord == Coord(0, 0)  # B waited...
+    assert isinstance(b.standing_order, Explore)  # ...and stayed on mission
+
+
+def test_explore_waits_out_transient_traffic(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """A friendly parked on the only route is traffic, not terrain: the
+    explorer holds (order intact) and proceeds once the cell frees up."""
+    from empire.core.standing_order import Explore, Sentry
+
+    m = _land_map(4, 1)
+    blocker = Army(UnitId(1), p1, Coord(1, 0))
+    m.place_unit(blocker, Coord(1, 0))
+    blocker.standing_order = Sentry()
+    scout = Army(UnitId(2), p1, Coord(0, 0))
+    m.place_unit(scout, Coord(0, 0))
+    scout.standing_order = Explore()
+    _see(p1, [Coord(x, 0) for x in range(3)])
+
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert scout.coord == Coord(0, 0)  # held, didn't wake
+    assert isinstance(scout.standing_order, Explore)
+
+    m.remove_unit(blocker)  # traffic clears
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert scout.coord == Coord(1, 0)  # moving again
+    assert isinstance(scout.standing_order, Explore)
