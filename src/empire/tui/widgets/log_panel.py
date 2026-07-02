@@ -35,7 +35,12 @@ class LogPanel(VerticalScroll):
 
     DEFAULT_CSS = """
     LogPanel {
-        height: 8;
+        /* Absorb whatever vertical space the fixed-size map + status bar +
+           footer leave over, so a taller terminal means more log history.
+           The map sizes itself to its content (inline height), so the log
+           is the natural flex row; never shrink below 8 lines. */
+        height: 1fr;
+        min-height: 8;
         border-top: solid $accent;
     }
     LogPanel > RichLog {
