@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from empire.core.coord import Coord
 from empire.core.engine import (
+    ArtilleryResult,
     CombatResolverProtocol,
     MoveOutcome,
     StepOutcome,
@@ -38,7 +39,7 @@ from empire.core.engine import (
     wake_sentried_units,
 )
 from empire.core.event_bus import EventBusProtocol, NullEventBus
-from empire.core.identity import PlayerId, UnitId
+from empire.core.identity import CityId, PlayerId, UnitId
 
 if TYPE_CHECKING:
     from empire.contracts.controller import AIController
@@ -214,6 +215,11 @@ class TurnManager:
             self._standing_orders_phase(player)
             self._movement_phase(player)
             self._scan_phase(player)
+            # City artillery (spec §4.7) fires AFTER this player has moved and
+            # scanned — so it has already discovered any gun about to shell it
+            # — and never as a pre-emptive interrupt of the move itself. The
+            # shells "take time to walk in": a city acts on its own, deferred.
+            self._city_artillery_phase(player)
             # Turn-end (spec §5.4): the disband runs at the END of the
             # owner's own segment, so a conquering army is never still
             # standing when the opponent moves. Units produced this very
@@ -226,36 +232,58 @@ class TurnManager:
         """City artillery's opening salvo (spec §4.7): before any player moves,
         every city — owned or neutral — fires once at its most dangerous
         in-range enemy. Symmetric across players (nobody has moved), so it
-        carries no turn-order advantage. A city that fires here has spent its
-        one shot for the round; the reactive path in `_apply_turn_plan` only
-        fires cities that still have their shot (e.g. against a unit that
-        *enters* range mid-round). No-op unless the ruleset enables artillery.
+        carries no turn-order advantage and neutralises first-mover bias in a
+        standoff. A city that fires here has spent its one shot for the round;
+        the per-segment `_city_artillery_phase` then only fires cities that
+        still have their shot (a fresh contact that moved into range this
+        round). No-op unless the ruleset enables artillery.
         """
         if self.game.rules.city_artillery_range <= 0:
             return
-        from empire.core.engine import ArtilleryOutcome, execute_city_artillery
+        from empire.core.engine import resolve_city_artillery
+
+        self._publish_artillery(
+            resolve_city_artillery(self.game.map, self.game.rules, self.game.rng)
+        )
+
+    def _city_artillery_phase(self, player: Player) -> None:
+        """Deferred defensive volley (spec §4.7): after `player` has moved and
+        scanned, every hostile city with a shot still in hand fires one salvo
+        at `player`'s highest-priority unit in range.
+
+        Deferred, not reactive: `player` already scanned this segment, so a
+        gun it moved next to is discovered before it fires — no "hit from
+        nowhere". A city fires as its own action, never as a pre-emptive
+        interrupt of the move. Most cities already spent their shot in the
+        opening barrage; this catches units that moved into range afterwards.
+        """
+        if self.game.rules.city_artillery_range <= 0:
+            return
+        from empire.core.engine import resolve_city_artillery
+
+        self._publish_artillery(
+            resolve_city_artillery(
+                self.game.map, self.game.rules, self.game.rng, target_owner=player
+            )
+        )
+
+    def _publish_artillery(
+        self, results: list[tuple[CityId, ArtilleryResult, Coord]]
+    ) -> None:
+        """Emit the bus events for one artillery volley's results (shared by
+        the opening barrage and the per-segment phase). The reveal-the-gun
+        fog update already happened inside `_fire_artillery`."""
+        from empire.core.engine import ArtilleryOutcome
         from empire.core.events import CityFiredEvent, UnitRemovedEvent
 
-        for city in list(self.game.map.cities()):
-            coords = {u.id: u.coord for u in self.game.map.all_units()}
-            owners = {u.id: u.owner for u in self.game.map.all_units()}
-            result = execute_city_artillery(
-                city, self.game.map, self.game.rules, self.game.rng
-            )
+        for city_id, result, tcoord in results:
             if result.target_id is None:
                 continue
-            tcoord = coords.get(result.target_id, city.coord)
-            # Being shelled reveals the gun (see reactive path): mark the firing
-            # city seen for the victim's owner, even if the salvo destroys the
-            # unit before any scan would have spotted the city.
-            victim_owner = owners.get(result.target_id)
-            if victim_owner is not None:
-                victim_owner.view.visible.add(city.coord)
             destroyed = result.outcome is ArtilleryOutcome.TARGET_DESTROYED
             hit = destroyed or result.outcome is ArtilleryOutcome.TARGET_DAMAGED
             self.game.event_bus.publish(
                 CityFiredEvent(
-                    city_id=city.id,
+                    city_id=city_id,
                     target_id=result.target_id,
                     target_coord=tcoord,
                     hit=hit,
@@ -319,29 +347,9 @@ class TurnManager:
             combat_resolver=self.game.combat_resolver,
             rng=self.game.rng,
         )
-        # Overwatch drawn by order-driven movement (spec §4.7).
-        if result.reactive_fire:
-            from empire.core.engine import ArtilleryOutcome
-            from empire.core.events import CityFiredEvent, UnitRemovedEvent
-
-            for city_id, shot, at in result.reactive_fire:
-                if shot.target_id is None:
-                    continue
-                destroyed = shot.outcome is ArtilleryOutcome.TARGET_DESTROYED
-                hit = destroyed or shot.outcome is ArtilleryOutcome.TARGET_DAMAGED
-                self.game.event_bus.publish(
-                    CityFiredEvent(
-                        city_id=city_id,
-                        target_id=shot.target_id,
-                        target_coord=at,
-                        hit=hit,
-                        destroyed=destroyed,
-                    )
-                )
-                if destroyed:
-                    self.game.event_bus.publish(
-                        UnitRemovedEvent(unit_id=shot.target_id, last_coord=at)
-                    )
+        # Artillery no longer fires reactively mid-move; hostile cities shell
+        # this player's units in the deferred `_city_artillery_phase` after
+        # the scan, so there is nothing to publish here.
         for uid in result.moved_unit_ids:
             unit = self.game.map.unit_by_id(uid)
             if unit is None:
@@ -464,12 +472,12 @@ class TurnManager:
         self, player: Player, unit_id: UnitId, start: Coord, outcome: MoveOutcome
     ) -> None:
         """Publish the bus events for one resolved step/landing: movement,
-        reactive city artillery, destructions, captures, and the conqueror's
-        capture-time disband. Shared by `moves` and amphibious `unloads`."""
-        from empire.core.engine import ArtilleryOutcome, reactive_city_fire
+        destructions, captures, and the conqueror's capture-time disband.
+        Shared by `moves` and amphibious `unloads`. City artillery is no longer
+        reactive to the move — it fires in the deferred `_city_artillery_phase`
+        after the scan."""
         from empire.core.events import (
             CityCapturedEvent,
-            CityFiredEvent,
             UnitDisbandedEvent,
             UnitMovedEvent,
             UnitRemovedEvent,
@@ -480,35 +488,6 @@ class TurnManager:
             self.game.event_bus.publish(
                 UnitMovedEvent(unit_id=unit_id, from_=start, to=unit.coord)
             )
-        # Reactive overwatch (spec §4.7) on a unit that ended in gun range.
-        if self.game.rules.city_artillery_range > 0 and unit is not None:
-            mcoord = unit.coord
-            for city_id, result in reactive_city_fire(
-                unit, self.game.map, self.game.rules, self.game.rng
-            ):
-                if result.target_id is None:
-                    continue
-                # Being shelled reveals the gun: mark the firing city seen for
-                # the victim's owner. Reactive fire resolves DURING movement,
-                # before the scan phase, and a destroyed unit contributes no
-                # vision — so without this you die to a city you never see on
-                # the map (can't tell what hit you or where). The scan phase
-                # then commits it to `remembered`.
-                firing_city = self.game.map.city_by_id(city_id)
-                if firing_city is not None:
-                    player.view.visible.add(firing_city.coord)
-                destroyed = result.outcome is ArtilleryOutcome.TARGET_DESTROYED
-                hit = destroyed or result.outcome is ArtilleryOutcome.TARGET_DAMAGED
-                self.game.event_bus.publish(
-                    CityFiredEvent(
-                        city_id=city_id, target_id=result.target_id,
-                        target_coord=mcoord, hit=hit, destroyed=destroyed,
-                    )
-                )
-                if destroyed:
-                    self.game.event_bus.publish(
-                        UnitRemovedEvent(unit_id=result.target_id, last_coord=mcoord)
-                    )
         for uid in outcome.units_destroyed:
             self.game.event_bus.publish(UnitRemovedEvent(unit_id=uid, last_coord=start))
         for cid in outcome.cities_captured:

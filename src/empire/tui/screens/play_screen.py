@@ -36,10 +36,10 @@ from empire.core.engine import (
     execute_unload,
     scan_set_for_player,
     step_would_attack,
+    step_would_enter_artillery_zone,
 )
 from empire.core.events import (
     CityCapturedEvent,
-    CityFiredEvent,
     UnitDisbandedEvent,
     UnitMovedEvent,
     UnitRemovedEvent,
@@ -435,33 +435,10 @@ class PlayScreen(Screen[None]):
                 UnitDisbandedEvent(unit_id=unit.id, last_coord=target),
             )
 
-        # Overwatch (spec §4.7): entering a hostile city's gun range
-        # mid-round draws reactive fire — the human's immediate steps are
-        # not exempt (they previously were: a free entry the AI never got).
-        if not unit_died:
-            from empire.core.engine import ArtilleryOutcome, reactive_city_fire
-
-            for city_id, shot in reactive_city_fire(
-                unit, self._game.map, self._game.rules, self._game.rng
-            ):
-                if shot.target_id is None:
-                    continue
-                destroyed = shot.outcome is ArtilleryOutcome.TARGET_DESTROYED
-                hit = destroyed or shot.outcome is ArtilleryOutcome.TARGET_DAMAGED
-                self._bus.publish(
-                    CityFiredEvent(
-                        city_id=city_id,
-                        target_id=shot.target_id,
-                        target_coord=unit.coord,
-                        hit=hit,
-                        destroyed=destroyed,
-                    )
-                )
-                if destroyed:
-                    self._bus.publish(
-                        UnitRemovedEvent(unit_id=shot.target_id, last_coord=unit.coord)
-                    )
-            unit_died = self._game.map.unit_by_id(unit.id) is None
+        # City artillery is no longer reactive to the step: a hostile city
+        # shells this unit in the deferred artillery phase at end of the
+        # human's segment (`Game._city_artillery_phase`), AFTER the fog update
+        # below — so the fort is discovered before it ever fires (spec §4.7).
 
         # Update fog: a step may have revealed (or hidden) tiles.
         scanned = scan_set_for_player(self._human, self._game.map)
@@ -478,27 +455,33 @@ class PlayScreen(Screen[None]):
         the engine applies AFTER this round's standing-orders phase (the
         designed mechanism that prevents the same-round double step).
 
-        Returns (stepped, unit_alive, attack_blocked). A move order never
-        auto-attacks: if the first step would resolve as combat or a city
-        capture, it is refused (attack_blocked=True) — engaging is a
-        deliberate manual step, never an order side effect."""
+        Returns (stepped, unit_alive, block) where `block` is None, "attack",
+        or "artillery". A move order never auto-attacks (first step would
+        resolve as combat / a capture → "attack") and never sleepwalks into a
+        hostile city's gun range (first step would enter the red zone →
+        "artillery", spec §4.7). Both are deliberate manual steps, never an
+        order side effect — the same rule the engine applies to later steps."""
         used = self._moves_used.get(unit.id, 0)
         if used >= unit.moves_this_turn():
-            return False, True, False  # out of moves; the order starts next round
+            return False, True, None  # out of moves; the order starts next round
         if not self._game.map.in_bounds(target):
-            return False, True, False
+            return False, True, None
         if step_would_attack(unit, target, self._game.map):
-            return False, True, True
+            return False, True, "attack"
+        if step_would_enter_artillery_zone(
+            unit, target, self._game.map, self._game.rules
+        ):
+            return False, True, "artillery"
         outcome, unit_died = self._execute_step(unit, target)
         if unit_died:
             self._selected_unit_id = None
             self._handled.add(unit.id)
-            return outcome.steps_taken > 0, False, False
+            return outcome.steps_taken > 0, False, None
         if outcome.steps_taken > 0:
             self._moves_used[unit.id] = used + outcome.steps_taken
             self._cursor = unit.coord
-            return True, True, False
-        return False, True, False
+            return True, True, None
+        return False, True, None
 
     def action_select_unit(self) -> None:
         """Manual free-select: take the own unit under the cursor.
@@ -831,11 +814,17 @@ class PlayScreen(Screen[None]):
             return
         # Step the first cell now; the REMAINDER goes live via the plan's
         # set_orders so the engine walks it from the next round onward.
-        stepped, alive, blocked = self._order_first_step(unit, path[0])
-        if blocked:
+        stepped, alive, block = self._order_first_step(unit, path[0])
+        if block == "attack":
             # The route starts into an enemy/city: a go-to never auto-attacks.
             # Leave the unit selected so the player can step in deliberately.
             self._hint = "go-to blocked by an enemy ahead — step in to attack"
+            self._refresh_view()
+            return
+        if block == "artillery":
+            # The route starts into a hostile city's gun range: a go-to never
+            # walks into the guns. Leave the unit at the edge for the player.
+            self._hint = "go-to stops at a hostile city's gun range — step in deliberately"
             self._refresh_view()
             return
         self._handled.add(unit.id)
@@ -1345,10 +1334,15 @@ class PlayScreen(Screen[None]):
         self._awaiting_heading = False
         # Step now; the heading goes live via the plan's set_orders so the
         # engine walks it from the NEXT round (not again this round).
-        stepped, alive, blocked = self._order_first_step(unit, unit.coord.step(d))
-        if blocked:
+        stepped, alive, block = self._order_first_step(unit, unit.coord.step(d))
+        if block == "attack":
             # A heading never auto-attacks: enemy/city ahead → engage manually.
             self._hint = f"enemy {d.name} — step in to attack (heading not set)"
+            self._refresh_view()
+            return
+        if block == "artillery":
+            # A heading never walks into a hostile city's gun range (spec §4.7).
+            self._hint = f"{d.name} enters a city's gun range — step in deliberately (heading not set)"
             self._refresh_view()
             return
         self._handled.add(unit_id)
