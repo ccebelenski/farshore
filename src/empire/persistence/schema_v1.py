@@ -22,6 +22,7 @@ from empire.core.map import Map, RememberedTile, UnitSnapshot, ViewMap
 from empire.core.player import Player
 from empire.core.ruleset import MapProfile, RuleSet
 from empire.core.standing_order import (
+    Explore,
     Heading,
     Loading,
     PatrolPath,
@@ -414,6 +415,8 @@ class V1Serializer:
             }
         if isinstance(order, Loading):
             return {"kind": "loading"}
+        if isinstance(order, Explore):
+            return {"kind": "explore"}
         # Sentry — the only remaining variant.
         return {"kind": "sentry"}
 
@@ -434,6 +437,8 @@ class V1Serializer:
             )
         if kind == "loading":
             return Loading()
+        if kind == "explore":
+            return Explore()
         if kind == "sentry":
             return Sentry()
         raise ValueError(f"Unknown StandingOrder kind in save: {kind!r}")

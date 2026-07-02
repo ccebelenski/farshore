@@ -46,6 +46,7 @@ from empire.core.identity import CityId, UnitId
 from empire.core.player import Player
 from empire.core.reporting import publish_move_outcome
 from empire.core.standing_order import (
+    Explore,
     Heading,
     Loading,
     PatrolPath,
@@ -130,6 +131,7 @@ class PlayScreen(Screen[None]):
         Binding("d", "set_heading", "set heading"),
         Binding("g", "go_to", "go-to"),
         Binding("t", "patrol_route", "patrol route"),
+        Binding("v", "explore", "explore"),
         Binding("o", "unload", "unload cargo"),
         Binding("l", "loading", "load ship"),
         Binding("f", "bombard", "bombard"),
@@ -683,6 +685,35 @@ class PlayScreen(Screen[None]):
         self._hint = (
             "patrol: cursor to the far endpoint; Enter to confirm, Esc to cancel"
         )
+        self._refresh_view()
+
+    def action_explore(self) -> None:
+        """Put the selected unit (army/ship/fighter) into Explore: it reveals
+        unexplored tiles autonomously — shore first — until woken by contact,
+        a discovery, 'w', or running out of reachable frontier."""
+        if self._selected_unit_id is None:
+            self._hint = "select a unit first"
+            self._refresh_view()
+            return
+        unit = self._selected_unit()
+        if unit is None:
+            self._refresh_view()
+            return
+        if unit.kind is UnitKind.SATELLITE:
+            self._hint = "satellites take no orders — press a direction to launch"
+            self._refresh_view()
+            return
+        if unit.carried_by is not None:
+            self._hint = "aboard a carrier — unload it first"
+            self._refresh_view()
+            return
+        unit.standing_order = Explore()
+        self._handled.add(unit.id)
+        self._hint = (
+            "exploring — reveals unknown tiles (shore first); wakes on "
+            "contact/discovery, 'w', or when nothing is left to explore"
+        )
+        self._advance_to_next_unit()
         self._refresh_view()
 
     def action_unload(self) -> None:

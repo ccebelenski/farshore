@@ -317,7 +317,7 @@ def test_round_trip_with_custom_ruleset() -> None:
 def test_round_trip_preserves_standing_orders(tmp_path: Path) -> None:
     """Heading, PatrolPath, and Sentry all survive save/load intact."""
     from empire.core.coord import Direction
-    from empire.core.standing_order import Heading, PatrolPath, Sentry
+    from empire.core.standing_order import Explore, Heading, PatrolPath, Sentry
 
     game = _build_tiny_game()
     units = list(game.map.all_units())
@@ -334,6 +334,9 @@ def test_round_trip_preserves_standing_orders(tmp_path: Path) -> None:
     army2 = Army(UnitId(99), army.owner, Coord(1, 0))
     game.map.place_unit(army2, Coord(1, 0))
     army2.standing_order = Sentry()
+    army3 = Army(UnitId(98), army.owner, Coord(0, 1))
+    game.map.place_unit(army3, Coord(0, 1))
+    army3.standing_order = Explore()
 
     path = tmp_path / "save.json"
     SaveManager().save(game, path)
@@ -348,6 +351,7 @@ def test_round_trip_preserves_standing_orders(tmp_path: Path) -> None:
     assert bs_order.remaining == (Coord(2, 0), Coord(2, 1))
     assert bs_order.loop is True
     assert isinstance(loaded_units[99].standing_order, Sentry)
+    assert isinstance(loaded_units[98].standing_order, Explore)
 
 
 def test_round_trip_preserves_move_to_default_order(tmp_path: Path) -> None:

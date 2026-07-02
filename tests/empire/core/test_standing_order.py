@@ -530,3 +530,113 @@ def test_ship_patrol_wakes_on_enemy_in_scan(
     assert ship.coord == Coord(1, 0)  # stepped, then woke
     assert ship.standing_order is None
     assert UnitId(1) in result.interrupted_unit_ids
+
+
+# --- Explore: autonomous fog-frontier scouting --------------------------------
+
+
+def _see(p: Player, cells: list[Coord]) -> None:
+    p.view.visible = set(cells)
+
+
+def test_explore_army_heads_for_frontier_and_persists(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    from empire.core.standing_order import Explore
+
+    m = _land_map(5, 1)
+    army = Army(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(army, Coord(0, 0))
+    army.standing_order = Explore()
+    _see(p1, [Coord(x, 0) for x in range(3)])  # (3,0),(4,0) unexplored
+
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert army.coord == Coord(1, 0)  # heading for the frontier at (2,0)
+    assert isinstance(army.standing_order, Explore)  # still exploring
+    assert UnitId(1) in result.moved_unit_ids
+
+
+def test_explore_prefers_shore_frontier(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """Shore frontier wins over NEARER inland frontier: the coastline is the
+    priority (it reveals the shape of the world)."""
+    from empire.core.standing_order import Explore
+
+    rows = ["LLLL", "LLLL", "LLLL", "LLLL", "LWLL"]
+    m = _mixed_map(rows)
+    army = Army(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(army, Coord(0, 0))
+    army.standing_order = Explore()
+    # Column 3 unexplored -> frontier is column 2. (2,3)/(2,4) touch the
+    # known water at (1,4): shore. (2,0)/(2,1) are nearer but inland.
+    _see(p1, [Coord(x, y) for x in range(3) for y in range(5)])
+
+    for _ in range(3):
+        apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert army.coord == Coord(2, 3)  # dist-3 shore beat the dist-2 inland
+
+
+def test_explore_wakes_when_no_frontier_left(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    from empire.core.standing_order import Explore
+
+    m = _land_map(3, 1)
+    army = Army(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(army, Coord(0, 0))
+    army.standing_order = Explore()
+    _see(p1, [Coord(x, 0) for x in range(3)])  # everything seen
+
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert army.standing_order is None  # woke: nothing left to explore
+    assert UnitId(1) in result.interrupted_unit_ids
+    assert army.coord == Coord(0, 0)
+
+
+def test_two_explorers_claim_different_frontier_cells(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    from empire.core.standing_order import Explore
+
+    m = _land_map(4, 2)
+    a = Army(UnitId(1), p1, Coord(0, 0))
+    b = Army(UnitId(2), p1, Coord(0, 1))
+    m.place_unit(a, Coord(0, 0))
+    m.place_unit(b, Coord(0, 1))
+    a.standing_order = Explore()
+    b.standing_order = Explore()
+    _see(p1, [Coord(x, y) for x in range(3) for y in range(2)])  # col 3 unseen
+
+    for _ in range(2):
+        apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    # Frontier is (2,0) and (2,1); the claims set kept them off each other.
+    assert {a.coord, b.coord} == {Coord(2, 0), Coord(2, 1)}
+
+
+def test_explore_fighter_wakes_at_bingo_fuel(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """A fighter never explores itself into a crash: it wakes when remaining
+    fuel just covers the flight home to the nearest own city."""
+    from empire.core.city import City
+    from empire.core.identity import CityId
+    from empire.core.standing_order import Explore
+    from empire.core.unit import Fighter
+
+    m = _land_map(8, 1)
+    city = City(id=CityId(1), coord=Coord(0, 0), owner=p1)
+    m._tiles[Coord(0, 0)] = type(m.tile(Coord(0, 0)))(  # own base at (0,0)
+        coord=Coord(0, 0), terrain=m.tile(Coord(0, 0)).terrain, city=city
+    )
+    jet = Fighter(UnitId(1), p1, Coord(0, 0))
+    jet.range = 3  # tiny tank
+    m.place_unit(jet, Coord(0, 0))
+    jet.standing_order = Explore()
+    _see(p1, [Coord(x, 0) for x in range(6)])  # frontier at (5,0), far away
+
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert jet.standing_order is None  # woke at bingo, not crashed
+    assert m.unit_by_id(UnitId(1)) is not None  # alive
+    # It can still get home: fuel >= distance back to (0,0).
+    assert jet.range >= jet.coord.chebyshev_to(Coord(0, 0))

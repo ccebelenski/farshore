@@ -827,3 +827,41 @@ async def test_patrol_route_sets_looping_cycle() -> None:
         assert order.loop is True
         assert order.original == (mid, b, mid, a)  # full round trip
         assert order.remaining == (b, mid, a)  # first cell already stepped
+
+
+async def test_explore_verb_sets_order_and_skips_cycle() -> None:
+    """'v' puts the unit into Explore; it leaves the order queue (the engine
+    drives it until it wakes)."""
+    from empire.core.identity import UnitId
+    from empire.core.standing_order import Explore
+    from empire.core.unit import Army
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app()
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    capital = next(c for c in game.map.cities() if c.owner is human)
+    # A land cell next to the capital for the scout.
+    from empire.core.tile import TerrainKind
+    spot = next(
+        c for c in capital.coord.neighbors()
+        if game.map.in_bounds(c)
+        and game.map.terrain_at(c) is TerrainKind.LAND
+        and not game.map.units_at(c)
+    )
+    scout = Army(UnitId(970), human, spot)
+    game.map.place_unit(scout, spot)
+
+    async with app.run_test(size=(60, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        screen._selected_unit_id = scout.id  # pyright: ignore[reportPrivateUsage]
+        screen.action_explore()
+        await pilot.pause()
+        assert isinstance(scout.standing_order, Explore)
+        needing = screen._units_needing_orders(  # pyright: ignore[reportPrivateUsage]
+            include_handled=True
+        )
+        assert scout.id not in {u.id for u in needing}

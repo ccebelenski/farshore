@@ -21,7 +21,7 @@ from empire.core.coord import Coord, Direction
 from empire.core.identity import CityId, UnitId
 from empire.core.map import Map
 from empire.core.ruleset import RuleSet
-from empire.core.standing_order import Heading, Loading, PatrolPath, Sentry
+from empire.core.standing_order import Explore, Heading, Loading, PatrolPath, Sentry
 from empire.core.tile import TerrainKind
 from empire.core.unit import UNIT_REGISTRY, Unit, UnitKind
 
@@ -1153,6 +1153,199 @@ def load_adjacent_cargo(carrier: Unit, real_map: Map) -> list[UnitId]:
     return loaded
 
 
+# -----------------------------------------------------------------------------
+# Explore: autonomous fog-frontier scouting (standing order)
+# -----------------------------------------------------------------------------
+
+_LANDLIKE = frozenset({TerrainKind.LAND, TerrainKind.CITY})
+
+
+def _known_terrain(player: Player, real_map: Map, c: Coord) -> TerrainKind | None:
+    """The terrain `player` knows at `c` (live if visible, stale if
+    remembered), or None if never seen. Explore plans fog-honestly: it never
+    routes through cells the player has no knowledge of."""
+    if c in player.view.visible:
+        return real_map.terrain_at(c)
+    rt = player.view.remembered.get(c)
+    return rt.terrain if rt is not None else None
+
+
+def _explore_passable(unit: Unit, player: Player, real_map: Map, c: Coord) -> bool:
+    """May `unit` PLAN a route through `c`? Known terrain the unit can occupy;
+    non-own cities are excluded (explore never auto-attacks or auto-captures —
+    engaging is always the player's deliberate step)."""
+    t = _known_terrain(player, real_map, c)
+    if t is None or t not in type(unit).legal_terrain:
+        return False
+    if t is TerrainKind.CITY:
+        if c in player.view.visible:
+            city = real_map.tile(c).city
+            return city is not None and city.owner is player
+        rt = player.view.remembered.get(c)
+        return rt is not None and rt.last_city_owner == player.id
+    return True
+
+
+def _is_shore(player: Player, real_map: Map, c: Coord) -> bool:
+    """`c` sits on a known land/water boundary — the coastline explorers
+    prioritize (finding the shape of the world beats inland filler)."""
+    t = _known_terrain(player, real_map, c)
+    if t is None:
+        return False
+    mine_land = t in _LANDLIKE
+    for nb in c.neighbors():
+        if not real_map.in_bounds(nb):
+            continue
+        nt = _known_terrain(player, real_map, nb)
+        if nt is None:
+            continue
+        if (nt in _LANDLIKE) != mine_land:
+            return True
+    return False
+
+
+def _explore_flood(
+    unit: Unit, player: Player, real_map: Map
+) -> tuple[dict[Coord, int], dict[Coord, Coord]]:
+    """BFS over the unit's known-passable cells from its position, avoiding
+    cells occupied by visible units (can't finish a move on/through them).
+    Returns (distance, parent) maps. Deterministic: neighbors expand in
+    Direction-enum order. (Local BFS — core must not import pathfinding.)"""
+    from collections import deque
+
+    dist: dict[Coord, int] = {unit.coord: 0}
+    parent: dict[Coord, Coord] = {}
+    q: deque[Coord] = deque((unit.coord,))
+    while q:
+        cur = q.popleft()
+        for nb in cur.neighbors():
+            if nb in dist or not real_map.in_bounds(nb):
+                continue
+            if not _explore_passable(unit, player, real_map, nb):
+                continue
+            if nb in player.view.visible and real_map.units_at(nb):
+                continue  # occupied (own or seen enemy) — route around
+            dist[nb] = dist[cur] + 1
+            parent[nb] = cur
+            q.append(nb)
+    return dist, parent
+
+
+def _pick_explore_target(
+    unit: Unit,
+    player: Player,
+    real_map: Map,
+    claims: set[Coord],
+    dist: dict[Coord, int],
+) -> Coord | None:
+    """The nearest reachable, unclaimed FRONTIER cell — known, passable, with
+    an in-bounds neighbor never seen. Shore frontier takes absolute priority
+    (spec of the Explore order: reveal coastline first). Ties break (dist, y,
+    x) for determinism."""
+    seen = player.view.seen
+    best: tuple[bool, int, int, int] | None = None
+    best_cell: Coord | None = None
+    for c, d in dist.items():
+        if d == 0 or c in claims:
+            continue
+        if not any(
+            real_map.in_bounds(nb) and not seen(nb) for nb in c.neighbors()
+        ):
+            continue  # not frontier
+        key = (not _is_shore(player, real_map, c), d, c.y, c.x)
+        if best is None or key < best:
+            best, best_cell = key, c
+    return best_cell
+
+
+def _fighter_at_bingo(unit: Unit, player: Player, real_map: Map, at: Coord) -> int:
+    """Distance from `at` to the nearest own city (air movement = chebyshev),
+    or a huge number if none. A fighter wakes from Explore at BINGO FUEL —
+    just enough left to fly home — instead of scouting itself into a crash."""
+    dists = [
+        at.chebyshev_to(c.coord)
+        for c in real_map.cities()
+        if c.owner is player
+    ]
+    return min(dists) if dists else 10**9
+
+
+def _run_explore(
+    unit: Unit,
+    player: Player,
+    real_map: Map,
+    rules: RuleSet,
+    combat_resolver: CombatResolverProtocol,
+    rng: random.Random,
+    claims: set[Coord],
+) -> tuple[bool, bool]:
+    """One turn of the Explore order for `unit`: walk up to its movement
+    budget toward the chosen frontier target, with the standard standing-order
+    guards per step. Returns (stepped, woke). Clears the order on wake."""
+    budget = unit.moves_this_turn()
+    stepped = False
+
+    def wake() -> tuple[bool, bool]:
+        unit.standing_order = None
+        return (stepped, True)
+
+    while budget > 0:
+        if (
+            unit.kind is UnitKind.FIGHTER
+            and unit.range <= _fighter_at_bingo(unit, player, real_map, unit.coord) + 1
+        ):
+            return wake()  # bingo fuel: just enough to fly home
+        dist, parent = _explore_flood(unit, player, real_map)
+        target = _pick_explore_target(unit, player, real_map, claims, dist)
+        if target is None:
+            return wake()  # no reachable frontier left — exploration done
+        claims.add(target)
+        # Reconstruct the path start->target (exclusive of start).
+        path: list[Coord] = []
+        cur = target
+        while cur != unit.coord:
+            path.append(cur)
+            cur = parent[cur]
+        path.reverse()
+        for cell in path:
+            if budget <= 0:
+                return (stepped, False)
+            # Standard standing-order guards: never auto-attack, halt at the
+            # edge of a hostile artillery ring (both wake the unit).
+            if step_would_attack(unit, cell, real_map):
+                return wake()
+            if step_would_enter_artillery_zone(unit, cell, real_map, rules):
+                return wake()
+            outcome = execute_unit_path(
+                unit=unit,
+                path=((cell.x, cell.y),),
+                real_map=real_map,
+                rules=rules,
+                combat_resolver=combat_resolver,
+                rng=rng,
+            )
+            if real_map.unit_by_id(unit.id) is None:
+                return (stepped, True)  # died en route (order dies with it)
+            if outcome.last_outcome is not StepOutcome.OK:
+                return wake()  # blocked (stale intel, transient jam): stop
+            stepped = True
+            budget -= 1
+            # Post-step wake triggers: contact or discovery is exactly the
+            # news the explorer was sent out for.
+            if enemy_in_scan_range(unit, real_map) or unseen_city_in_scan(
+                unit, real_map
+            ):
+                return wake()
+            if (
+                unit.kind is UnitKind.FIGHTER
+                and unit.range
+                <= _fighter_at_bingo(unit, player, real_map, unit.coord) + 1
+            ):
+                return wake()
+        # Reached the target with budget left: re-pick and keep going.
+    return (stepped, False)
+
+
 def apply_standing_orders(
     player: Player,
     real_map: Map,
@@ -1181,6 +1374,9 @@ def apply_standing_orders(
     moved: list[UnitId] = []
     interrupted: list[UnitId] = []
     sentried: list[UnitId] = []
+    # Explore coordination: each explorer claims its frontier target for the
+    # turn, so two explorers never chase the same cell.
+    explore_claims: set[Coord] = set()
 
     # Snapshot the list so removals during iteration don't trip us up.
     own_units = [u for u in real_map.board_units() if u.owner is player]
@@ -1188,6 +1384,16 @@ def apply_standing_orders(
     for unit in own_units:
         order = unit.standing_order
         if order is None:
+            continue
+        if isinstance(order, Explore):
+            stepped, woke = _run_explore(
+                unit, player, real_map, rules, combat_resolver, rng,
+                explore_claims,
+            )
+            if stepped:
+                moved.append(unit.id)
+            if woke:
+                interrupted.append(unit.id)
             continue
         if isinstance(order, Loading):
             # A loading dock: hold position and sweep any newly-adjacent cargo

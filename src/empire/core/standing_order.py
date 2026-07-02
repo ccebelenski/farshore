@@ -90,6 +90,20 @@ class PatrolPath:
 
 
 @dataclass(frozen=True, slots=True)
+class Explore:
+    """Autonomously reveal unexplored tiles until woken.
+
+    Carries no payload: the behavior is recomputed each turn (the frontier
+    recedes as tiles get revealed), fog-honestly over KNOWN terrain. Each
+    turn the unit heads for the nearest reachable frontier cell — a known,
+    passable cell adjacent to unexplored — with shore frontier taking
+    priority. Wakes on enemy-in-scan, city discovery, an artillery ring,
+    manually ('w'), or when no reachable frontier remains. Explorers
+    coordinate minimally: each claims its target for the turn so two never
+    chase the same cell."""
+
+
+@dataclass(frozen=True, slots=True)
 class Sentry:
     """The unit holds position and is skipped by auto-cycle."""
 
@@ -107,4 +121,4 @@ class Loading:
     """
 
 
-StandingOrder = Heading | PatrolPath | Sentry | Loading
+StandingOrder = Heading | PatrolPath | Sentry | Loading | Explore
