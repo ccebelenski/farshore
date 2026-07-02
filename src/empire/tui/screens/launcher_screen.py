@@ -123,10 +123,15 @@ class LauncherScreen(Screen[None]):
 
     def __init__(self, launcher: GameLauncher | None = None) -> None:
         super().__init__()
+        import random as _random
+
         self._launcher = launcher if launcher is not None else GameLauncher()
         self._page: _Page = _Page.MAIN
         self._cursor: int = 0
-        self._config: GameConfig = GameConfig()
+        # A fresh random seed per launcher visit — otherwise every
+        # menu-started game silently plays the same seed-0 map. The SETUP
+        # page shows it; left/right nudge, space rerolls.
+        self._config: GameConfig = GameConfig(seed=_random.randrange(10_000))
         self._saves: list[Path] = []
         self._load_opponent: int = 0  # index into OPPONENTS for restores
         self._notice: str = ""
