@@ -10,9 +10,8 @@ Mid-turn revision returns an empty `UnitMove` (no further movement *this
 turn*). This is **not** the same as putting the unit on persistent
 sentry — surprise must never cause a unit to enter sentry. If anything,
 a sentried unit hit by a surprise should auto-*wake* so the player can
-react. Persistent-sentry mechanics land in Phase 10.6; until then,
-revise_move just halts the current path and the next turn's planner
-picks up.
+react. `revise_move` just halts the current path; the next turn's
+planner picks up.
 """
 
 from __future__ import annotations

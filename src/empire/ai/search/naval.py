@@ -1,11 +1,11 @@
-"""Naval behaviors for `PlanFollower` (Phase 15.9).
+"""Naval behaviors for `PlanFollower`.
 
 Two jobs, both stateless (re-derived from the board each turn, like the land
 follower):
 
 - **Sea scouting** — route idle ships toward the nearest sea frontier so the
   AI discovers other landmasses (the value-of-information work the search
-  can't do; see the phase plan).
+  can't do).
 - **Amphibious operations** — for each `Role.INVADE` objective, orchestrate a
   transport + cargo armies: loiter at the embark port while armies board,
   then sail to the target's coast and storm ashore (an `UnloadOrder`).

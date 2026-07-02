@@ -758,9 +758,6 @@ def _fire_artillery(
     Being shelled reveals the gun: the firing city is marked seen for the
     victim's owner HERE — the single chokepoint every fire path funnels
     through — so no caller can shell a unit without showing it what fired.
-    (This reveal used to be duplicated per call site and was silently missing
-    from two of the five, so a unit could die to a city it never saw on the
-    map — the "hit from nowhere" playtest bug.)
     """
     if victim.owner is not None:
         victim.owner.view.visible.add(city.coord)
@@ -811,9 +808,7 @@ def resolve_city_artillery(
     """One coordinated round of city artillery (spec §4.7): every city with a
     ready shot fires one salvo at its highest-priority in-range hostile unit.
 
-    The SINGLE entry point for both firing occasions, replacing the old
-    reactive per-step overwatch (which fired *before* the mover scanned, so it
-    could hit from an undiscovered city):
+    The SINGLE entry point for both firing occasions:
 
     - `target_owner=None` — the symmetric opening barrage: a city may shell
       the most dangerous enemy of any player, before anyone moves.
@@ -1271,9 +1266,9 @@ def apply_standing_orders(
 
         # Step succeeded. Post-step wake triggers — autonomous movement stops
         # on news the player must react to: an enemy in scan, or discovering a
-        # city. (Entering a hostile artillery zone is handled BEFORE the step
-        # now — the order halts at the edge — so there's no post-step zone
-        # wake.) Applies to every unit kind (armies, fighters, ships alike).
+        # city. (Entering a hostile artillery zone is handled BEFORE the step —
+        # the order halts at the edge — so there's no post-step zone wake.)
+        # Applies to every unit kind (armies, fighters, ships alike).
         if (
             enemy_in_scan_range(unit, real_map)
             or unseen_city_in_scan(unit, real_map)

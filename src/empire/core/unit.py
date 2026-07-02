@@ -1,8 +1,8 @@
 """Unit hierarchy: the `Unit` ABC, `UnitKind` enum, nine concrete subclasses,
 and a `UNIT_REGISTRY` mapping kind to class.
 
-Phase-2 scope: structural only. No movement rules, no combat, no damage
-scaling logic — those land in Phase 8. The class-level attributes are our
+Structural only: movement, combat and damage-scaling rules live in
+`empire.core.engine` / `empire.combat`. The class-level attributes are our
 v1 design choices (see `planning/01-game-rules-spec.md` §2) and are subject
 to playtest tuning.
 
@@ -150,8 +150,8 @@ class Unit(ABC):
 
         Returns a string of unit-kind characters in order from "most prefers
         to fight" to "least prefers to fight." Combat strength against each
-        target derives from where the target sits in this ordering. Specific
-        formulas land in Phase 6.
+        target derives from where the target sits in this ordering (see
+        `empire.combat`).
         """
 
     def __repr__(self) -> str:

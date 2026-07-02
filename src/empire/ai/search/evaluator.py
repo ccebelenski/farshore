@@ -11,7 +11,7 @@ Terms, in dominance order (see `planning/03-ai-design.md` §9.1):
   of an army — without this term the search can't see value building up.
 - **Material**: armies on the board.
 
-- **Exploration / information** (Phase 15.9+ §10.2): seen area is rewarded —
+- **Exploration / information** (§10.2): seen area is rewarded —
   land worth more than sea (cities live on land; open ocean is the low-prior
   side of the frontier). This *replaces* the original perimeter-penalty `intel`
   term, which we measured to be counterproductive: a perimeter count *rises* as
@@ -21,7 +21,7 @@ Terms, in dominance order (see `planning/03-ai-design.md` §9.1):
   in exploration and one-sided (only our own fog; not zero-sum). The legacy
   `intel` weight defaults to 0; `_frontier_penalty` is kept for comparison only.
 
-- **Opportunity** (Phase 15.9+ §10.2): a known, unowned, *reachable* city carries
+- **Opportunity** (§10.2): a known, unowned, *reachable* city carries
   a distance-discounted fraction of city value — so discovering an overseas
   landmass is a value *spike* (not the penalty the old surface produced) and
   bringing force toward it is a value *ramp* the short-horizon search can climb
@@ -30,7 +30,7 @@ Terms, in dominance order (see `planning/03-ai-design.md` §9.1):
   plus the crossing. Always kept below `city` so capturing a prize strictly beats
   loitering beside it. See `_opportunity_and_exploration`.
 
-- **Holdability / local force balance** (Phase 15.9+ §10): a city's worth is
+- **Holdability / local force balance** (§10): a city's worth is
   conditioned on the armies in its neighborhood — an own city outnumbered
   locally is discounted (recapture risk), and own force massed at an enemy/
   neutral city is credited (a campaign-in-progress is worth something before
@@ -75,7 +75,7 @@ class EvalWeights:
     city: float = 100.0
     army: float = 10.0
     production: float = 8.0  # one *completed* build ≈ most of an army
-    # Legacy perimeter-penalty (Phase 15.9). Measured counterproductive — it
+    # Legacy perimeter-penalty. Measured counterproductive — it
     # penalised scouting and never self-flattened on a sea-ringed continent — so
     # it is disabled (0.0) and superseded by the exploration term below. Kept as
     # a weight so the old behavior can still be A/B'd in the curve simulator.
@@ -109,7 +109,7 @@ class EvalWeights:
     # production to a hull is the valued act). Below `city` even fully loaded
     # (×1.3 max) so capturing is always a further gain. Odds-scaling deferred.
     invade_potential: float = 60.0
-    # Holdability / local force balance (Phase 15.9+ §10): conditions a city's
+    # Holdability / local force balance (§10): conditions a city's
     # worth on whether the local situation supports keeping (own) or taking
     # (enemy/neutral) it. `recapture_risk` discounts an own city per net enemy
     # army in its neighborhood — so a beachhead taken while outnumbered reads as

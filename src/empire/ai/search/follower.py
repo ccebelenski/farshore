@@ -10,7 +10,7 @@ objectives take their `strength` nearest armies in plan-priority order
 Recomputing — rather than remembering — is what keeps an objective-level
 plan executable over a playout horizon where units die and new ones appear.
 
-Movement discipline under city artillery (both measured in Phase 15.8 —
+Movement discipline under city artillery (both measured —
 71% of armies lost to artillery died with no friendly within 3 cells, and
 the survivors were bleeding on *transit* through unrelated cities' rings):
 
@@ -360,7 +360,7 @@ class PlanFollower:
             return self._advance(unit, target, raw_field, view)
         # No frontier at all (late game, board explored): under artillery
         # rules, rally behind the nearest active assault instead of freezing
-        # in place — the Phase 15.8 stall trace showed unassigned armies
+        # in place — otherwise unassigned armies stand
         # standing as statues at distance 6 while 3-army fists ground
         # themselves on the gauntlet; reserves massed at the ring make the
         # next re-assignment instant. WITHOUT artillery there is nothing to

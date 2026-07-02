@@ -1,9 +1,8 @@
 """`Map` (the authoritative grid) plus `ViewMap` and friends (per-player fog).
 
-Phase-2 scope: structural plus the spatial-index discipline. `Map.move_unit`
-maintains the spatial index but does *not* validate against `RuleSet`
-(terrain legality, occupancy, etc.) — that lands in Phase 8. `ViewMap` is
-naive (full visibility) for now; real fog-of-war logic lands in Phase 8.
+Structural plus the spatial-index discipline: `Map.move_unit` maintains
+the spatial index but does *not* validate against `RuleSet` (terrain
+legality, occupancy, etc.) — legality is the engine's job.
 """
 
 from __future__ import annotations
@@ -60,9 +59,8 @@ class ViewMap:
       - `remembered`: coordinates the player has seen at some past turn,
         with stale snapshot data.
 
-    `seen()` reports whether a coord is in either set. Population of these
-    sets via scan logic (per-unit scan radii, city scan, satellite vision)
-    lands in Phase 8; `update_from_scan()` is a stub until then.
+    `seen()` reports whether a coord is in either set; the engine's scan
+    phase populates them via `update_from_scan()`.
     """
 
     def __init__(self) -> None:
@@ -93,8 +91,8 @@ class ViewMap:
         # and from there into AI tie-breaks; set iteration order depends on
         # the set's memory history, which a save/clone round-trip cannot
         # reproduce. Canonical order is what makes a loaded or cloned game
-        # replay the original bit-for-bit (a Phase-15.8 forward-model
-        # requirement; see tests/empire/ai/search/test_playout.py).
+        # replay the original bit-for-bit (a forward-model requirement;
+        # see tests/empire/ai/search/test_playout.py).
         for c in sorted(self.visible - new_visible, key=lambda c: (c.y, c.x)):
             tile = real_map.tile(c)
             unit_snapshots: list[UnitSnapshot] = [
@@ -124,6 +122,7 @@ class ViewMap:
 
         self.visible = new_visible
 
+
 # -----------------------------------------------------------------------------
 # Map: the authoritative grid + spatial index
 # -----------------------------------------------------------------------------
@@ -137,8 +136,8 @@ class Map:
     is the sole writer; `Unit.coord` is the canonical source of truth for
     a unit's position, mutated only via this class's methods.
 
-    Phase 2: `place_unit / move_unit / remove_unit` maintain the index but do
-    not validate against `RuleSet`. Phase 8 adds rule validation.
+    `place_unit / move_unit / remove_unit` maintain the index but do not
+    validate against `RuleSet` — legality is the engine's job.
     """
 
     def __init__(self, width: int, height: int, tiles: dict[Coord, Tile]) -> None:
@@ -235,7 +234,7 @@ class Map:
         u.cargo.clear()
 
     def move_unit(self, u: Unit, to: Coord) -> None:
-        """Move a unit from its current coord to `to`. No rule validation in Phase 2.
+        """Move a unit from its current coord to `to`. No rule validation here.
 
         A carrier drags its aboard cargo along — their coordinates track the
         carrier so save/load and unload-placement stay consistent (cargo is

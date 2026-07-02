@@ -1,4 +1,4 @@
-"""`SearchAI`: plan-space lookahead (Phase 15.8, design §9 of 03-ai-design).
+"""`SearchAI`: plan-space lookahead (design §9 of 03-ai-design).
 
 Each turn, rolling horizon:
 
@@ -44,7 +44,7 @@ DEFAULT_SAMPLES = 3
 _SAMPLE_STRIDE = 104_729
 # A challenger must beat the incumbent plan's score by this much to displace
 # it (≈ one army's worth). Without it, sampling noise flips near-tied plans
-# every turn — the Phase 15.8 stall trace showed assault strength oscillating
+# every turn — without it, assault strength oscillates
 # 3↔5 each turn, reshuffling fist membership so no storm ever cohered.
 SWITCH_MARGIN = 10.0
 # Investment-scaled commitment stickiness (§10): a campaign part-way through a

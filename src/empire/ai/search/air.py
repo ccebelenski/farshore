@@ -1,4 +1,4 @@
-"""Air behaviors for `PlanFollower` (Phase 15.9, air half).
+"""Air behaviors for `PlanFollower`.
 
 Fighters are fast (speed 8), far-seeing (scan 5) and fly over anything (land,
 water, city), which makes them the AI's best scouts — and, opportunistically,

@@ -18,7 +18,7 @@ class EventBus:
 
     Handlers run in subscription order on the publishing thread. There is
     no async dispatch, no priority, and no error isolation: an exception in
-    a handler propagates to the publisher. Phase-4 scope: keep it simple
+    a handler propagates to the publisher. Kept simple
     and predictable; if we need async or isolation later, swap in a
     different implementation behind the same Protocol.
 

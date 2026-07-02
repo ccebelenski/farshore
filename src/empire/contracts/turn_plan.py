@@ -95,8 +95,7 @@ class TurnPlan:
 
     The engine validates and applies the plan; ill-formed plans (unit that
     doesn't exist, target city not owned, etc.) are reported back so the AI
-    can be improved. Phase 3 ships the data type; the engine that consumes
-    it lands in Phase 8.
+    can be improved.
     """
 
     production_orders: tuple[ProductionOrder, ...] = ()

@@ -1,8 +1,7 @@
 """City and its production state.
 
-Phase-2 scope: structural only. `ProductionState.tick()` updates the
-accumulated work but the actual unit-emission and production-ticking-during-
-turn-phase logic lands in Phase 8 (see `planning/05-implementation-plan.md`).
+`ProductionState` tracks accumulated work; the unit-emission and
+turn-phase glue lives in `empire.core.engine` (`run_production_tick`).
 """
 
 from __future__ import annotations
@@ -43,8 +42,7 @@ class DefaultOrder:
 class ProductionState:
     """Tracks what a city is building and how much work is accumulated.
 
-    The classes that mutate this state live in this module's package; the
-    actual turn-phase glue lands in Phase 8.
+    The turn-phase glue that drives it lives in `empire.core.engine`.
     """
 
     def __init__(self, building: UnitKind | None = None, work: int = 0) -> None:

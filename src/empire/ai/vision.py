@@ -29,7 +29,7 @@ def frontier_cells(view: WorldView) -> frozenset[Coord]:
 def sea_frontier_cells(view: WorldView) -> frozenset[Coord]:
     """Sea frontier: seen WATER cells with at least one unseen on-board
     8-neighbor — where a ship sails to reveal more of the map (and, by the
-    Phase-15.9 value gradient, the lower-prior side of the frontier: open
+    Value gradient, the lower-prior side of the frontier: open
     ocean rather than land likely to hold cities)."""
     return _frontier(view, want_water=True)
 

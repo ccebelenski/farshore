@@ -53,11 +53,11 @@ _UNSEEN = " "
 # Terrain uses explicit truecolor, NOT named ANSI colors: terminal themes
 # remap ANSI freely ("blue" often renders violet, "green" teal), which made
 # water/land ambiguous to the eye. Water = unmistakable sea blue, land =
-# light sandy brown (user playtest note, 2026-06-12).
+# light sandy brown.
 #
-# Remembered (fogged) terrain keeps its HUE, just dimmed — a shared
-# bright_black made fogged land and water indistinguishable (user playtest note,
-# 2026-07-02). Dim sand vs dim sea blue stays legible while still reading as fog.
+# Remembered (fogged) terrain keeps its HUE, just dimmed — a shared grey
+# made fogged land and water indistinguishable. Dim sand vs dim sea blue
+# stays legible while still reading as fog.
 _STYLE_LAND_VISIBLE = Style(color="#C8A96E")
 _STYLE_LAND_REMEMBERED = Style(color="#6E5C3C")  # dim sand
 _STYLE_WATER_VISIBLE = Style(color="#2E86E8")
@@ -71,8 +71,8 @@ _STYLE_OWN_UNIT = Style(color="cyan", bold=True)
 _STYLE_ENEMY_UNIT = Style(color="red", bold=True)
 
 # Hostile-artillery danger overlay: a dark-red background tinge on visible
-# cells inside a discovered hostile city's gun range (playtest request —
-# the player needs to see the gauntlet to plan the storm).
+# cells inside a discovered hostile city's gun range —
+# the player needs to see the gauntlet to plan the storm.
 _STYLE_DANGER_BG = Style(bgcolor="#4A1212")
 
 # Cursor tint by mode. Reverse-video so the underlying char stays readable.

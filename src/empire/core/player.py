@@ -1,7 +1,7 @@
 """Player: a participant in the game (human or AI).
 
-Phase-2 scope: structural only. `Player.cities()` / `Player.units()`
-convenience queries land in Phase 4 (when `Game` exists to ask).
+Structural only — ownership queries live on `Game`/`Map`, which hold
+the collections.
 """
 
 from __future__ import annotations

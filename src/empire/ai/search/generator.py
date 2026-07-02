@@ -1,4 +1,4 @@
-"""`CandidateGenerator`: the plausible plans `SearchAI` evaluates each turn.
+"""`CandidateGenerator`: the plausible plans the search AIs evaluate each turn.
 
 The generator's job is breadth, not judgment — propose every course of
 action a competent player might consider and let the playouts price them.
@@ -115,10 +115,9 @@ class CandidateGenerator:
         if not targets:
             # No KNOWN land target. Two cases that must NOT be conflated:
             #   - home continent still has unexplored land → keep scouting it on
-            #     foot to find the enemy at all (the original regression: this
-            #     branch jumped straight to naval/RESERVE, so the AI never
-            #     explored home and turtled to defeat — empty `targets` early
-            #     means UNEXPLORED, not "home won");
+            #     foot to find the enemy at all — do NOT jump straight to
+            #     naval/RESERVE here: empty `targets` early means UNEXPLORED,
+            #     not "home won" (skipping home scouting turtles the AI);
             #   - home is fully explored → drop SCOUT so naval/air projection
             #     takes over (offering SCOUT here lets it stick via hysteresis
             #     and crowd out the ships, which stalls projection — navy=0).
@@ -160,10 +159,10 @@ class CandidateGenerator:
             )
 
         # All-out: a fist at every known target at once. The close-out plan —
-        # the Phase 15.8 stall autopsy found cap-outs were mostly *crushing*
-        # endgames grinding targets one fist at a time while 20+ armies sat
-        # in reserve. Playouts price it: chosen when force is overwhelming,
-        # rejected when spreading thin would lose the fights.
+        # capped-out games are mostly *crushing* endgames grinding targets one
+        # fist at a time while 20+ armies sit in reserve. Playouts price it:
+        # chosen when force is overwhelming, rejected when spreading thin
+        # would lose the fights.
         if len(targets) >= 3:
             plans.append(
                 Plan(
@@ -233,7 +232,7 @@ class CandidateGenerator:
     def _fist_size(rules: RuleSet) -> int:
         """Rule-derived assault strength: under city artillery the city fires
         at most `range` times on a direct approach, so `range + 1` armies
-        guarantee one lands (Phase 15.7's `_fortified_fist` insight)."""
+        guarantee one lands."""
         if rules.city_artillery_range > 0:
             return rules.city_artillery_range + 1
         return 3

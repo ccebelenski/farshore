@@ -6,7 +6,6 @@ subscription-management infrastructure (`EventBus`) lives in
 `empire.events.bus`; subscribers import event types from here and the bus
 from there.
 
-Phase 4 declares the events; Phase 8 actually emits most of them.
 """
 
 from __future__ import annotations

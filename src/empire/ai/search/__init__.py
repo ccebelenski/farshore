@@ -1,4 +1,4 @@
-"""`SearchAI` (Phase 15.8): plan-space lookahead.
+"""`SearchAI`: plan-space lookahead.
 
 Instead of a hand-designed doctrine, the AI searches a small space of
 candidate plans each turn, scoring each by cloning the game and simulating

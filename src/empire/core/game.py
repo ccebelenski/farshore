@@ -1,16 +1,13 @@
 """`Game`: the root aggregate. Holds the whole game state.
 
-Phase-4 scope:
 - Construction with `RuleSet`, `Map`, players, optional seed, optional bus.
 - `attach_controller` / `controllers` dict for AI wiring (controllers are
   externally injected; they do *not* round-trip through save/load — see
   `empire.persistence.schema_v1`).
-- `run_turn()` delegates to a `TurnManager` whose phase methods are empty
-  placeholders; Phase 8 fills them in with the real production / movement /
-  combat / fog logic.
-- `is_over()` / `winner()` use the spec's "zero cities" rule
-  (`planning/01-game-rules-spec.md` §8). Phase 8 refines the end-of-turn
-  check; the predicate itself is correct as written.
+- `run_turn()` delegates to a `TurnManager` that runs the production /
+  movement / combat / fog phases for every player.
+- `is_over()` / `winner()` implement the spec's "zero cities" rule
+  (`planning/01-game-rules-spec.md` §8).
 
 Game lives in `core` per the planning layout, so it must not import from
 `empire.events` (dep matrix). It talks to the bus via the
@@ -301,10 +298,8 @@ class TurnManager:
         its support limit (spec §5.4).
 
         Runs at the END of the player's own segment — a conquering army
-        disbands into the city it just took before any opponent acts (it
-        used to survive a full enemy turn as a corpse-shield, and the TUI
-        would even offer it orders that then evaporated; playtest bug,
-        2026-06-12). `exempt` carries this segment's freshly-produced units:
+        disbands into the city it just took before any opponent acts.
+        `exempt` carries this segment's freshly-produced units:
         their owner plans before production runs, so they get until next
         turn-end to march out.
         """
@@ -346,9 +341,8 @@ class TurnManager:
             combat_resolver=self.game.combat_resolver,
             rng=self.game.rng,
         )
-        # Artillery no longer fires reactively mid-move; hostile cities shell
-        # this player's units in the deferred `_city_artillery_phase` after
-        # the scan, so there is nothing to publish here.
+        # City artillery fires in the deferred `_city_artillery_phase`
+        # after the scan — nothing to publish here.
         for uid in result.moved_unit_ids:
             unit = self.game.map.unit_by_id(uid)
             if unit is None:

@@ -138,7 +138,7 @@ class HeightFieldMapGenerator(MapGenerator):
 
         Tiny landmasses (1-cell islands, few-cell shoals) aren't meaningful
         gameplay terrain — they can't host meaningful city play and just
-        clutter the map. Per playtest feedback, we strip them at the
+        clutter the map. We strip them at the
         terrain stage so city placement and naval analysis only see real
         landmasses.
         """

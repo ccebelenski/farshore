@@ -17,7 +17,7 @@ class PathCostProfile:
     """Per-terrain costs. `None` means impassable for this unit.
 
     `danger_weight` is multiplied by a caller-supplied threat value at each
-    cell and added to that cell's terrain cost. Phase 7 lays the wiring;
+    cell and added to that cell's terrain cost. The wiring exists;
     actual threat lookups come from `IntelService` in later phases.
     """
 

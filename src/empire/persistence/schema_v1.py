@@ -144,8 +144,8 @@ class V1Serializer:
             transport_escort_required_for_unload=bool(
                 d["transport_escort_required_for_unload"]
             ),
-            # Artillery fields landed in Phase 15.6, after early saves were
-            # written; default to the inert/classic values when absent.
+            # Artillery fields are absent from older saves; default to
+            # the inert/classic values.
             city_artillery_range=int(d.get("city_artillery_range", 0)),
             city_artillery_hit_prob=float(d.get("city_artillery_hit_prob", 0.5)),
             city_artillery_pin_prob=float(d.get("city_artillery_pin_prob", 0.5)),

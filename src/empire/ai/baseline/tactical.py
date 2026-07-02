@@ -5,13 +5,11 @@ and gets back the cells the unit intends to enter this turn (1-step path
 for ARMY/speed-1 units). Per-kind logic is split into dedicated methods so
 weight tables and heuristics stay scoped to one unit type at a time.
 
-Phase 9 ships the ARMY decision in full. Other unit kinds fall through to
-`_sentry_decision` — BaselineAI's starting players only build Army, and
-adding Fighter/Patrol/etc. is a follow-up that doesn't require rewriting
-this scaffold.
+The ARMY decision is the real one. Other unit kinds fall through to
+`_sentry_decision` — BaselineAI's players only build Army.
 
-Performance shape (Phase 15.8 Step 0 — BaselineAI is also `SearchAI`'s
-opponent model, so its planning cost bounds every playout): one BFS
+Performance shape (BaselineAI is also the search AIs' opponent model, so
+its planning cost bounds every playout): one BFS
 `DistanceField` flood per unit answers all of that unit's objective
 distances at once, and the winner's path is reconstructed by descending the
 same field — no per-(unit, target) searches. Distances (hence scores and the
@@ -80,7 +78,7 @@ class BaselineTactical:
     def decide(self, unit: Unit, view: WorldView) -> UnitMove:
         if unit.kind is UnitKind.ARMY:
             return self._army_decide(unit, view)
-        # Other unit kinds: stay put. They aren't produced under Phase 9's
+        # Other unit kinds: stay put. They aren't produced under the baseline's
         # ARMY-only production policy, but the dispatcher must remain total.
         return self._sentry(unit)
 

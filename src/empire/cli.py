@@ -223,8 +223,8 @@ def _launch_tui(
 ) -> None:
     """Build a game per the flags, attach controllers, run `EmpireApp`.
 
-    `brawl` puts both capitals on one continent (the Phase-15.5 land-brawl
-    setup) — the meaningful way to playtest AIs on a shared continent.
+    `brawl` puts both capitals on one continent — the meaningful way to
+    playtest AIs on a shared continent.
     """
     from empire.ai.baseline import BaselineAI
     from empire.core.engine import refresh_player_view
@@ -396,7 +396,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     validate = subs.add_parser(
         "validate",
-        help="Phase 10 gate: N seeded BaselineAI vs BaselineAI games + save/load check",
+        help="N seeded BaselineAI vs BaselineAI games + save/load check",
     )
     validate.add_argument(
         "--profile",

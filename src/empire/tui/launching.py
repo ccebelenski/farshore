@@ -27,9 +27,8 @@ from empire.core.ruleset import (
 from empire.persistence.save_manager import SaveManager
 
 # The two shipped opponents: the classic greedy "horde" (BaselineAI) and the
-# stateful multi-focus "portfolio" (PortfolioAI). The old single-plan SearchAI and
-# the StrategicAI line are retired as playable opponents — the portfolio supersedes
-# them (planning/07). "baseline" stays the internal key for the horde.
+# stateful multi-focus "portfolio" (PortfolioAI). "baseline" stays the internal
+# key for the horde.
 OPPONENTS: tuple[str, ...] = ("baseline", "portfolio")
 PROFILE_NAMES: tuple[str, ...] = ("SMALL", "STANDARD", "LARGE")
 

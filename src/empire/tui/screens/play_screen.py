@@ -189,8 +189,8 @@ class PlayScreen(Screen[None]):
         # Set of unit IDs the auto-cycle should skip this turn (moved out,
         # dead, loaded, sentried, or skipped). A sentry/skip is reversible
         # until end-turn and does NOT consume the unit's move: waking or
-        # revisiting it restores its full move for this turn (playtest model,
-        # 2026-06). Auto-end still fires once the queue empties.
+        # revisiting it restores its full move for this turn. Auto-end still
+        # fires once the queue empties.
         self._handled: set[UnitId] = set()
         # Next direction key triggers a heading-set instead of stepping.
         self._awaiting_heading: bool = False
@@ -311,7 +311,7 @@ class PlayScreen(Screen[None]):
         # Taking direct control revokes a standing order — live (set on a
         # previous turn) or pending (set this turn): without this, a
         # manually-stepped unit with a heading/go-to would move AGAIN in the
-        # engine's standing-orders phase (playtest: "free move!").
+        # engine's standing-orders phase — a free extra move.
         if outcome.steps_taken > 0 and not unit_died:
             had_order = (
                 unit.standing_order is not None
@@ -727,8 +727,7 @@ class PlayScreen(Screen[None]):
         """Wake the own unit under the CURSOR (point-and-wake), or the
         selected unit if the cursor isn't on one. Cursor-first is what makes
         waking several units work: move cursor, 'w', move cursor, 'w' — no
-        select step, so the cursor keeps moving (playtest: waking by hovering
-        did nothing, because wake only acted on the selected unit)."""
+        select step, so the cursor keeps moving."""
         unit = next(
             (u for u in self._game.map.units_at(self._cursor) if u.owner is self._human),
             None,
@@ -806,10 +805,8 @@ class PlayScreen(Screen[None]):
         self._refresh_view()
 
     def action_reset_path(self) -> None:
-        """Legacy no-op kept for the `r` binding. Immediate moves can't be
-        rolled back once applied (combat may have resolved). Press `r` is
-        now a hint reminder; we leave the binding in place so muscle
-        memory from path-queueing days doesn't crash."""
+        """No-op kept so the `r` binding doesn't crash: moves are immediate
+        and can't be rolled back once applied (combat may have resolved)."""
         if self._selected_unit_id is None:
             return
         self._hint = "moves are immediate now — no path to reset"
@@ -989,7 +986,7 @@ class PlayScreen(Screen[None]):
                     self._begin_end_turn()
                 else:
                     # Put the player straight onto the unit they declined to
-                    # lose — no hunting for it (playtest note, 2026-06-12).
+                    # lose — no hunting for it.
                     # Refund a skip's forfeited budget: 'n' is a UI gesture,
                     # not a physical act, and they just changed their mind.
                     rescued = doomed[0]
@@ -1028,7 +1025,7 @@ class PlayScreen(Screen[None]):
         # Reset per-turn state. Production stays committed in the city via
         # the engine; we just clear our scratch dicts.
         self._pending_production.clear()
-        self._pending_orders.clear()  # now riding the plan's set_orders
+        self._pending_orders.clear()  # handed off via the plan's set_orders
         self._moves_used.clear()
         self._selected_unit_id = None
         self._handled.clear()

@@ -2,8 +2,8 @@
 
 A `Migration` upgrades a save payload from one schema version to the next.
 The `MIGRATIONS` registry maps `from_version -> Migration` so the loader can
-walk old saves up to current. Phase 4 ships the framework with no actual
-migrations (current schema is v1); Phase 16 hardens this when a v2 lands.
+walk old saves up to current. No migrations exist while v1 is the only
+schema version.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ class Migration:
 
 MIGRATIONS: dict[int, Migration] = {}
 """Keyed by `from_version`. Lookup yields the migration that takes the payload
-to `from_version + 1` (typically). Empty in Phase 4 since v1 is current."""
+to `from_version + 1` (typically). Empty while v1 is current."""
 
 
 def register(migration: Migration) -> None:
