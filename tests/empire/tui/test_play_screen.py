@@ -770,3 +770,60 @@ async def test_disband_cancel_keeps_unit() -> None:
         await pilot.press("n")  # decline
         await pilot.pause()
         assert game.map.unit_by_id(army.id) is army
+
+
+async def test_patrol_route_sets_looping_cycle() -> None:
+    """'t' on a ship + endpoint + Enter: the ship steps out immediately and
+    the pending order is a LOOPING round-trip (start<->endpoint) that the
+    engine shuttles until woken."""
+    from empire.core.coord import Coord
+    from empire.core.identity import UnitId
+    from empire.core.standing_order import PatrolPath
+    from empire.core.tile import TerrainKind
+    from empire.core.unit import Patrol
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app()
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    # Find a 3-cell horizontal water run for the patrol leg.
+    run = None
+    for y in range(game.map.height):
+        for x in range(game.map.width - 2):
+            cells = [Coord(x + i, y) for i in range(3)]
+            if all(
+                game.map.terrain_at(c) is TerrainKind.WATER
+                and game.map.tile(c).on_board
+                for c in cells
+            ):
+                run = cells
+                break
+        if run:
+            break
+    assert run is not None, "map should have a 3-cell water run"
+    a, mid, b = run
+    ship = Patrol(UnitId(960), human, a)
+    game.map.place_unit(ship, a)
+    # Full visibility so the goto/patrol BFS can route over the water.
+    human.view.visible = {
+        Coord(x, y) for x in range(game.map.width) for y in range(game.map.height)
+    }
+
+    async with app.run_test(size=(60, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        screen._selected_unit_id = ship.id  # pyright: ignore[reportPrivateUsage]
+        screen.action_patrol_route()
+        assert screen._awaiting_patrol_target  # pyright: ignore[reportPrivateUsage]
+        screen._cursor = b  # pyright: ignore[reportPrivateUsage]
+        screen.action_confirm()
+        await pilot.pause()
+
+        assert ship.coord == mid  # immediate first step, like go-to
+        order = screen._pending_orders[ship.id]  # pyright: ignore[reportPrivateUsage]
+        assert isinstance(order, PatrolPath)
+        assert order.loop is True
+        assert order.original == (mid, b, mid, a)  # full round trip
+        assert order.remaining == (b, mid, a)  # first cell already stepped

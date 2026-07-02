@@ -327,7 +327,7 @@ def test_round_trip_preserves_standing_orders(tmp_path: Path) -> None:
     battleship.standing_order = PatrolPath(
         remaining=(Coord(2, 0), Coord(2, 1)),
         original=(Coord(2, 0), Coord(2, 1)),
-        reverse_on_end=True,
+        loop=True,
     )
     # Force a third unit onto Sentry to cover that variant. Build one on
     # the fly via SaveManager round-trip — easier to just decorate.
@@ -346,7 +346,7 @@ def test_round_trip_preserves_standing_orders(tmp_path: Path) -> None:
     bs_order = loaded_units[int(battleship.id)].standing_order
     assert isinstance(bs_order, PatrolPath)
     assert bs_order.remaining == (Coord(2, 0), Coord(2, 1))
-    assert bs_order.reverse_on_end is True
+    assert bs_order.loop is True
     assert isinstance(loaded_units[99].standing_order, Sentry)
 
 

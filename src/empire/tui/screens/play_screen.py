@@ -91,6 +91,12 @@ _DIR_KEYS: dict[str, Direction] = {
     "up": Direction.N, "down": Direction.S, "left": Direction.W, "right": Direction.E,
 }
 
+# Unit kinds that can fly a patrol route ('t'): ships only.
+_PATROL_ROUTE_KINDS = frozenset({
+    UnitKind.PATROL, UnitKind.DESTROYER, UnitKind.SUBMARINE,
+    UnitKind.TRANSPORT, UnitKind.CARRIER, UnitKind.BATTLESHIP,
+})
+
 # GOTO routes around discovered hostile-city gun rings: a danger cell costs this
 # much extra, so the path detours up to ~this many cells to skip one — but it's
 # finite, so a goal in/behind the ring is still reachable (intended assault).
@@ -123,6 +129,7 @@ class PlayScreen(Screen[None]):
         Binding("u", "select_unit", "select unit"),
         Binding("d", "set_heading", "set heading"),
         Binding("g", "go_to", "go-to"),
+        Binding("t", "patrol_route", "patrol route"),
         Binding("o", "unload", "unload cargo"),
         Binding("l", "loading", "load ship"),
         Binding("f", "bombard", "bombard"),
@@ -203,6 +210,8 @@ class PlayScreen(Screen[None]):
         self._awaiting_heading: bool = False
         # Cursor mode is "pick a destination for go-to" while True.
         self._awaiting_goto_target: bool = False
+        # Cursor mode is "pick a patrol endpoint" (ships) while True.
+        self._awaiting_patrol_target: bool = False
         # Next direction key unloads the selected carrier's next cargo unit.
         self._awaiting_unload: bool = False
         # Next direction key fires a bombardment at that adjacent cell.
@@ -276,8 +285,12 @@ class PlayScreen(Screen[None]):
         if self._awaiting_heading and self._selected_unit_id is not None:
             self._set_heading(self._selected_unit_id, d)
             return
-        # Go-to / city-order-target modes: direction keys move the cursor.
-        if self._awaiting_goto_target or self._awaiting_city_order_target is not None:
+        # Go-to / patrol / city-order-target modes: cursor movement.
+        if (
+            self._awaiting_goto_target
+            or self._awaiting_patrol_target
+            or self._awaiting_city_order_target is not None
+        ):
             new = self._cursor.step(d)
             if self._game.map.in_bounds(new):
                 self._cursor = new
@@ -579,12 +592,14 @@ class PlayScreen(Screen[None]):
         if (
             self._awaiting_heading
             or self._awaiting_goto_target
+            or self._awaiting_patrol_target
             or self._awaiting_unload
             or self._awaiting_bombard
             or self._awaiting_city_order_target is not None
         ):
             self._awaiting_heading = False
             self._awaiting_goto_target = False
+            self._awaiting_patrol_target = False
             self._awaiting_unload = False
             self._awaiting_bombard = False
             self._awaiting_city_order_target = None
@@ -644,6 +659,30 @@ class PlayScreen(Screen[None]):
         self._awaiting_goto_target = True
         self._cursor = unit.coord
         self._hint = "go-to: direction keys move cursor; Enter to confirm, Esc to cancel"
+        self._refresh_view()
+
+    def action_patrol_route(self) -> None:
+        """Arm patrol-route (ships): cursor picks the far endpoint; Enter
+        confirms. The ship shuttles start<->endpoint continuously until woken
+        — manually ('w') or by a wake event (enemy in scan, discovery,
+        artillery ring)."""
+        if self._selected_unit_id is None:
+            self._hint = "select a ship first"
+            self._refresh_view()
+            return
+        unit = self._selected_unit()
+        if unit is None:
+            self._refresh_view()
+            return
+        if unit.kind not in _PATROL_ROUTE_KINDS:
+            self._hint = "patrol routes are for ships"
+            self._refresh_view()
+            return
+        self._awaiting_patrol_target = True
+        self._cursor = unit.coord
+        self._hint = (
+            "patrol: cursor to the far endpoint; Enter to confirm, Esc to cancel"
+        )
         self._refresh_view()
 
     def action_unload(self) -> None:
@@ -811,6 +850,9 @@ class PlayScreen(Screen[None]):
                 )
             self._refresh_view()
             return
+        if self._awaiting_patrol_target:
+            self._confirm_patrol_route()
+            return
         if not self._awaiting_goto_target:
             return
         unit = self._selected_unit()
@@ -845,12 +887,55 @@ class PlayScreen(Screen[None]):
         else:
             tail = tuple(path[1:]) if stepped else tuple(path)
             if tail:
-                self._pending_orders[unit.id] = PatrolPath.new(
-                    tail, reverse_on_end=False
-                )
+                self._pending_orders[unit.id] = PatrolPath.new(tail)
             self._hint = (
                 f"go-to set: {len(tail)} cells queued"
                 + (" (stepped)" if stepped else "")
+            )
+        self._advance_to_next_unit()
+        self._refresh_view()
+
+    def _confirm_patrol_route(self) -> None:
+        """Enter on a patrol endpoint: build the round trip and set it as a
+        LOOPING standing order — the ship shuttles start<->endpoint until
+        woken. The cycle's last cell is the start itself, adjacent to its
+        first cell, so the re-armed pass always begins with a legal step."""
+        self._awaiting_patrol_target = False
+        unit = self._selected_unit()
+        if unit is None:
+            self._refresh_view()
+            return
+        start = unit.coord
+        forward = self._build_goto_path(unit, self._cursor)
+        if forward is None or len(forward) == 0:
+            self._hint = "no sea path to that cell"
+            self._refresh_view()
+            return
+        # Round trip: out along the path, back along the same path to start.
+        back = tuple(reversed((start, *forward[:-1])))
+        cycle = (*forward, *back)
+        # Step the first cell now (player expectation, same as go-to); the
+        # remainder goes live via set_orders after this round's phase.
+        stepped, alive, block = self._order_first_step(unit, forward[0])
+        if block == "attack":
+            self._hint = "patrol blocked by an enemy ahead — step in to attack"
+            self._refresh_view()
+            return
+        if block == "artillery":
+            self._hint = "patrol would enter a city's gun range — pick another route"
+            self._refresh_view()
+            return
+        self._handled.add(unit.id)
+        if not alive:
+            self._hint = "ship lost on the first patrol step"
+        else:
+            remaining = cycle[1:] if stepped else cycle
+            self._pending_orders[unit.id] = PatrolPath(
+                remaining=remaining, original=cycle, loop=True
+            )
+            self._hint = (
+                f"patrol set: ({start.x},{start.y})<->({self._cursor.x},{self._cursor.y})"
+                f" — loops until woken ('w')"
             )
         self._advance_to_next_unit()
         self._refresh_view()
@@ -1082,6 +1167,7 @@ class PlayScreen(Screen[None]):
         self._handled.clear()
         self._awaiting_heading = False
         self._awaiting_goto_target = False
+        self._awaiting_patrol_target = False
         self._awaiting_unload = False
         self._awaiting_city_order_target = None
         # Paint the status line FIRST, then run the (synchronous) engine
@@ -1154,6 +1240,7 @@ class PlayScreen(Screen[None]):
         self._moves_used.clear()
         self._awaiting_heading = False
         self._awaiting_goto_target = False
+        self._awaiting_patrol_target = False
         self._awaiting_unload = False
         self._cursor = self._home_cursor()
         refresh_player_view(self._human, self._game.map, self._game.turn)

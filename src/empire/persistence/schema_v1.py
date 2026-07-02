@@ -410,7 +410,7 @@ class V1Serializer:
                 "kind": "patrol",
                 "remaining": [[c.x, c.y] for c in order.remaining],
                 "original": [[c.x, c.y] for c in order.original],
-                "reverse_on_end": order.reverse_on_end,
+                "loop": order.loop,
             }
         if isinstance(order, Loading):
             return {"kind": "loading"}
@@ -429,7 +429,8 @@ class V1Serializer:
             return PatrolPath(
                 remaining=tuple(Coord(int(c[0]), int(c[1])) for c in d["remaining"]),
                 original=tuple(Coord(int(c[0]), int(c[1])) for c in d["original"]),
-                reverse_on_end=bool(d.get("reverse_on_end", False)),
+                # "reverse_on_end" is the legacy name for the loop flag.
+                loop=bool(d.get("loop", d.get("reverse_on_end", False))),
             )
         if kind == "loading":
             return Loading()

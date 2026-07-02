@@ -10,9 +10,10 @@ Three variants — all frozen value types:
 
 - `Heading(direction)`: walk one cell per turn in a fixed cardinal/diagonal
   direction. Never exhausts on its own; only interruption clears it.
-- `PatrolPath(remaining, original, reverse_on_end)`: walk a pre-built BFS
-  path one cell per turn. When `remaining` empties: if `reverse_on_end`,
-  re-arm with the path flipped; else, clear the order.
+- `PatrolPath(remaining, original, loop)`: walk a pre-built BFS path one
+  cell per turn. When `remaining` empties: if `loop`, re-arm with the same
+  cycle (a patrol route builds `original` as the full round trip, ending
+  adjacent to its first cell); else, clear the order.
 - `Sentry()`: do nothing. The unit skips auto-cycle until manually woken
   or auto-woken by a nearby enemy/city becoming visible. Per spec, a
   surprise NEVER causes a unit to enter sentry — see
@@ -42,24 +43,29 @@ class PatrolPath:
     """Walk a pre-built BFS path one cell per turn.
 
     `remaining` is the still-to-enter tail of the current pass through
-    the path. `original` is the path as first set, kept so `reverse_on_end`
-    can rebuild it. The engine replaces this dataclass each turn with a
-    new instance reflecting one step of progress.
+    the path. `original` is the path as first set, kept so `loop` can
+    re-arm it. The engine replaces this dataclass each turn with a new
+    instance reflecting one step of progress.
+
+    A looping patrol's `original` must be a full ROUND TRIP whose last cell
+    is adjacent to its first (the TUI builds A->B->A as one cycle) — the
+    re-armed pass then starts with a legal step, never a step into the
+    unit's own cell.
     """
 
     remaining: tuple[Coord, ...]
     original: tuple[Coord, ...]
-    reverse_on_end: bool = False
+    loop: bool = False
 
     @classmethod
     def new(
         cls,
         cells: tuple[Coord, ...],
         *,
-        reverse_on_end: bool = False,
+        loop: bool = False,
     ) -> PatrolPath:
         """Construct a fresh patrol from a single path."""
-        return cls(remaining=cells, original=cells, reverse_on_end=reverse_on_end)
+        return cls(remaining=cells, original=cells, loop=loop)
 
     def next_cell(self) -> Coord | None:
         """The cell the unit would walk into next, or None if exhausted."""
@@ -69,23 +75,17 @@ class PatrolPath:
         """The patrol state after consuming one cell.
 
         Returns None when the order should clear (one-shot path exhausted).
-        For `reverse_on_end`, returns a new patrol with the original
-        reversed once the current pass empties.
+        For `loop`, re-arms the same cycle once the current pass empties.
         """
         tail = self.remaining[1:]
         if tail:
             return PatrolPath(
-                remaining=tail,
-                original=self.original,
-                reverse_on_end=self.reverse_on_end,
+                remaining=tail, original=self.original, loop=self.loop
             )
-        if not self.reverse_on_end:
+        if not self.loop:
             return None
-        flipped = tuple(reversed(self.original))
         return PatrolPath(
-            remaining=flipped,
-            original=flipped,
-            reverse_on_end=True,
+            remaining=self.original, original=self.original, loop=True
         )
 
 

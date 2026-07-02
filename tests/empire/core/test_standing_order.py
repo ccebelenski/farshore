@@ -56,15 +56,20 @@ def test_patrol_path_one_shot_exhausts() -> None:
     assert p4 is None  # exhausted
 
 
-def test_patrol_path_reverse_on_end_flips() -> None:
-    cells = (Coord(1, 0), Coord(2, 0))
-    p = PatrolPath.new(cells, reverse_on_end=True)
-    after_first = p.after_step()
-    assert after_first is not None and after_first.remaining == (Coord(2, 0),)
-    after_second = after_first.after_step()
-    assert after_second is not None
-    assert after_second.remaining == (Coord(2, 0), Coord(1, 0))  # reversed
-    assert after_second.original == (Coord(2, 0), Coord(1, 0))
+def test_patrol_path_loop_rearms_the_cycle() -> None:
+    """A looping patrol re-arms with the SAME cycle when the pass empties
+    (the cycle's last cell is the start, adjacent to its first cell — so the
+    next pass begins with a legal step, never a step into the unit's own
+    cell, which the old reverse-on-end flip did)."""
+    cycle = (Coord(1, 0), Coord(2, 0), Coord(1, 0), Coord(0, 0))  # A=(0,0)<->B=(2,0)
+    p = PatrolPath.new(cycle, loop=True)
+    for expected in cycle:
+        assert p is not None and p.next_cell() == expected
+        p = p.after_step()
+    # Pass exhausted -> re-armed, same cycle from the top.
+    assert p is not None
+    assert p.remaining == cycle
+    assert p.loop is True
 
 
 # --- Heading: walks one cell per turn ---------------------------------------
@@ -344,7 +349,7 @@ def test_goto_wakes_instead_of_capturing_a_city(
     )
     mover = Army(UnitId(1), p1, Coord(0, 0))
     m.place_unit(mover, Coord(0, 0))
-    mover.standing_order = PatrolPath.new((Coord(1, 0),), reverse_on_end=False)
+    mover.standing_order = PatrolPath.new((Coord(1, 0),))
     deterministic = replace(STANDARD, army_capture_city_deterministic=True)
 
     result = apply_standing_orders(p1, m, deterministic, resolver, random.Random(0))
@@ -478,3 +483,50 @@ def test_loading_carrier_sweeps_new_cargo_each_turn(
     assert len(transport.cargo) == 1
     assert transport.cargo[0] == UnitId(2)  # cargo holds ids
     assert all(u.id != UnitId(2) for u in m.board_units())  # off the board, aboard
+
+
+# --- looping ship patrol: engine-level ping-pong ------------------------------
+
+
+def test_ship_patrol_loops_between_endpoints(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """A looping PatrolPath drives a ship A->B->A->B... indefinitely under
+    apply_standing_orders — the continuous patrol route ('t'). Speed-1 hull
+    on a 3-cell strait: 8 turns = two full round trips."""
+    from empire.core.unit import Patrol
+
+    m = _mixed_map(["WWW"])
+    ship = Patrol(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(ship, Coord(0, 0))
+    a, b = Coord(0, 0), Coord(2, 0)
+    cycle = (Coord(1, 0), b, Coord(1, 0), a)  # out and back, ending at A
+    ship.standing_order = PatrolPath.new(cycle, loop=True)
+
+    seen: list[Coord] = []
+    for _ in range(8):
+        apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+        assert ship.standing_order is not None, "patrol must persist"
+        seen.append(ship.coord)
+    assert seen == [Coord(1, 0), b, Coord(1, 0), a] * 2  # two clean loops
+
+
+def test_ship_patrol_wakes_on_enemy_in_scan(
+    p1: Player, p2: Player, resolver: CombatResolver
+) -> None:
+    """The patrol's wake contract: an enemy entering scan range interrupts
+    the loop (the ship stops and the player takes over)."""
+    from empire.core.unit import Patrol
+
+    m = _mixed_map(["WWWWWW"])
+    ship = Patrol(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(ship, Coord(0, 0))
+    cycle = (Coord(1, 0), Coord(2, 0), Coord(1, 0), Coord(0, 0))
+    ship.standing_order = PatrolPath.new(cycle, loop=True)
+    # Enemy ship within Patrol scan (3) of the first step's destination.
+    m.place_unit(Patrol(UnitId(2), p2, Coord(4, 0)), Coord(4, 0))
+
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert ship.coord == Coord(1, 0)  # stepped, then woke
+    assert ship.standing_order is None
+    assert UnitId(1) in result.interrupted_unit_ids

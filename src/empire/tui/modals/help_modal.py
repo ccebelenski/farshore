@@ -35,6 +35,7 @@ Unit / city:
   w                wake the unit under the cursor (or selected) into this turn
   d                set heading — steps NOW, then walks every turn
   g                go-to target — Enter steps now, then walks
+  t                patrol route (ships) — shuttles here<->endpoint until woken
   l                load — carrier waits for cargo, wakes when full
   o                unload — next direction lands the carrier's cargo
   f                bombard — warship fires at the next direction's cell
