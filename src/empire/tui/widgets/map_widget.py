@@ -54,10 +54,14 @@ _UNSEEN = " "
 # remap ANSI freely ("blue" often renders violet, "green" teal), which made
 # water/land ambiguous to the eye. Water = unmistakable sea blue, land =
 # light sandy brown (user playtest note, 2026-06-12).
+#
+# Remembered (fogged) terrain keeps its HUE, just dimmed — a shared
+# bright_black made fogged land and water indistinguishable (user playtest note,
+# 2026-07-02). Dim sand vs dim sea blue stays legible while still reading as fog.
 _STYLE_LAND_VISIBLE = Style(color="#C8A96E")
-_STYLE_LAND_REMEMBERED = Style(color="bright_black")
+_STYLE_LAND_REMEMBERED = Style(color="#6E5C3C")  # dim sand
 _STYLE_WATER_VISIBLE = Style(color="#2E86E8")
-_STYLE_WATER_REMEMBERED = Style(color="bright_black")
+_STYLE_WATER_REMEMBERED = Style(color="#1E5288")  # dim sea blue
 _STYLE_CITY_NEUTRAL = Style(color="white", bold=True)
 _STYLE_CITY_OWN = Style(color="cyan", bold=True)
 _STYLE_CITY_ENEMY = Style(color="red", bold=True)
