@@ -100,6 +100,10 @@ def is_legal_step(unit: Unit, to: Coord, real_map: Map, rules: RuleSet) -> bool:
     - Step is at most a 1-cell Chebyshev move.
     """
     del rules  # reserved for future rule toggles
+    if unit.kind is UnitKind.SATELLITE:
+        # Satellites are never path-moved (spec §2.4): they launch onto a
+        # fixed one-way orbit (`advance_satellites`) and cannot be steered.
+        return False
     if not real_map.in_bounds(to):
         return False
     tile = real_map.tile(to)
@@ -194,6 +198,11 @@ def run_production_tick(
             new_unit.range = rules.fighter_base_range
         elif kind is UnitKind.SATELLITE:
             new_unit.range = rules.satellite_range
+            # An AI owner auto-launches east; a human is prompted for the
+            # orbit direction by the TUI (the satellite stays unlaunched —
+            # decaying, not moving — until they choose).
+            if player.is_ai:
+                new_unit.orbit_direction = Direction.E
         real_map.place_unit(new_unit, city.coord)
         apply_default_order(new_unit, city)
         city.production.consume()
@@ -886,23 +895,27 @@ def crash_out_of_fuel_fighters(real_map: Map, rules: RuleSet) -> tuple[UnitId, .
 
 
 def advance_satellites(real_map: Map) -> tuple[tuple[UnitId, ...], tuple[UnitId, ...]]:
-    """Orbit every satellite one cell and decay its lifetime (spec §2.4).
+    """Advance every satellite one turn (spec §2.4).
 
-    Each satellite steps one cell along `orbit_direction`, reflecting off
-    the map edge (the offending axis flips), then loses one turn of
-    lifetime; at zero it deorbits and is removed. Returns
-    `(moved_ids, deorbited_ids)`.
+    A LAUNCHED satellite (orbit_direction set at launch, never changed)
+    moves `speed` cells along its fixed heading, WRAPPING at map edges — a
+    simulated orbit circling the world. Launched or not, every satellite
+    burns one turn of lifetime (a parked, unlaunched satellite is wasting
+    fuel, not a free radar tower); at zero it deorbits (crashes) and is
+    removed. Returns `(moved_ids, deorbited_ids)`.
     """
     moved: list[UnitId] = []
     deorbited: list[UnitId] = []
     for sat in list(real_map.board_units()):
-        if sat.kind is not UnitKind.SATELLITE or sat.orbit_direction is None:
+        if sat.kind is not UnitKind.SATELLITE:
             continue
-        new_dir, dest = _orbit_step(sat.coord, sat.orbit_direction, real_map)
-        sat.orbit_direction = new_dir
-        if dest != sat.coord:
-            real_map.move_unit(sat, dest)
-            moved.append(sat.id)
+        if sat.orbit_direction is not None:
+            dest = sat.coord
+            for _ in range(type(sat).speed):
+                dest = _orbit_step(dest, sat.orbit_direction, real_map)
+            if dest != sat.coord:
+                real_map.move_unit(sat, dest)
+                moved.append(sat.id)
         sat.range -= 1
         if sat.range <= 0:
             real_map.remove_unit(sat)
@@ -910,23 +923,13 @@ def advance_satellites(real_map: Map) -> tuple[tuple[UnitId, ...], tuple[UnitId,
     return (tuple(moved), tuple(deorbited))
 
 
-def _orbit_step(
-    coord: Coord, direction: Direction, real_map: Map
-) -> tuple[Direction, Coord]:
-    """Next (direction, coord) for an orbiting body, bouncing off edges.
-
-    Reflects each axis that would carry the body off the board, so a
-    satellite ricochets along the interior rather than leaving the map.
-    """
-    dx, dy = direction.dx, direction.dy
-    if not (0 <= coord.x + dx < real_map.width):
-        dx = -dx
-    if not (0 <= coord.y + dy < real_map.height):
-        dy = -dy
-    new_dir = next(
-        (d for d in Direction if d.dx == dx and d.dy == dy), direction
+def _orbit_step(coord: Coord, direction: Direction, real_map: Map) -> Coord:
+    """The next cell along an orbit: fixed heading, wrapping at map edges
+    (a simulated orbit — the world is a cylinder/torus to a satellite)."""
+    return Coord(
+        (coord.x + direction.dx) % real_map.width,
+        (coord.y + direction.dy) % real_map.height,
     )
-    return (new_dir, Coord(coord.x + dx, coord.y + dy))
 
 
 def repair_in_cities(real_map: Map) -> tuple[UnitId, ...]:

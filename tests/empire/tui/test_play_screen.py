@@ -656,9 +656,12 @@ async def test_load_command_full_does_not_enter_loading() -> None:
         assert not isinstance(carrier.standing_order, Loading)  # not waiting
 
 
-async def test_satellite_never_enters_order_queue() -> None:
-    """Playtest bug: a satellite was being offered for manual movement. It
-    auto-orbits (spec §2.4) and must be excluded from the order cycle."""
+async def test_satellite_launch_prompt_and_orbit_lockout() -> None:
+    """An UNLAUNCHED satellite enters the order cycle exactly once — for its
+    launch prompt: the direction key launches it (sets the one-way orbit),
+    never moves it. A LAUNCHED satellite never re-enters the queue (spec
+    §2.4 — no manual control after launch)."""
+    from empire.core.coord import Direction
     from empire.core.identity import UnitId
     from empire.core.unit import Satellite
     from empire.tui.screens.play_screen import PlayScreen
@@ -670,11 +673,24 @@ async def test_satellite_never_enters_order_queue() -> None:
     capital = next(c for c in game.map.cities() if c.owner is human)
     sat = Satellite(UnitId(950), human, capital.coord)
     game.map.place_unit(sat, capital.coord)
+    start = sat.coord
 
     async with app.run_test(size=(60, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, PlayScreen)
+        needing = screen._units_needing_orders(  # pyright: ignore[reportPrivateUsage]
+            include_handled=True
+        )
+        assert sat.id in {u.id for u in needing}  # awaiting its launch prompt
+
+        # Select it and press a direction: LAUNCH, not a move.
+        screen._selected_unit_id = sat.id  # pyright: ignore[reportPrivateUsage]
+        await pilot.press("8")  # north
+        assert sat.orbit_direction is Direction.N
+        assert sat.coord == start  # launching is not a step
+
+        # Launched: locked out of the queue and of manual movement.
         needing = screen._units_needing_orders(  # pyright: ignore[reportPrivateUsage]
             include_handled=True
         )

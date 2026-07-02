@@ -306,6 +306,10 @@ class PlayScreen(Screen[None]):
             self._refresh_view()
             return
 
+        if unit.kind is UnitKind.SATELLITE:
+            self._launch_satellite(unit, d)
+            return
+
         used = self._moves_used.get(unit.id, 0)
         budget = unit.moves_this_turn()
         if used >= budget:
@@ -431,6 +435,24 @@ class PlayScreen(Screen[None]):
         # Update fog: a step may have revealed (or hidden) tiles.
         refresh_player_view(self._human, self._game.map, self._game.turn)
         return outcome, unit_died
+
+    def _launch_satellite(self, sat: Unit, d: Direction) -> None:
+        """Direction key on a satellite: launch it onto its one-way orbit
+        (spec §2.4). The heading is chosen exactly once — after launch the
+        satellite wraps around the map on its own until its fuel runs out
+        and it crashes; there is no manual control, ever."""
+        if sat.orbit_direction is not None:
+            self._hint = "satellite is in orbit — no manual control"
+            self._refresh_view()
+            return
+        sat.orbit_direction = d
+        self._handled.add(sat.id)
+        self._hint = (
+            f"satellite launched {d.name} — orbits until its fuel "
+            f"({sat.range} turns) runs out"
+        )
+        self._advance_to_next_unit()
+        self._refresh_view()
 
     def _order_first_step(
         self, unit: Unit, target: Coord
@@ -578,8 +600,12 @@ class PlayScreen(Screen[None]):
         if self._selected_unit_id is None:
             return
         uid = self._selected_unit_id
-        self._handled.add(uid)
         unit = self._game.map.unit_by_id(uid)
+        if unit is not None and unit.kind is UnitKind.SATELLITE:
+            self._hint = "satellites can't hold — press a direction to launch"
+            self._refresh_view()
+            return
+        self._handled.add(uid)
         if unit is not None:
             unit.standing_order = Sentry()
         self._hint = "sentry — wakes on enemy in scan range ('w' to wake now)"
@@ -590,6 +616,11 @@ class PlayScreen(Screen[None]):
         """Arm heading-set: the next direction key sets a Heading instead of walking."""
         if self._selected_unit_id is None:
             self._hint = "select a unit first ('u' or auto-cycle)"
+            self._refresh_view()
+            return
+        unit = self._selected_unit()
+        if unit is not None and unit.kind is UnitKind.SATELLITE:
+            self._hint = "satellites take no orders — press a direction to launch"
             self._refresh_view()
             return
         self._awaiting_heading = True
@@ -604,6 +635,10 @@ class PlayScreen(Screen[None]):
             return
         unit = self._selected_unit()
         if unit is None:
+            self._refresh_view()
+            return
+        if unit.kind is UnitKind.SATELLITE:
+            self._hint = "satellites take no orders — press a direction to launch"
             self._refresh_view()
             return
         self._awaiting_goto_target = True
@@ -1186,10 +1221,12 @@ class PlayScreen(Screen[None]):
         for unit in self._game.map.board_units():
             if unit.owner is not self._human:
                 continue
-            # Satellites are not player-commanded: the engine auto-orbits them
-            # (spec §2.4 — fixed heading, bounce off edges). They must never
-            # enter the order queue or the player gets prompted to "move" one.
+            # A LAUNCHED satellite is not player-commanded (spec §2.4 —
+            # fixed one-way orbit, wraps at edges): it never re-enters the
+            # queue. An UNLAUNCHED one enters once, for its launch prompt.
             if unit.kind is UnitKind.SATELLITE:
+                if unit.orbit_direction is None:
+                    result.append(unit)
                 continue
             if unit.moves_this_turn() <= 0:
                 continue
@@ -1235,6 +1272,11 @@ class PlayScreen(Screen[None]):
         warning = self._in_city_warning(target)
         if warning is not None:
             self._hint = warning
+        elif target.kind is UnitKind.SATELLITE:
+            self._hint = (
+                "satellite ready: press a direction to LAUNCH its one-way "
+                "orbit (wraps the map; no control after launch)"
+            )
         else:
             self._hint = (
                 f"{remaining} unit(s) need orders; direction keys move it, "

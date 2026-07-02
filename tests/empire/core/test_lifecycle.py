@@ -133,6 +133,7 @@ def test_out_of_fuel_fighter_on_friendly_city_survives(p1: Player) -> None:
 def test_satellite_orbits_one_cell_per_round(p1: Player) -> None:
     m = _build_map(["LLLLL"])
     sat = Satellite(UnitId(1), p1, Coord(1, 0))
+    sat.orbit_direction = Direction.E  # launched
     sat.range = 10
     m.place_unit(sat, Coord(1, 0))
 
@@ -145,17 +146,37 @@ def test_satellite_orbits_one_cell_per_round(p1: Player) -> None:
     assert sat.range == 9
 
 
-def test_satellite_bounces_off_edge(p1: Player) -> None:
+def test_satellite_wraps_around_the_map_edge(p1: Player) -> None:
+    """A simulated orbit: the heading NEVER changes; the world wraps."""
     m = _build_map(["LLL"])  # width 3; sat at the east edge heading east
     sat = Satellite(UnitId(1), p1, Coord(2, 0))
+    sat.orbit_direction = Direction.E
     sat.range = 10
     m.place_unit(sat, Coord(2, 0))
 
     advance_satellites(m)
 
-    # Reflected: heading flips west, steps back to (1, 0).
-    assert sat.orbit_direction is Direction.W
+    # Wrapped to the west edge, still heading east.
+    assert sat.orbit_direction is Direction.E
+    assert sat.coord == Coord(0, 0)
+
+
+def test_unlaunched_satellite_decays_in_place(p1: Player) -> None:
+    """No launch direction chosen yet: it doesn't move, but the fuel clock
+    runs from production — a parked satellite is not a free radar tower."""
+    m = _build_map(["LLL"])
+    sat = Satellite(UnitId(1), p1, Coord(1, 0))
+    assert sat.orbit_direction is None  # produced unlaunched
+    sat.range = 2
+    m.place_unit(sat, Coord(1, 0))
+
+    moved, deorbited = advance_satellites(m)
+    assert moved == () and deorbited == ()
     assert sat.coord == Coord(1, 0)
+    assert sat.range == 1
+
+    _, deorbited = advance_satellites(m)
+    assert deorbited == (UnitId(1),)  # crashed without ever launching
 
 
 def test_satellite_deorbits_at_end_of_lifetime(p1: Player) -> None:
@@ -257,3 +278,42 @@ def test_repair_caps_at_max_hits(p1: Player) -> None:
 
     assert repaired == ()
     assert dest.hits == type(dest).max_hits
+
+
+def test_satellite_production_launch_defaults(p1: Player, p2: Player) -> None:
+    """A human-owned city produces an UNLAUNCHED satellite (the TUI prompts
+    for the orbit); an AI owner auto-launches east."""
+    from empire.core.city import City
+    from empire.core.engine import run_production_tick
+    from empire.core.identity import CityId
+    from empire.core.ruleset import STANDARD
+    from empire.core.unit import UnitKind
+
+    m = _build_map(["LLL"])
+    ids = iter(range(1, 10))
+
+    for player, expected in ((p1, None), (p2, Direction.E)):  # p1 human, p2 AI
+        city = City(id=CityId(int(player.id)), coord=Coord(1, 0), owner=player)
+        m._tiles[Coord(1, 0)] = type(m.tile(Coord(1, 0)))(
+            coord=Coord(1, 0), terrain=m.tile(Coord(1, 0)).terrain, city=city
+        )
+        city.production.building = UnitKind.SATELLITE
+        city.production.work = Satellite.build_time - 1
+        produced = run_production_tick(
+            player, m, STANDARD, lambda: UnitId(next(ids))
+        )
+        assert len(produced) == 1
+        assert produced[0].orbit_direction == expected
+        m.remove_unit(produced[0])
+
+
+def test_satellite_is_never_path_movable(p1: Player) -> None:
+    """Engine-level lockout: satellites cannot be single-moved by any path
+    (manual step, goto, heading, AI plan) — orbit is the only motion."""
+    from empire.core.engine import is_legal_step
+    from empire.core.ruleset import STANDARD
+
+    m = _build_map(["LLL"])
+    sat = Satellite(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(sat, Coord(0, 0))
+    assert not is_legal_step(sat, Coord(1, 0), m, STANDARD)

@@ -317,9 +317,13 @@ class Satellite(Unit):
 
     def __init__(self, id_: UnitId, owner: Player, coord: Coord) -> None:
         super().__init__(id_, owner, coord)
-        # A freshly launched satellite orbits eastward until it bounces off
-        # a map edge (spec §2.4). Save/load preserves the live heading.
-        self.orbit_direction = Direction.E
+        # A fresh satellite is UNLAUNCHED (spec §2.4): launching means choosing
+        # its one-way orbit direction — the player is prompted, an AI owner
+        # auto-launches east at production. Once set, the heading is never
+        # player-changed (it only reflects off map edges); the lifetime clock
+        # runs from production either way, so a parked satellite is burning
+        # fuel, not a free radar tower. Save/load preserves the live heading.
+        self.orbit_direction: Direction | None = None
 
     def attack_preferences(self) -> str:
         return ""  # Satellites cannot attack (or be attacked)
