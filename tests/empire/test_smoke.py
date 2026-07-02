@@ -14,7 +14,6 @@ PACKAGES = [
     "empire.pathfinding",
     "empire.persistence",
     "empire.ai",
-    "empire.ai.strategic",
     "empire.ai.llm",
     "empire.tui",
     "empire.tui.widgets",

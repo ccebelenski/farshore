@@ -22,7 +22,6 @@ import time
 from dataclasses import dataclass
 
 from empire.ai.baseline import BaselineAI
-from empire.ai.strategic.ai import StrategicAI
 from empire.combat.resolver import CombatResolver
 from empire.contracts.controller import AIController
 from empire.core.city import City
@@ -94,17 +93,16 @@ def build_land_brawl(
 
 
 def _smart_ai(kind: str) -> AIController:
-    """The challenger under test: 'strategic' (Phase 15) or 'search' (15.8)."""
-    if kind == "search":
-        from empire.ai.search import SearchAI
+    """The challenger under test. ('strategic' retired with the StrategicAI line.)"""
+    del kind
+    from empire.ai.search import SearchAI
 
-        return SearchAI()
-    return StrategicAI()
+    return SearchAI()
 
 
 def play_match(
     profile: MapProfile, seed: int, strategic_first: bool, cap: int,
-    rules: RuleSet = STANDARD, ai: str = "strategic",
+    rules: RuleSet = STANDARD, ai: str = "search",
 ) -> tuple[str, int] | None:
     """Run one game; return (outcome, turns). Outcome is
     'strategic' | 'baseline' | 'draw' | 'unfinished' ('strategic' = the
@@ -155,7 +153,7 @@ class ArenaResult:
 
 def run_arena(
     seeds: int, cap: int, profile: MapProfile = ARENA_PROFILE, verbose: bool = True,
-    rules: RuleSet = STANDARD, jobs: int = 1, ai: str = "strategic",
+    rules: RuleSet = STANDARD, jobs: int = 1, ai: str = "search",
 ) -> ArenaResult:
     """Each seed played twice (sides swapped) to cancel positional bias.
 
@@ -224,7 +222,7 @@ def main() -> None:
         help="parallel worker processes (default: cores-1; 1 = sequential)",
     )
     parser.add_argument(
-        "--ai", choices=("strategic", "search"), default="strategic",
+        "--ai", choices=("search",), default="search",
         help="the challenger to pit against BaselineAI",
     )
     args = parser.parse_args()

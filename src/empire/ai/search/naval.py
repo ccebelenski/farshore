@@ -40,7 +40,6 @@ SEA_KINDS = frozenset(
         UnitKind.BATTLESHIP,
     }
 )
-_SEA_KINDS = SEA_KINDS  # internal alias
 
 
 class NavalResult:
@@ -59,7 +58,7 @@ def plan_naval(view: WorldView, plan: Plan) -> NavalResult:
     `result.claimed_armies`."""
     result = NavalResult()
     own = list(view.own_units)
-    ships = [u for u in own if u.kind in _SEA_KINDS and u.carried_by is None]
+    ships = [u for u in own if u.kind in SEA_KINDS and u.carried_by is None]
     if not ships:
         return result  # nothing naval to do (and no invasion possible)
 
@@ -251,7 +250,7 @@ def _nav_grids(
     others = frozenset(
         u.coord
         for u in view.own_units
-        if u.kind in _SEA_KINDS and u.carried_by is None and u.id != transport.id
+        if u.kind in SEA_KINDS and u.carried_by is None and u.id != transport.id
     )
     raw_sea = PassabilityGrid(view.real_map(), SEA_COST)
     nav = sea_grid.with_blocked(others) if others else sea_grid
@@ -408,21 +407,6 @@ _SEAT_SLACK = 1
 # Chebyshev radius for counting the enemy defender screen near a landing spot.
 _LAND_MARCH = 6
 _SCREEN_R = 3
-
-
-def _pick_transport(
-    ships: list[Unit], used: set[UnitId], target: Coord
-) -> Unit | None:
-    """A free transport for an operation: prefer one already carrying cargo
-    (finish what it started), else the nearest empty one to the target."""
-    transports = [
-        s for s in ships if s.kind is UnitKind.TRANSPORT and s.id not in used
-    ]
-    if not transports:
-        return None
-    loaded = [t for t in transports if t.cargo]
-    pool = loaded if loaded else transports
-    return min(pool, key=lambda t: (t.coord.chebyshev_to(target), int(t.id)))
 
 
 def _landing_cells(

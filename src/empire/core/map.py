@@ -124,12 +124,6 @@ class ViewMap:
 
         self.visible = new_visible
 
-    def render_char(self, c: Coord) -> str:
-        """Phase 8: minimal renderer. Phase 17 will produce the full TUI glyphs."""
-        del c
-        return " "
-
-
 # -----------------------------------------------------------------------------
 # Map: the authoritative grid + spatial index
 # -----------------------------------------------------------------------------

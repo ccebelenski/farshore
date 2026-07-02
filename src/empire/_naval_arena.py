@@ -36,11 +36,8 @@ _SHIP_KINDS = SEA_KINDS
 
 
 def _challenger(kind: str) -> AIController:
-    """The AI under test on the naval gate."""
-    if kind == "strategic":
-        from empire.ai.strategic.ai import StrategicAI
-
-        return StrategicAI()
+    """The AI under test on the naval gate. ('strategic' retired.)"""
+    del kind
     from empire.ai.search import SearchAI
 
     return SearchAI()
@@ -206,7 +203,7 @@ def main() -> None:
     parser.add_argument("--seeds", type=int, default=25, help="seeds (each played both ways)")
     parser.add_argument("--cap", type=int, default=400, help="per-game turn cap (naval is slow)")
     parser.add_argument(
-        "--ai", choices=("strategic", "search"), default="search",
+        "--ai", choices=("search",), default="search",
         help="the challenger under test",
     )
     parser.add_argument(

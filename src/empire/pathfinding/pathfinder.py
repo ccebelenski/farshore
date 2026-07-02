@@ -1,10 +1,7 @@
 """`Pathfinder` ABC and `Path` value type.
 
-The ABC implements the generic A*-with-pluggable-heuristic algorithm.
-Concrete subclasses just provide `_heuristic`:
-- `BFSPathfinder._heuristic` returns 0 (uniform-cost search / Dijkstra).
-- `AStarPathfinder._heuristic` returns the Chebyshev distance to goal
-  (admissible when min step cost >= 1).
+The ABC implements the generic best-first search with a pluggable heuristic;
+`BFSPathfinder._heuristic` returns 0 (uniform-cost search / Dijkstra).
 """
 
 from __future__ import annotations

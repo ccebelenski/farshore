@@ -1077,12 +1077,6 @@ def _coord_in_hostile_artillery_zone(
     return False
 
 
-def in_hostile_artillery_zone(unit: Unit, real_map: Map, rules: RuleSet) -> bool:
-    """True if `unit`'s cell is covered by ANY hostile city's guns (enemy or
-    neutral — both fire, spec §4.7). Any unit kind: armies, fighters, ships."""
-    return _coord_in_hostile_artillery_zone(unit.owner, unit.coord, real_map, rules)
-
-
 def step_would_enter_artillery_zone(
     unit: Unit, target: Coord, real_map: Map, rules: RuleSet
 ) -> bool:

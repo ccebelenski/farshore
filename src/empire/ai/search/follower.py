@@ -33,16 +33,48 @@ from __future__ import annotations
 from empire.ai.search.air import plan_air
 from empire.ai.search.naval import SEA_KINDS, is_ocean_coastal, plan_naval
 from empire.ai.search.plan import Objective, Plan, Role, SurplusPolicy
-from empire.ai.strategic.behaviors.base import idle_step
 from empire.ai.vision import frontier_cells
 from empire.contracts.surprise import Surprise
 from empire.contracts.turn_plan import ProductionOrder, TurnPlan, UnitMove, UnloadOrder
 from empire.contracts.world_view import WorldView
 from empire.core.coord import Coord
 from empire.core.identity import UnitId
+from empire.core.tile import TerrainKind
 from empire.core.unit import Unit, UnitKind
 from empire.pathfinding.cost import ARMY as ARMY_COST_PROFILE
 from empire.pathfinding.distance_field import DistanceField, PassabilityGrid
+
+
+def idle_step(unit: Unit, view: WorldView) -> UnitMove:
+    """The 'nothing better to do' fallback. A land unit must NEVER end its turn
+    on a friendly city — §5.4 disbands it at turn-end — so if it is sitting on
+    one, step off to any legal, unoccupied, non-friendly-city neighbour rather
+    than sentry. Off a city, or for a unit §5.4 doesn't disband, plain sentry."""
+    tile = view.terrain_at(unit.coord)
+    on_friendly_city = (
+        tile is not None
+        and tile.terrain is TerrainKind.CITY
+        and tile.city is not None
+        and tile.city.owner is view.own_player
+    )
+    if not on_friendly_city:
+        return UnitMove(unit_id=unit.id)
+
+    legal = type(unit).legal_terrain
+    for nb in unit.coord.neighbors():
+        if not view.in_bounds(nb):
+            continue
+        nb_tile = view.terrain_at(nb)
+        if nb_tile is None or nb_tile.terrain not in legal:
+            continue
+        # Don't step onto another friendly city (same trap) or a friendly unit.
+        if nb_tile.terrain is TerrainKind.CITY:
+            continue
+        if any(u.owner is view.own_player for u in view.real_map().units_at(nb)):
+            continue
+        return UnitMove(unit_id=unit.id, path=((nb.x, nb.y),))
+    # Boxed in (every escape blocked) — sentry and accept the disband.
+    return UnitMove(unit_id=unit.id)
 
 
 # Roles whose armies storm a city: a land assault and the land phase of an
