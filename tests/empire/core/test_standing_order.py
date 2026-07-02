@@ -640,3 +640,135 @@ def test_explore_fighter_wakes_at_bingo_fuel(
     assert m.unit_by_id(UnitId(1)) is not None  # alive
     # It can still get home: fuel >= distance back to (0,0).
     assert jet.range >= jet.coord.chebyshev_to(Coord(0, 0))
+
+
+# --- Return To Base: fighter flies itself home ---------------------------------
+
+
+def _city_tile(m: Map, city_obj) -> None:
+    m._tiles[city_obj.coord] = Tile(
+        coord=city_obj.coord, terrain=TerrainKind.CITY, city=city_obj
+    )
+
+
+def test_rtb_flies_home_lands_and_refuels(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    from empire.core.city import City
+    from empire.core.standing_order import ReturnToBase
+    from empire.core.unit import Fighter
+
+    m = _land_map(12, 1)
+    city = City(id=CityId(1), coord=Coord(0, 0), owner=p1)
+    _city_tile(m, city)
+    jet = Fighter(UnitId(1), p1, Coord(10, 0))
+    jet.range = 12
+    m.place_unit(jet, Coord(10, 0))
+    jet.standing_order = ReturnToBase()
+
+    # Fighter speed 8: turn 1 covers 8 cells, turn 2 lands the last 2.
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert jet.coord == Coord(2, 0)
+    assert isinstance(jet.standing_order, ReturnToBase)
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert jet.coord == Coord(0, 0)  # landed
+    assert jet.standing_order is None  # order complete
+    assert jet.range == STANDARD.fighter_base_range  # refuelled on landing
+    assert UnitId(1) in result.moved_unit_ids
+
+
+def test_rtb_boards_a_nearer_carrier(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    from empire.core.city import City
+    from empire.core.standing_order import ReturnToBase
+    from empire.core.unit import Carrier, Fighter
+
+    m = _mixed_map(["LLLLWWWWWWWL"])  # land strip, water, far land
+    city = City(id=CityId(1), coord=Coord(0, 0), owner=p1)
+    _city_tile(m, city)
+    flattop = Carrier(UnitId(1), p1, Coord(6, 0))
+    m.place_unit(flattop, Coord(6, 0))
+    jet = Fighter(UnitId(2), p1, Coord(8, 0))
+    jet.range = 20
+    m.place_unit(jet, Coord(8, 0))
+    jet.standing_order = ReturnToBase()
+
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    # Carrier (dist 2) beat the city (dist 8): the jet boarded it.
+    assert jet.carried_by == flattop.id
+    assert jet.id in flattop.cargo
+    assert jet.standing_order is None
+
+
+def test_rtb_skips_full_airbase(p1: Player, resolver: CombatResolver) -> None:
+    """A city with all 8 airbase slots parked is no landing spot: RTB picks
+    the farther open base instead."""
+    from empire.core.city import City
+    from empire.core.standing_order import ReturnToBase
+    from empire.core.unit import Fighter
+
+    m = _land_map(14, 2)  # second row: room to route around the packed base
+    near = City(id=CityId(1), coord=Coord(4, 0), owner=p1)
+    far = City(id=CityId(2), coord=Coord(0, 0), owner=p1)
+    _city_tile(m, near)
+    _city_tile(m, far)
+    for i in range(8):  # pack the near base to its §5.4 air limit
+        parked = Fighter(UnitId(10 + i), p1, Coord(4, 0))
+        m.place_unit(parked, Coord(4, 0))
+    jet = Fighter(UnitId(1), p1, Coord(6, 0))
+    jet.range = 20
+    m.place_unit(jet, Coord(6, 0))
+    jet.standing_order = ReturnToBase()
+
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert jet.coord == Coord(0, 0)  # flew past the full base to the open one
+    assert jet.standing_order is None
+
+
+def test_rtb_wakes_when_no_base_reachable_on_fuel(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """The target vanished en route (carrier sunk): nothing reachable on
+    current fuel -> wake, player chooses where to fly or crash."""
+    from empire.core.city import City
+    from empire.core.standing_order import ReturnToBase
+    from empire.core.unit import Fighter
+
+    m = _land_map(30, 1)
+    city = City(id=CityId(1), coord=Coord(0, 0), owner=p1)
+    _city_tile(m, city)
+    jet = Fighter(UnitId(1), p1, Coord(20, 0))
+    jet.range = 5  # can never reach (0,0): dist 20
+    m.place_unit(jet, Coord(20, 0))
+    jet.standing_order = ReturnToBase()
+
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert jet.standing_order is None
+    assert UnitId(1) in result.interrupted_unit_ids
+    assert m.unit_by_id(UnitId(1)) is not None  # alive, player's call now
+
+
+def test_fighter_lands_at_own_city_with_parked_fighter(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """The airbase landing rule: an own city with §5.4 air capacity left
+    accepts an incoming fighter even though a friendly is parked there
+    (one parked fighter used to make the whole airbase unlandable)."""
+    from empire.core.city import City
+    from empire.core.engine import StepOutcome, execute_unit_path
+    from empire.core.unit import Fighter
+
+    m = _land_map(3, 1)
+    city = City(id=CityId(1), coord=Coord(0, 0), owner=p1)
+    _city_tile(m, city)
+    m.place_unit(Fighter(UnitId(1), p1, Coord(0, 0)), Coord(0, 0))  # parked
+    jet = Fighter(UnitId(2), p1, Coord(1, 0))
+    m.place_unit(jet, Coord(1, 0))
+
+    outcome = execute_unit_path(
+        unit=jet, path=((0, 0),), real_map=m, rules=STANDARD,
+        combat_resolver=resolver, rng=random.Random(0),
+    )
+    assert outcome.last_outcome is StepOutcome.OK
+    assert jet.coord == Coord(0, 0)

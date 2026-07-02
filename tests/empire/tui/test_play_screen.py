@@ -865,3 +865,46 @@ async def test_explore_verb_sets_order_and_skips_cycle() -> None:
             include_handled=True
         )
         assert scout.id not in {u.id for u in needing}
+
+
+async def test_rtb_verb_sets_order_or_warns() -> None:
+    """'b' on a fighter: sets ReturnToBase when a base is reachable; with no
+    base in fuel range it WARNS and aborts (no order — the player keeps
+    control to choose where to fly or crash)."""
+    from empire.core.identity import UnitId
+    from empire.core.standing_order import ReturnToBase
+    from empire.core.unit import Fighter
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app()
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    capital = next(c for c in game.map.cities() if c.owner is human)
+    from empire.core.tile import TerrainKind
+    spot = next(
+        c for c in capital.coord.neighbors()
+        if game.map.in_bounds(c)
+        and game.map.terrain_at(c) is TerrainKind.LAND
+        and not game.map.units_at(c)
+    )
+    jet = Fighter(UnitId(980), human, spot)
+    game.map.place_unit(jet, spot)
+
+    async with app.run_test(size=(60, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        screen._selected_unit_id = jet.id  # pyright: ignore[reportPrivateUsage]
+
+        # Base adjacent: RTB commits.
+        screen.action_return_to_base()
+        assert isinstance(jet.standing_order, ReturnToBase)
+
+        # Out of fuel range of everything: warn + abort, no order.
+        jet.standing_order = None
+        jet.range = 0
+        screen._selected_unit_id = jet.id  # pyright: ignore[reportPrivateUsage]
+        screen.action_return_to_base()
+        assert jet.standing_order is None
+        assert "NO BASE IN RANGE" in screen._hint  # pyright: ignore[reportPrivateUsage]

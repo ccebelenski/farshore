@@ -21,7 +21,14 @@ from empire.core.coord import Coord, Direction
 from empire.core.identity import CityId, UnitId
 from empire.core.map import Map
 from empire.core.ruleset import RuleSet
-from empire.core.standing_order import Explore, Heading, Loading, PatrolPath, Sentry
+from empire.core.standing_order import (
+    Explore,
+    Heading,
+    Loading,
+    PatrolPath,
+    ReturnToBase,
+    Sentry,
+)
 from empire.core.tile import TerrainKind
 from empire.core.unit import UNIT_REGISTRY, Unit, UnitKind
 
@@ -352,8 +359,28 @@ def execute_unit_path(
                 o.owner is unit.owner and not _is_intangible(o) for o in occupants
             )
         ):
-            last_outcome = StepOutcome.BLOCKED_BY_FRIENDLY
-            break
+            # Exception: an OWN CITY cell accepts the mover while its §5.4
+            # support category still has capacity (airbase parks 8 fighters,
+            # dry-dock 1 ship) — without this, one parked fighter made the
+            # whole airbase unlandable and the 8-slot limit was unreachable
+            # by movement. Overflow is still policed by the turn-end disband.
+            target_city = real_map.tile(target).city
+            category = _city_support_category(unit.kind)
+            has_slot = (
+                target_city is not None
+                and target_city.owner is unit.owner
+                and category is not None
+                and sum(
+                    1
+                    for o in occupants
+                    if o.owner is unit.owner
+                    and _city_support_category(o.kind) == category
+                )
+                < _CITY_SUPPORT_LIMITS[category]
+            )
+            if not has_slot:
+                last_outcome = StepOutcome.BLOCKED_BY_FRIENDLY
+                break
 
         entry, destroyed, captured = _resolve_entry(
             unit, target, real_map, rules, combat_resolver, rng
@@ -1154,6 +1181,105 @@ def load_adjacent_cargo(carrier: Unit, real_map: Map) -> list[UnitId]:
 
 
 # -----------------------------------------------------------------------------
+# Return To Base: a fighter flies itself home (standing order)
+# -----------------------------------------------------------------------------
+
+
+def rtb_target(unit: Unit, player: Player, real_map: Map) -> Coord | None:
+    """The nearest landing spot `unit` can still reach on current fuel: an own
+    city with airbase capacity left, or an own carrier with deck room. Air
+    movement ignores terrain, so reachability is chebyshev distance vs fuel.
+    None if nothing is in range (the TUI warns and aborts; en route, the
+    order wakes). Public: the TUI uses it to validate activation."""
+    spots: list[tuple[int, int, int, Coord]] = []
+    limit = _CITY_SUPPORT_LIMITS["air"]
+    for city in real_map.cities():
+        if city.owner is not player or city.coord == unit.coord:
+            continue
+        parked = sum(
+            1
+            for o in real_map.units_at(city.coord)
+            if o.owner is player and _city_support_category(o.kind) == "air"
+        )
+        if parked >= limit:
+            continue
+        d = unit.coord.chebyshev_to(city.coord)
+        if d <= unit.range:
+            spots.append((d, city.coord.y, city.coord.x, city.coord))
+    for other in real_map.board_units():
+        if other.owner is player and other.can_carry(unit):
+            d = unit.coord.chebyshev_to(other.coord)
+            if d <= unit.range:
+                spots.append((d, other.coord.y, other.coord.x, other.coord))
+    return min(spots)[3] if spots else None
+
+
+def _run_rtb(
+    unit: Unit,
+    player: Player,
+    real_map: Map,
+    rules: RuleSet,
+    combat_resolver: CombatResolverProtocol,
+    rng: random.Random,
+) -> tuple[bool, bool]:
+    """One turn of Return To Base: re-pick the nearest landing spot (carriers
+    move, cities fall) and fly toward it, landing/boarding on arrival.
+    Greedy chebyshev steps with local avoidance — air ignores terrain.
+    Returns (stepped, woke); wakes only when no spot is reachable on current
+    fuel (the player then chooses where to fly or crash)."""
+    budget = unit.moves_this_turn()
+    stepped = False
+    while budget > 0:
+        target = rtb_target(unit, player, real_map)
+        if target is None:
+            unit.standing_order = None
+            return (stepped, True)
+        # Candidate next cells: strictly closer to the target, deterministic
+        # order. Skip cells that would resolve as an attack or are occupied —
+        # EXCEPT the target itself (landing on a carrier / an airbase slot).
+        step_to: Coord | None = None
+        options = sorted(
+            (
+                nb
+                for nb in unit.coord.neighbors()
+                if real_map.in_bounds(nb)
+                and nb.chebyshev_to(target) < unit.coord.chebyshev_to(target)
+            ),
+            key=lambda c: (c.chebyshev_to(target), c.y, c.x),
+        )
+        for nb in options:
+            if step_would_attack(unit, nb, real_map):
+                continue
+            if nb != target and real_map.units_at(nb):
+                continue  # route around traffic; only the target is enterable
+            step_to = nb
+            break
+        if step_to is None:
+            unit.standing_order = None
+            return (stepped, True)  # boxed in — player takes over
+        outcome = execute_unit_path(
+            unit=unit,
+            path=((step_to.x, step_to.y),),
+            real_map=real_map,
+            rules=rules,
+            combat_resolver=combat_resolver,
+            rng=rng,
+        )
+        if outcome.last_outcome is StepOutcome.LOADED:
+            unit.standing_order = None  # aboard the carrier: home
+            return (True, False)
+        if outcome.last_outcome is not StepOutcome.OK:
+            unit.standing_order = None
+            return (stepped, True)  # blocked (e.g. airbase slot just filled)
+        stepped = True
+        budget -= 1
+        if unit.coord == target:
+            unit.standing_order = None  # landed (the step refuelled it)
+            return (True, False)
+    return (stepped, False)
+
+
+# -----------------------------------------------------------------------------
 # Explore: autonomous fog-frontier scouting (standing order)
 # -----------------------------------------------------------------------------
 
@@ -1384,6 +1510,15 @@ def apply_standing_orders(
     for unit in own_units:
         order = unit.standing_order
         if order is None:
+            continue
+        if isinstance(order, ReturnToBase):
+            stepped, woke = _run_rtb(
+                unit, player, real_map, rules, combat_resolver, rng
+            )
+            if stepped:
+                moved.append(unit.id)
+            if woke:
+                interrupted.append(unit.id)
             continue
         if isinstance(order, Explore):
             stepped, woke = _run_explore(

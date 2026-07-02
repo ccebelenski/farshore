@@ -37,6 +37,7 @@ from empire.core.engine import (
     execute_unload,
     load_adjacent_cargo,
     refresh_player_view,
+    rtb_target,
     step_would_attack,
     step_would_enter_artillery_zone,
 )
@@ -50,6 +51,7 @@ from empire.core.standing_order import (
     Heading,
     Loading,
     PatrolPath,
+    ReturnToBase,
     Sentry,
     StandingOrder,
 )
@@ -132,6 +134,7 @@ class PlayScreen(Screen[None]):
         Binding("g", "go_to", "go-to"),
         Binding("t", "patrol_route", "patrol route"),
         Binding("v", "explore", "explore"),
+        Binding("b", "return_to_base", "RTB"),
         Binding("o", "unload", "unload cargo"),
         Binding("l", "loading", "load ship"),
         Binding("f", "bombard", "bombard"),
@@ -685,6 +688,40 @@ class PlayScreen(Screen[None]):
         self._hint = (
             "patrol: cursor to the far endpoint; Enter to confirm, Esc to cancel"
         )
+        self._refresh_view()
+
+    def action_return_to_base(self) -> None:
+        """RTB: the selected fighter flies itself to the nearest own city
+        with airbase room, or own carrier with deck room, and lands. If
+        nothing is reachable on current fuel: warn and ABORT — the player
+        keeps control and chooses where to fly (or crash)."""
+        if self._selected_unit_id is None:
+            self._hint = "select a fighter first"
+            self._refresh_view()
+            return
+        unit = self._selected_unit()
+        if unit is None:
+            self._refresh_view()
+            return
+        if unit.kind is not UnitKind.FIGHTER:
+            self._hint = "RTB is for fighters"
+            self._refresh_view()
+            return
+        target = rtb_target(unit, self._human, self._game.map)
+        if target is None:
+            self._hint = (
+                f"NO BASE IN RANGE (fuel {unit.range}) — RTB aborted; "
+                "fly it manually"
+            )
+            self._refresh_view()
+            return
+        unit.standing_order = ReturnToBase()
+        self._handled.add(unit.id)
+        self._hint = (
+            f"RTB: heading for ({target.x},{target.y}) — "
+            f"{unit.coord.chebyshev_to(target)} cells, fuel {unit.range}"
+        )
+        self._advance_to_next_unit()
         self._refresh_view()
 
     def action_explore(self) -> None:

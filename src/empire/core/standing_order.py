@@ -104,6 +104,17 @@ class Explore:
 
 
 @dataclass(frozen=True, slots=True)
+class ReturnToBase:
+    """A fighter flies itself home: each turn it re-picks the nearest own
+    city with airbase capacity OR own carrier with deck room (carriers move,
+    cities fall — the destination is revalidated every turn) and heads there,
+    landing/boarding on arrival. Deliberately does NOT wake on enemy contact
+    or artillery rings — it is an emergency flight home, not a patrol. Wakes
+    only if no landing spot remains reachable on current fuel (the player
+    then chooses where to fly/crash)."""
+
+
+@dataclass(frozen=True, slots=True)
 class Sentry:
     """The unit holds position and is skipped by auto-cycle."""
 
@@ -121,4 +132,4 @@ class Loading:
     """
 
 
-StandingOrder = Heading | PatrolPath | Sentry | Loading | Explore
+StandingOrder = Heading | PatrolPath | Sentry | Loading | Explore | ReturnToBase

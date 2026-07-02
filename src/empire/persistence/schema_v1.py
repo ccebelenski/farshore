@@ -26,6 +26,7 @@ from empire.core.standing_order import (
     Heading,
     Loading,
     PatrolPath,
+    ReturnToBase,
     Sentry,
     StandingOrder,
 )
@@ -417,6 +418,8 @@ class V1Serializer:
             return {"kind": "loading"}
         if isinstance(order, Explore):
             return {"kind": "explore"}
+        if isinstance(order, ReturnToBase):
+            return {"kind": "rtb"}
         # Sentry — the only remaining variant.
         return {"kind": "sentry"}
 
@@ -439,6 +442,8 @@ class V1Serializer:
             return Loading()
         if kind == "explore":
             return Explore()
+        if kind == "rtb":
+            return ReturnToBase()
         if kind == "sentry":
             return Sentry()
         raise ValueError(f"Unknown StandingOrder kind in save: {kind!r}")

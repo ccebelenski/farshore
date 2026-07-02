@@ -222,8 +222,12 @@ def test_fighter_cannot_load_onto_carrier_in_dry_dock(p1: Player) -> None:
         rng=random.Random(0),
     )
 
-    # Not a load — blocked by the friendly carrier instead; nothing went aboard.
-    assert outcome.last_outcome is StepOutcome.BLOCKED_BY_FRIENDLY
+    # Not a load: the fighter LANDS at the city's airbase slot beside the
+    # dry-docked carrier (own-city §5.4 capacity landing); nothing boards a
+    # carrier sitting in dry dock.
+    assert outcome.last_outcome is StepOutcome.OK
+    assert fighter.coord == Coord(0, 0)
+    assert fighter.carried_by is None
     assert carrier.cargo == []
     assert not fighter.is_aboard()
 
