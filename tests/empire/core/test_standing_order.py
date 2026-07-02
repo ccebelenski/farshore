@@ -13,15 +13,16 @@ from empire.core.coord import Coord, Direction
 from empire.core.engine import (
     apply_standing_orders,
     enemy_in_scan_range,
+    load_adjacent_cargo,
     wake_sentried_units,
 )
 from empire.core.identity import CityId, PlayerId, UnitId
 from empire.core.map import Map, ViewMap
 from empire.core.player import Player
 from empire.core.ruleset import STANDARD
-from empire.core.standing_order import Heading, PatrolPath, Sentry
+from empire.core.standing_order import Heading, Loading, PatrolPath, Sentry
 from empire.core.tile import TerrainKind, Tile
-from empire.core.unit import Army, Patrol
+from empire.core.unit import Army, Patrol, Transport
 
 
 def _land_map(width: int, height: int) -> Map:
@@ -429,3 +430,67 @@ def test_loading_order_round_trips_through_save() -> None:
     restored = loaded.map.unit_by_id(UnitId(1))
     assert restored is not None
     assert isinstance(restored.standing_order, Loading)
+
+
+# --- Loading dock: continuous sweep of newly-adjacent cargo -------------------
+
+
+def test_load_adjacent_cargo_snaps_own_armies_not_enemy(
+    p1: Player, p2: Player
+) -> None:
+    """The shared loader boards eligible friendly neighbours and ignores an
+    enemy unit (ownership is enforced by can_carry)."""
+    m = _mixed_map(["WLL", "LLL"])
+    transport = Transport(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(transport, Coord(0, 0))
+    m.place_unit(Army(UnitId(2), p1, Coord(1, 0)), Coord(1, 0))  # own, adjacent
+    m.place_unit(Army(UnitId(3), p1, Coord(0, 1)), Coord(0, 1))  # own, adjacent
+    m.place_unit(Army(UnitId(4), p2, Coord(1, 1)), Coord(1, 1))  # ENEMY, adjacent
+
+    boarded = load_adjacent_cargo(transport, m)
+    assert set(boarded) == {UnitId(2), UnitId(3)}
+    assert len(transport.cargo) == 2
+    assert m.unit_by_id(UnitId(4)) is not None  # enemy left ashore
+
+
+def test_load_adjacent_cargo_stops_at_capacity(p1: Player) -> None:
+    # Transport centred so all 8 neighbours are in-bounds land; more armies
+    # than capacity surround it.
+    m = _mixed_map(["LLL", "LWL", "LLL"])
+    transport = Transport(UnitId(1), p1, Coord(1, 1))
+    m.place_unit(transport, Coord(1, 1))
+    cap = transport.effective_capacity()
+    neighbours = [c for c in Coord(1, 1).neighbors() if m.in_bounds(c)]
+    assert len(neighbours) > cap  # genuinely over-subscribed
+    for i, c in enumerate(neighbours, start=2):
+        m.place_unit(Army(UnitId(i), p1, c), c)
+
+    boarded = load_adjacent_cargo(transport, m)
+    assert len(boarded) == cap  # filled exactly to capacity, no more
+    assert len(transport.cargo) == cap
+
+
+def test_loading_carrier_sweeps_new_cargo_each_turn(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """A Loading carrier is a persistent dock: it snaps up armies that become
+    adjacent on LATER turns (freshly produced / walked up), not just at
+    set-time — the playtest bug ('Load doesn't sweep new armies')."""
+    m = _mixed_map(["WL"])
+    transport = Transport(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(transport, Coord(0, 0))
+    transport.standing_order = Loading()
+
+    # Turn 1: nothing adjacent -> nothing loaded, still holding.
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert len(transport.cargo) == 0
+    assert isinstance(transport.standing_order, Loading)
+
+    # A freshly-produced army appears adjacent afterwards.
+    m.place_unit(Army(UnitId(2), p1, Coord(1, 0)), Coord(1, 0))
+
+    # Turn 2: the dock sweeps it aboard.
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert len(transport.cargo) == 1
+    assert transport.cargo[0] == UnitId(2)  # cargo holds ids
+    assert all(u.id != UnitId(2) for u in m.board_units())  # off the board, aboard

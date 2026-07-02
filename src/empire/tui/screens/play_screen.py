@@ -34,6 +34,7 @@ from empire.core.engine import (
     execute_bombardment,
     execute_unit_path,
     execute_unload,
+    load_adjacent_cargo,
     scan_set_for_player,
     step_would_attack,
 )
@@ -697,22 +698,14 @@ class PlayScreen(Screen[None]):
         self._refresh_view()
 
     def _snap_adjacent_cargo(self, carrier: Unit) -> int:
-        """Load eligible own units on the 8 neighbor cells aboard `carrier`,
-        nearest registry-order first, until full. Returns how many boarded."""
-        loaded = 0
-        for nb in carrier.coord.neighbors():
-            if not self._game.map.in_bounds(nb):
-                continue
-            # Snapshot — load_cargo mutates the cell's occupant list.
-            for cargo in list(self._game.map.units_at(nb)):
-                if not carrier.can_carry(cargo):
-                    continue
-                self._game.map.load_cargo(carrier, cargo)
-                self._handled.discard(cargo.id)  # it's aboard now, off the cycle
-                loaded += 1
-                if len(carrier.cargo) >= carrier.effective_capacity():
-                    return loaded
-        return loaded
+        """Load eligible adjacent units aboard `carrier` now, until full.
+        Delegates to the shared engine loader (the same one the per-turn
+        Loading sweep uses) so the set-time snap and the sweep can't drift;
+        here we also drop boarded units from the auto-cycle."""
+        boarded = load_adjacent_cargo(carrier, self._game.map)
+        for cid in boarded:
+            self._handled.discard(cid)  # aboard now, off the cycle
+        return len(boarded)
 
     def action_bombard(self) -> None:
         """Arm bombardment: the next direction key fires at that adjacent cell."""

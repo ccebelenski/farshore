@@ -1076,6 +1076,30 @@ def unseen_city_in_scan(unit: Unit, real_map: Map) -> bool:
     return False
 
 
+def load_adjacent_cargo(carrier: Unit, real_map: Map) -> list[UnitId]:
+    """Snap eligible friendly units on the 8 neighbour cells aboard `carrier`,
+    in cell order, until it is full (spec §3.4). Returns the ids that boarded.
+
+    The one loading-dock primitive, shared by the TUI's set-time snap (when the
+    player issues a Load order) AND the per-turn `Loading` sweep in
+    `apply_standing_orders` — so a carrier parked in Loading keeps hoovering up
+    newly-adjacent armies (freshly produced, or walked up) every turn, not just
+    once. Ownership/kind/capacity are enforced by `Unit.can_carry`."""
+    loaded: list[UnitId] = []
+    for nb in carrier.coord.neighbors():
+        if not real_map.in_bounds(nb):
+            continue
+        # Snapshot — load_cargo mutates the cell's occupant list.
+        for cargo in list(real_map.units_at(nb)):
+            if not carrier.can_carry(cargo):
+                continue
+            real_map.load_cargo(carrier, cargo)
+            loaded.append(cargo.id)
+            if len(carrier.cargo) >= carrier.effective_capacity():
+                return loaded
+    return loaded
+
+
 def apply_standing_orders(
     player: Player,
     real_map: Map,
@@ -1113,9 +1137,16 @@ def apply_standing_orders(
         order = unit.standing_order
         if order is None:
             continue
-        if isinstance(order, (Sentry, Loading)):
-            # Both hold position; neither steps. (Loading's wake-when-full is
-            # handled in wake_sentried_units, run just before this.)
+        if isinstance(order, Loading):
+            # A loading dock: hold position and sweep any newly-adjacent cargo
+            # aboard this turn (freshly produced / walked up), until full. The
+            # wake-when-full is handled in wake_sentried_units (run just before
+            # this); a full sweep here wakes next turn's check.
+            load_adjacent_cargo(unit, real_map)
+            sentried.append(unit.id)
+            continue
+        if isinstance(order, Sentry):
+            # Holds position; never steps.
             sentried.append(unit.id)
             continue
 
