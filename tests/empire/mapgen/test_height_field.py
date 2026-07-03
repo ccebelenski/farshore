@@ -377,7 +377,7 @@ def test_at_least_one_meaningful_connected_landmass(
     profile: MapProfile,
     seed: int,
 ) -> None:
-    """Per `planning/01-game-rules-spec.md` §9.1 and `planning/05-implementation-plan.md`
+    """Per docs/RULES.md §9.1 and the mapgen design
     Phase-5 exit gate: the generated map must have at least one connected
     landmass — i.e., the largest connected component of LAND+CITY cells
     isn't a single pepper-noise tile.

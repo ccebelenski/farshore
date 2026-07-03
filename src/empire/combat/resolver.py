@@ -1,6 +1,6 @@
 """`CombatResolver`: per-blow attrition combat between two units.
 
-Implements the combat rules from `planning/01-game-rules-spec.md` §4. Per
+Implements the combat rules from `docs/RULES.md` §4. Per
 blow: with probability `p` the defender loses 1 HP; otherwise the attacker
 loses 1 HP. Repeat until one side reaches 0 HP. `p` is derived from the
 units' `strength` and the attacker's `attack_preferences`.

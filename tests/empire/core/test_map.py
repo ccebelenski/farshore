@@ -197,7 +197,7 @@ def _index_units_at(m: Map, c: Coord) -> set[UnitId]:
 def test_spatial_index_consistency_under_random_ops(player: Player) -> None:
     """After many random place/move/remove ops, the index must agree with truth.
 
-    Headline canary for Phase 2. Runs >1000 ops per planning/05 Phase 2 exit
+    Headline performance canary. Runs >1000 ops per the original exit
     gate ("Spatial-index property test runs ≥1000 random ops without desync").
     """
     rng = random.Random(0xE3417E)  # fixed seed for determinism

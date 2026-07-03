@@ -3,12 +3,10 @@ and a `UNIT_REGISTRY` mapping kind to class.
 
 Structural only: movement, combat and damage-scaling rules live in
 `empire.core.engine` / `empire.combat`. The class-level attributes are our
-v1 design choices (see `planning/01-game-rules-spec.md` §2) and are subject
-to playtest tuning.
+v1 design choices (see `docs/RULES.md` §2), tuned through play.
 
 `Unit.coord` is read-only externally; only `Map.move_unit / place_unit`
-should mutate position via `_set_coord` (see `planning/04-class-hierarchy.md`
-§2).
+should mutate position via `_set_coord`.
 """
 
 from __future__ import annotations
@@ -169,7 +167,7 @@ _ANY_TERRAIN: frozenset[TerrainKind] = frozenset(TerrainKind)
 
 # -----------------------------------------------------------------------------
 # Concrete unit subclasses. Class-level attribute values are v1 defaults,
-# tunable via playtesting.
+# tuned through play.
 # -----------------------------------------------------------------------------
 
 

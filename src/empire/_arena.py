@@ -1,8 +1,7 @@
 """Land-brawl arena: head-to-head `StrategicAI` vs `BaselineAI` on a *shared*
 continent, with sides swapped per seed and a binomial significance test.
 
-This is the tuning instrument for the Phase-15.5 force-economy redesign (see
-`planning/05-implementation-plan.md`). Unlike `build_game`, which places
+A head-to-head tuning instrument. Unlike `build_game`, which places
 capitals on *separate* continents (spec §9.2), this drops both capitals on the
 largest landmass so the two AIs can actually fight on land — isolating "is the
 strategy smarter?" from "can it sail?".

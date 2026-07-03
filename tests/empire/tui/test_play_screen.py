@@ -908,3 +908,35 @@ async def test_rtb_verb_sets_order_or_warns() -> None:
         screen.action_return_to_base()
         assert jet.standing_order is None
         assert "NO BASE IN RANGE" in screen._hint  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_explore_verb_steps_off_own_city_immediately() -> None:
+    """'v' on an army standing on its own city must step it OFF right away
+    (like go-to/heading's immediate first step): explore otherwise only acts
+    next segment, and §5.4 disbands a city-sitting army at THIS segment's end
+    — the order looked like it 'did nothing' and the army died (playtest)."""
+    from empire.core.identity import UnitId
+    from empire.core.standing_order import Explore
+    from empire.core.unit import Army
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app()
+    assert app.game is not None
+    game = app.game
+    human = next(p for p in game.players if not p.is_ai)
+    capital = next(c for c in game.map.cities() if c.owner is human)
+    scout = Army(UnitId(971), human, capital.coord)
+    game.map.place_unit(scout, capital.coord)  # fresh produce, on the city
+
+    async with app.run_test(size=(60, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        screen._selected_unit_id = scout.id  # pyright: ignore[reportPrivateUsage]
+        screen.action_explore()
+        await pilot.pause()
+        assert isinstance(scout.standing_order, Explore)
+        assert scout.coord != capital.coord, (
+            "the immediate first step must carry the army off the city "
+            "(no disband trap)"
+        )

@@ -229,7 +229,7 @@ def test_belief_infers_unseen_terrain_by_domain() -> None:
     assert belief.map.terrain_at(Coord(5, 0)) is TerrainKind.WATER
 
 
-# --- aggression bias with caution-reversion (planning/06-aggression-bias.md) ---
+# --- aggression bias with caution-reversion ---
 
 
 def test_is_bold_classifies_plans() -> None:
@@ -283,7 +283,7 @@ def test_aggression_zero_is_a_noop() -> None:
 
 
 def test_base_value_credits_only_tagged_invade_goal() -> None:
-    """Split-score (planning/07): horizon-free base value goes to the INVADE goal
+    """Split-score: horizon-free base value goes to the INVADE goal
     TAG only (set by the generator when crossing water is the path to victory).
     A bare INVADE objective with no tag gets nothing — so island sideshows on a
     land map (untagged) can't pull the AI, the land-brawl-regression fix."""

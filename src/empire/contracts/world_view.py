@@ -5,9 +5,6 @@ the current turn, and the active `RuleSet`. It exposes only what fog of war
 permits — visible tiles, remembered tiles, own assets, and known enemy/
 neutral assets. No copies of the underlying state are made; readers see
 current state every time they query.
-
-See `planning/03-ai-design.md` §1 for the design rationale and
-`planning/04-class-hierarchy.md` §7 for class skeletons.
 """
 
 from __future__ import annotations
@@ -41,7 +38,7 @@ class KnownEnemyUnit:
 class WorldView:
     """Live-filtered view of the world for one player.
 
-    Per `planning/03-ai-design.md` §1, this is *not* a snapshot — it holds
+    This is deliberately *not* a snapshot — it holds
     references and re-derives its output on each query. The frozenness lives
     in the artifacts produced by callers (e.g., `IntelReport`), not here.
     """

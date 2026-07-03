@@ -1,4 +1,4 @@
-"""`SearchAI`: plan-space lookahead (design §9 of 03-ai-design).
+"""`SearchAI`: plan-space lookahead.
 
 Each turn, rolling horizon:
 
@@ -44,8 +44,7 @@ DEFAULT_SAMPLES = 3
 _SAMPLE_STRIDE = 104_729
 # A challenger must beat the incumbent plan's score by this much to displace
 # it (≈ one army's worth). Without it, sampling noise flips near-tied plans
-# every turn — without it, assault strength oscillates
-# 3↔5 each turn, reshuffling fist membership so no storm ever cohered.
+# every turn, reshuffling assault membership so no storm ever coheres.
 SWITCH_MARGIN = 10.0
 # Investment-scaled commitment stickiness (§10): a campaign part-way through a
 # slow strategic build resists abandonment so the search sees the 30-turn hull
@@ -57,7 +56,7 @@ SWITCH_MARGIN = 10.0
 COMMIT_SLOW_BUILD = 15
 COMMIT_BASE = 25.0
 COMMIT_SCALE = 30.0
-# Aggression temperament (planning/06-aggression-bias.md). A single scalar that
+# Aggression temperament. A single scalar that
 # leans plan selection toward BOLD plans — those whose payoff tends to land past
 # the search horizon (assault/invade objectives; building projection units) — so
 # the search commits to expansion and naval projection it otherwise can't see
@@ -65,21 +64,18 @@ COMMIT_SCALE = 30.0
 # fires: a bold plan scoring more than CAUTION_TOL below the best stand-pat
 # (non-bold) option is losing ground in-horizon (known-bad), so the bias is
 # withdrawn and the smarter plan wins. Caution is read off the playout itself, so
-# every in-horizon danger is caught by construction. aggression=0.0 recovers the
-# pre-bias behavior exactly (used as the arena A/B baseline). Defaults are a
-# starting guess in evaluator units (city=100, army=10); the self-play arena
-# calibrates them.
+# every in-horizon danger is caught by construction. aggression=0.0 recovers
+# plain honest evaluation exactly. Values are in evaluator units (city=100,
+# army=10).
 #
-# DISABLED BY DEFAULT (0.0): the uniform-scalar form was tested and FAILED — a
-# flat bonus to every bold plan only ever flips passive->bold, never bold->bold,
-# so it couldn't redirect land-consolidation toward naval projection (no naval
-# help) yet overrode correct passive/defensive choices on land (lost 17-3 to its
-# plain self). See planning/06-aggression-bias.md "Result" and memory
-# project_aggression_bias_failed. The mechanism is kept (param-exposed) because a
-# DIRECTIONAL successor may reuse the bold/reversion machinery, but it ships off.
+# DISABLED BY DEFAULT (0.0): a flat bonus to every bold plan only ever flips
+# passive->bold, never bold->bold, so it cannot redirect land consolidation
+# toward naval projection, yet it overrides correct passive/defensive choices
+# on land. The mechanism is kept (param-exposed) because a DIRECTIONAL
+# successor may reuse the bold/reversion machinery, but it ships off.
 DEFAULT_AGGRESSION = 0.0
 DEFAULT_CAUTION_TOL = 20.0
-# Split-score base value (planning/07-portfolio-director.md). The 12-turn playout
+# Split-score base value. The 12-turn playout
 # is demoted to a PRIORITY signal; a plan's worth also includes the horizon-FREE
 # intrinsic value of achieving its goal. Applied ONLY to past-horizon goals the
 # playout structurally cannot see — INVADE objectives, whose overseas city pays
@@ -87,9 +83,8 @@ DEFAULT_CAUTION_TOL = 20.0
 # defense) are left to the playout, which already values them correctly, so this
 # can't inflate land plans / regress the land game (no INVADE objective there =
 # no base value). This is what lets a naval plan get STARTED despite zero
-# in-horizon payoff — the wall the concurrency gate proved is at selection.
-# Roughly a city's worth (evaluator city=100) tempered for distance/uncertainty;
-# 0.0 disables. Tuned against the amphibious probe.
+# in-horizon payoff. Roughly a city's worth (evaluator city=100) tempered for
+# distance/uncertainty; 0.0 disables.
 INVADE_BASE_VALUE = 60.0
 # Exploration base value: the horizon-free worth of SCOUTING THE SEA to discover
 # the enemy continent — the goal one level up from INVADE (without a discovered
@@ -98,8 +93,8 @@ INVADE_BASE_VALUE = 60.0
 # past the horizon, so the playout won't pick it on its own. Credited only when
 # it is genuinely the way forward — gated in `_choose_plan` to fire ONLY when no
 # land target remains AND home is fully explored — so it cannot pull the AI off
-# the land game or off scouting its own continent first (the regressions in
-# project_naval_regressed_land). Kept below INVADE_BASE_VALUE so a discovered
+# the land game or off scouting its own continent first.
+# Kept below INVADE_BASE_VALUE so a discovered
 # target supersedes more scouting. 0.0 disables.
 EXPLORE_BASE_VALUE = 30.0
 
@@ -210,7 +205,7 @@ class SearchAI:
         self, candidates: tuple[Plan, ...], raw: list[float]
     ) -> list[float]:
         """Add the aggression lean to BOLD plans, reverting to flat when a
-        caution signal fires (planning/06-aggression-bias.md).
+        caution signal fires.
 
         Caution is derived from the playout, not a hand list: the `floor` is the
         best honest score among the NON-bold (stand-pat) plans, and a bold plan
@@ -230,12 +225,12 @@ class SearchAI:
         ]
 
     def _base_value(self, plan: Plan) -> float:
-        """Horizon-free worth of the plan's PAST-HORIZON goals (planning/07).
+        """Horizon-free worth of the plan's PAST-HORIZON goals.
 
         INVADE objectives: their overseas city pays off well past the 12-turn
         horizon, so the playout scores the build cost but never the prize —
-        leaving the plan unstartable on playout alone (the concurrency gate proved
-        selection is the wall). Crediting the intrinsic city worth lets a combined
+        leaving the plan unstartable on playout alone. Crediting the
+        intrinsic city worth lets a combined
         'press-home + build-fleet' plan out-score pure-home (it carries home's
         accurate playout value PLUS the overseas base value).
 
@@ -248,7 +243,7 @@ class SearchAI:
         them, so land-only games are untouched. Both naval credits come via the
         generator's goal tag, which it sets only when crossing water is the path
         to victory (home explored + no land-reachable enemy), so neither fires on
-        a shared-continent map (the land-brawl regression)."""
+        a shared-continent map."""
         value = 0.0
         if self._invade_base > 0.0 and plan.goal is PlanGoal.INVADE:
             value += self._invade_base

@@ -299,19 +299,35 @@ def test_volley_reveals_gun_to_victim(p1: Player, p2: Player) -> None:
 
 
 def test_step_into_zone_is_blocked_from_outside(p1: Player, p2: Player) -> None:
-    """Stepping from outside a hostile city's range to inside it is blocked —
-    the guard that stops an order at the red-zone edge (spec §4.7)."""
+    """Stepping from outside a DISCOVERED hostile city's range to inside it
+    is blocked — the guard that stops an order at the red-zone edge (§4.7)."""
     city = City(id=CityId(1), coord=Coord(0, 0), owner=p2)
     m = _map(["CLLLL"], cities={Coord(0, 0): city})
     army = _place(m, Army(UnitId(1), p1, Coord(3, 0)))  # chebyshev 3: outside
+    p1.view.visible = {Coord(0, 0)}  # the fort is discovered
     # (3,0)->(2,0): chebyshev 2 == range -> entering.
     assert step_would_enter_artillery_zone(army, Coord(2, 0), m, FORT)
+
+
+def test_undiscovered_ring_gives_no_clairvoyant_halt(
+    p1: Player, p2: Player
+) -> None:
+    """Fog-honest guard: a fort the player has NEVER SEEN projects no halt —
+    auto-moves may walk into its (unknown) ring; the scan on arrival
+    discovers the fort and the discovery wake takes over (playtest report:
+    an explorer woke at a ring edge with no red showing)."""
+    city = City(id=CityId(1), coord=Coord(0, 0), owner=p2)
+    m = _map(["CLLLL"], cities={Coord(0, 0): city})
+    army = _place(m, Army(UnitId(1), p1, Coord(3, 0)))
+    assert not p1.view.seen(Coord(0, 0))  # fort undiscovered
+    assert not step_would_enter_artillery_zone(army, Coord(2, 0), m, FORT)
 
 
 def test_step_outside_to_outside_not_blocked(p1: Player, p2: Player) -> None:
     city = City(id=CityId(1), coord=Coord(0, 0), owner=p2)
     m = _map(["CLLLL"], cities={Coord(0, 0): city})
     army = _place(m, Army(UnitId(1), p1, Coord(4, 0)))  # chebyshev 4
+    p1.view.visible = {Coord(0, 0)}
     # (4,0)->(3,0): chebyshev 3, still outside range 2.
     assert not step_would_enter_artillery_zone(army, Coord(3, 0), m, FORT)
 
@@ -322,6 +338,7 @@ def test_move_within_zone_not_blocked(p1: Player, p2: Player) -> None:
     city = City(id=CityId(1), coord=Coord(0, 0), owner=p2)
     m = _map(["CLLL"], cities={Coord(0, 0): city})
     army = _place(m, Army(UnitId(1), p1, Coord(2, 0)))  # already in range (2)
+    p1.view.visible = {Coord(0, 0)}
     assert not step_would_enter_artillery_zone(army, Coord(1, 0), m, FORT)
 
 
@@ -390,3 +407,22 @@ def test_destroyed_unit_reveals_the_firing_city() -> None:
     game.run_turn()
     assert game.map.unit_by_id(UnitId(1)) is None, "1-HP army should be shelled to death"
     assert p1.view.seen(ncoord), "a shelled-to-death unit must still reveal the firing city"
+
+
+def test_crossing_between_overlapping_rings_still_warns(
+    p1: Player, p2: Player
+) -> None:
+    """The edge test is per CITY: standing inside one discovered ring does not
+    license sleepwalking into a DIFFERENT discovered city's ring (overlapping
+    rings used to merge into one zone — orders crossed unwarned and got
+    shelled; playtest report)."""
+    a = City(id=CityId(1), coord=Coord(0, 0), owner=p2)
+    b = City(id=CityId(2), coord=Coord(5, 0), owner=p2)
+    m = _map(["CLLLLC"], cities={Coord(0, 0): a, Coord(5, 0): b})
+    army = _place(m, Army(UnitId(1), p1, Coord(2, 0)))  # in A's ring only
+    p1.view.visible = {Coord(0, 0), Coord(5, 0)}  # both forts discovered
+
+    # (2,0)->(3,0): leaves nothing (still within A's contiguous coverage
+    # under the old union test) but ENTERS B's ring (dist 2, from dist 3):
+    # per-city semantics must warn.
+    assert step_would_enter_artillery_zone(army, Coord(3, 0), m, FORT)

@@ -28,8 +28,8 @@ class Role(Enum):
 
 class PlanGoal(Enum):
     """The horizon-free strategic GOAL a plan serves, set by the generator (which
-    knows the land/sea topology) and read by the scorer's split-score base value
-    (planning/07). Most goals are read off the objectives; SCOUT_SEA must be
+    knows the land/sea topology) and read by the scorer's split-score base
+    value. Most goals are read off the objectives; SCOUT_SEA must be
     tagged because a 'press-home + scout-sea' plan looks structurally like an
     assault plan that happens to build a patrol — only the generator knows it was
     emitted to go find the enemy continent."""

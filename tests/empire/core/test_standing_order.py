@@ -846,3 +846,70 @@ def test_explore_waits_out_transient_traffic(
     apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
     assert scout.coord == Coord(1, 0)  # moving again
     assert isinstance(scout.standing_order, Explore)
+
+
+# --- move-order defer/retry: transient jams never cost an order ---------------
+
+
+def test_convergent_headings_defer_and_both_advance(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """A blocked by B who moves this same phase: A defers, retries after the
+    traffic clears, and BOTH keep their orders (transient jams used to wake
+    the blocked unit instantly — playtest: 'premature wakes')."""
+    m = _land_map(4, 1)
+    a = Army(UnitId(1), p1, Coord(0, 0))
+    b = Army(UnitId(2), p1, Coord(1, 0))
+    m.place_unit(a, Coord(0, 0))
+    m.place_unit(b, Coord(1, 0))
+    a.standing_order = Heading(Direction.E)
+    b.standing_order = Heading(Direction.E)
+
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert b.coord == Coord(2, 0)
+    assert a.coord == Coord(1, 0)  # deferred, then took the freed cell
+    assert isinstance(a.standing_order, Heading)  # order survived the jam
+    assert isinstance(b.standing_order, Heading)
+    assert set(result.moved_unit_ids) == {UnitId(1), UnitId(2)}
+
+
+def test_goto_repaths_around_a_parked_friendly(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """A go-to whose route is squatted by a sentried friendly re-paths around
+    the jam on the retry instead of waking (flexible pathing)."""
+    m = _land_map(4, 2)
+    blocker = Army(UnitId(1), p1, Coord(1, 0))
+    m.place_unit(blocker, Coord(1, 0))
+    blocker.standing_order = Sentry()
+    mover = Army(UnitId(2), p1, Coord(0, 0))
+    m.place_unit(mover, Coord(0, 0))
+    mover.standing_order = PatrolPath.new((Coord(1, 0), Coord(2, 0), Coord(3, 0)))
+    _see(p1, [Coord(x, y) for x in range(4) for y in range(2)])
+
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(1, 1)  # detoured via the open row
+    assert isinstance(mover.standing_order, PatrolPath)  # still en route
+
+    for _ in range(3):
+        apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(3, 0)  # arrived despite the squatter
+
+
+def test_heading_wakes_on_second_attempt_when_still_blocked(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """No alternative geometry for a heading: still blocked after everyone
+    moved -> wake (the deliberate second-attempt wake)."""
+    m = _land_map(3, 1)
+    blocker = Army(UnitId(1), p1, Coord(1, 0))
+    m.place_unit(blocker, Coord(1, 0))
+    blocker.standing_order = Sentry()
+    mover = Army(UnitId(2), p1, Coord(0, 0))
+    m.place_unit(mover, Coord(0, 0))
+    mover.standing_order = Heading(Direction.E)
+
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(0, 0)
+    assert mover.standing_order is None
+    assert UnitId(2) in result.interrupted_unit_ids

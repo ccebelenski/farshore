@@ -2,9 +2,7 @@
 
 The ONE publisher for every path that resolves a unit step or amphibious
 landing — the engine turn loop (`TurnManager`) and the TUI's immediate
-moves/unloads — so the event stream cannot drift between call sites. (The
-event blocks used to be copied per site; the copies diverged and a TUI
-amphibious capture went unreported.)
+moves/unloads — so the event stream cannot drift between call sites.
 """
 
 from __future__ import annotations

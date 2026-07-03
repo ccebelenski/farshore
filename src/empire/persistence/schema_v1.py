@@ -1,7 +1,6 @@
 """V1 (de)serializers for the game state.
 
-Save format is JSON. Topological load order per
-`planning/04-class-hierarchy.md` §8: RuleSet → Players (with empty
+Save format is JSON. Topological load order: RuleSet → Players (with empty
 ViewMaps) → Cities (refs Players) → Tiles (with City refs) → Map → Units
 (placed via Map; refs Players) → ViewMaps populated → Game.
 

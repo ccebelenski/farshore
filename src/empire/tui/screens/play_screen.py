@@ -35,6 +35,7 @@ from empire.core.engine import (
     execute_bombardment,
     execute_unit_path,
     execute_unload,
+    explore_now,
     load_adjacent_cargo,
     refresh_player_view,
     rtb_target,
@@ -745,10 +746,36 @@ class PlayScreen(Screen[None]):
             self._refresh_view()
             return
         unit.standing_order = Explore()
+        # Immediate first move (same expectation as go-to/heading) with the
+        # unit's REMAINING budget — critically, this carries a fresh army off
+        # its own city before the §5.4 turn-end disband can claim it.
+        remaining = unit.moves_this_turn() - self._moves_used.get(unit.id, 0)
+        started = unit.coord
+        still_exploring = True
+        if remaining > 0:
+            still_exploring = explore_now(
+                unit,
+                self._human,
+                self._game.map,
+                self._game.rules,
+                self._game.combat_resolver,
+                self._game.rng,
+                remaining,
+            )
+            if unit.coord != started:
+                self._moves_used[unit.id] = self._moves_used.get(unit.id, 0) + (
+                    unit.moves_this_turn()
+                )
+                refresh_player_view(
+                    self._human, self._game.map, self._game.turn
+                )
         self._handled.add(unit.id)
         self._hint = (
             "exploring — reveals unknown tiles (shore first); wakes on "
             "contact/discovery, 'w', or when nothing is left to explore"
+            if still_exploring
+            else "explorer stopped immediately — contact, discovery, or "
+            "nothing reachable to explore"
         )
         self._advance_to_next_unit()
         self._refresh_view()

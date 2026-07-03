@@ -1,4 +1,4 @@
-"""Spot-checks for `BaselineAI` per planning/05-implementation-plan.md Phase 9.
+"""Spot-checks for `BaselineAI`.
 
 These are *behavioral* tests against canned `WorldView` situations — they
 assert the AI makes the intuitively-correct decision, not specific score

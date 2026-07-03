@@ -3,7 +3,7 @@
 Player is a thin dataclass — most of its surface is `@dataclass` machinery,
 not Player behavior. Tests focus on the two things that *are* contracts:
 the default color, and the discipline rule that Player has no controller
-field (controllers live on Game per planning/04 §2).
+field (controllers live on Game, per the class-hierarchy design).
 """
 
 from empire.core.identity import PlayerId
@@ -17,6 +17,6 @@ def test_player_default_color_is_default() -> None:
 
 
 def test_player_does_not_hold_controller_reference() -> None:
-    """Per planning/04 §2: controllers live on Game, not on Player."""
+    """Controllers live on Game, not on Player (dependency-rule design)."""
     p = Player(id=PlayerId(1), name="P", is_ai=True, view=ViewMap())
     assert not hasattr(p, "controller")

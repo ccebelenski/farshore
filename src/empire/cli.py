@@ -121,8 +121,8 @@ def play_game(
     ]
 
     # Assign the two largest-continent cities as starting capitals (a stand-in
-    # for full capital-selection logic in planning/01 §9.2 — those checks
-    # land with the game-setup phase).
+    # for the full capital-selection logic of docs/RULES.md §9.2, which lives
+    # in the game-setup phase).
     from empire.setup import land_continents
 
     continents = sorted(
@@ -424,6 +424,8 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point. `argv=None` means use `sys.argv[1:]`."""
     if argv is None:
         argv = sys.argv[1:]
+    if not argv:
+        argv = ["tui"]  # bare `farshore` launches the game menu
     parser = _build_parser()
     args = parser.parse_args(argv)
 

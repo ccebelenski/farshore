@@ -7,9 +7,9 @@
 - `run_turn()` delegates to a `TurnManager` that runs the production /
   movement / combat / fog phases for every player.
 - `is_over()` / `winner()` implement the spec's "zero cities" rule
-  (`planning/01-game-rules-spec.md` §8).
+  (`docs/RULES.md` §8).
 
-Game lives in `core` per the planning layout, so it must not import from
+Game lives in `core`, so it must not import from
 `empire.events` (dep matrix). It talks to the bus via the
 `EventBusProtocol` defined in `empire.core.event_bus`.
 """
@@ -53,8 +53,7 @@ class Game:
     order and then calls `Game.__init__` with the assembled pieces.
 
     Controllers are *not* held by Players; they live on `Game.controllers`
-    so `core` stays free of AI-package imports (see
-    `planning/04-class-hierarchy.md` §2).
+    so `core` stays free of AI-package imports.
     """
 
     def __init__(

@@ -1099,37 +1099,41 @@ def enemy_in_scan_range(unit: Unit, real_map: Map) -> bool:
     return False
 
 
-def _coord_in_hostile_artillery_zone(
-    owner: Player | None, coord: Coord, real_map: Map, rules: RuleSet
-) -> bool:
-    """True if `coord` is covered by ANY city's guns hostile to `owner` (enemy
-    or neutral — both fire, spec §4.7)."""
-    if rules.city_artillery_range <= 0:
-        return False
-    for city in real_map.cities():
-        if city.owner is owner:
-            continue
-        if coord.chebyshev_to(city.coord) <= rules.city_artillery_range:
-            return True
-    return False
 
 
 def step_would_enter_artillery_zone(
     unit: Unit, target: Coord, real_map: Map, rules: RuleSet
 ) -> bool:
-    """True if stepping to `target` would carry `unit` from OUTSIDE any hostile
-    city's gun range to INSIDE it (spec §4.7).
+    """True if stepping to `target` would carry `unit` into the gun ring of a
+    DISCOVERED hostile city whose ring it is not already inside (spec §4.7).
 
-    Used to STOP auto-move orders (heading / go-to / patrol) at the edge of the
-    red zone — walking into artillery range is a deliberate decision the player
-    makes, never something an order sleepwalks into. The mirror of
-    `step_would_attack`, and checked in every auto-move step path (the engine's
-    `apply_standing_orders` AND the TUI's immediate first step) so the two can't
-    drift apart. A unit already inside a zone isn't blocked from moving within
-    it — only the outside→inside transition halts the order."""
-    return _coord_in_hostile_artillery_zone(
-        unit.owner, target, real_map, rules
-    ) and not _coord_in_hostile_artillery_zone(unit.owner, unit.coord, real_map, rules)
+    Used to STOP auto-move orders (heading / go-to / patrol / explore) at the
+    edge of a known red zone — entering one is a deliberate decision the
+    player makes, never something an order sleepwalks into. The mirror of
+    `step_would_attack`, checked in every auto-move step path.
+
+    Fog-honest AND per-city: an undiscovered fort gives no warning (unknown
+    guns are unknown — a unit that walks in discovers the fort by scan on
+    arrival, and the discovery wake fires before the deferred volley); and
+    the edge test is per CITY, so maneuvering within one known ring stays
+    free while crossing into a DIFFERENT known city's ring still warns
+    (overlapping rings used to be one merged zone, letting orders sleepwalk
+    from ring to ring unwarned)."""
+    if rules.city_artillery_range <= 0:
+        return False
+    owner = unit.owner
+    r = rules.city_artillery_range
+    for city in real_map.cities():
+        if city.owner is owner:
+            continue
+        if owner is not None and not owner.view.seen(city.coord):
+            continue  # unknown guns are unknown — no clairvoyant halts
+        if (
+            target.chebyshev_to(city.coord) <= r
+            and unit.coord.chebyshev_to(city.coord) > r
+        ):
+            return True
+    return False
 
 
 def step_would_attack(unit: Unit, target: Coord, real_map: Map) -> bool:
@@ -1336,7 +1340,7 @@ def _is_shore(player: Player, real_map: Map, c: Coord) -> bool:
 
 
 def _explore_flood(
-    unit: Unit, player: Player, real_map: Map
+    unit: Unit, player: Player, real_map: Map, avoid_occupied: bool = False
 ) -> tuple[dict[Coord, int], dict[Coord, Coord]]:
     """BFS over the unit's known-passable cells from its position.
     Returns (distance, parent) maps. Deterministic: neighbors expand in
@@ -1358,6 +1362,8 @@ def _explore_flood(
                 continue
             if not _explore_passable(unit, player, real_map, nb):
                 continue
+            if avoid_occupied and real_map.units_at(nb):
+                continue  # re-pathing around a jam: occupied cells are walls
             dist[nb] = dist[cur] + 1
             parent[nb] = cur
             q.append(nb)
@@ -1415,6 +1421,25 @@ def _fighter_at_bingo(unit: Unit, player: Player, real_map: Map, at: Coord) -> i
     return min(dists) if dists else 10**9
 
 
+def explore_now(
+    unit: Unit,
+    player: Player,
+    real_map: Map,
+    rules: RuleSet,
+    combat_resolver: CombatResolverProtocol,
+    rng: random.Random,
+    budget: int,
+) -> bool:
+    """Run the Explore order immediately for up to `budget` steps (the TUI's
+    set-time first move — same player expectation as go-to/heading, and it
+    carries a fresh army OFF its own city before the §5.4 turn-end disband
+    can claim it). Returns True if the unit still holds the order."""
+    _run_explore(
+        unit, player, real_map, rules, combat_resolver, rng, set(), budget
+    )
+    return unit.standing_order is not None
+
+
 def _run_explore(
     unit: Unit,
     player: Player,
@@ -1423,11 +1448,13 @@ def _run_explore(
     combat_resolver: CombatResolverProtocol,
     rng: random.Random,
     claims: set[Coord],
+    budget: int | None = None,
 ) -> tuple[bool, bool]:
     """One turn of the Explore order for `unit`: walk up to its movement
     budget toward the chosen frontier target, with the standard standing-order
     guards per step. Returns (stepped, woke). Clears the order on wake."""
-    budget = unit.moves_this_turn()
+    if budget is None:
+        budget = unit.moves_this_turn()
     stepped = False
 
     def wake() -> tuple[bool, bool]:
@@ -1561,6 +1588,120 @@ def apply_standing_orders(
     # Explore coordination: each explorer claims its frontier target for the
     # turn, so two explorers never chase the same cell.
     explore_claims: set[Coord] = set()
+    # Heading/PatrolPath steps blocked by friendly traffic get one within-turn
+    # retry after everyone else has moved (see the second pass below).
+    deferred: list[Unit] = []
+
+    def _step_move_order(unit: Unit, retry: bool = False) -> None:
+        """One step of a Heading/PatrolPath order, with the standard guards.
+        On a friendly-blocked cell: first pass defers (the blocker may move);
+        the retry pass re-paths a go-to around the jam, and wakes only when
+        no route remains."""
+        order = unit.standing_order
+        if isinstance(order, Heading):
+            target = unit.coord.step(order.direction)
+            next_order_on_success: Heading | PatrolPath | None = order
+        elif isinstance(order, PatrolPath):
+            nxt = order.next_cell()
+            if nxt is None:
+                unit.standing_order = None
+                interrupted.append(unit.id)
+                return
+            target = nxt
+            next_order_on_success = order.after_step()
+        else:
+            return  # order changed/cleared between passes
+
+        if not is_legal_step(unit, target, real_map, rules):
+            unit.standing_order = None
+            interrupted.append(unit.id)
+            return
+
+        # Never auto-attack: a unit on an order wakes BEFORE a step that
+        # would resolve as combat (enemy in the way) or a city capture.
+        # Engaging is always the human's deliberate call (a manual step),
+        # never something a heading / go-to / patrol walks into on its own.
+        if step_would_attack(unit, target, real_map):
+            unit.standing_order = None
+            interrupted.append(unit.id)
+            return
+
+        # Never sleepwalk into artillery range: an order halts at the EDGE of
+        # a discovered hostile ring (spec §4.7) and wakes, exactly like it
+        # stops before an attack. (The mirror guard runs on the TUI's
+        # immediate first step, via the same predicate.)
+        if step_would_enter_artillery_zone(unit, target, real_map, rules):
+            unit.standing_order = None
+            interrupted.append(unit.id)
+            return
+
+        # Friendly traffic on the next cell: not a reason to lose the order.
+        occupants = real_map.units_at(target)
+        if (
+            occupants
+            and not rules.allow_unit_stacking
+            and any(o.owner is player for o in occupants)
+        ):
+            if not retry:
+                deferred.append(unit)  # blocker may move; try again after
+                return
+            # Still blocked after everyone moved. A one-shot go-to can try a
+            # fresh route around the jam; a heading or a loop patrol has no
+            # alternative geometry — wake on the second attempt.
+            if isinstance(order, PatrolPath) and not order.loop:
+                dest = order.remaining[-1]
+                dist, parent = _explore_flood(
+                    unit, player, real_map, avoid_occupied=True
+                )
+                if dest in dist:
+                    cells: list[Coord] = []
+                    cur = dest
+                    while cur != unit.coord:
+                        cells.append(cur)
+                        cur = parent[cur]
+                    cells.reverse()
+                    unit.standing_order = PatrolPath.new(tuple(cells))
+                    _step_move_order(unit, retry=True)  # re-path is unblocked
+                    return
+            unit.standing_order = None
+            interrupted.append(unit.id)
+            return
+
+        outcome = execute_unit_path(
+            unit=unit,
+            path=((target.x, target.y),),
+            real_map=real_map,
+            rules=rules,
+            combat_resolver=combat_resolver,
+            rng=rng,
+        )
+
+        unit_alive = real_map.unit_by_id(unit.id) is not None
+        if not unit_alive or outcome.last_outcome is not StepOutcome.OK:
+            # Combat killed us, capture failed, or step otherwise failed.
+            if unit_alive:
+                unit.standing_order = None
+            interrupted.append(unit.id)
+            return
+
+        # Step succeeded. Post-step wake triggers — autonomous movement stops
+        # on news the player must react to: an enemy in scan, or discovering
+        # a city. (Entering a hostile artillery ring is handled BEFORE the
+        # step — the order halts at the edge — so there's no post-step wake.)
+        if (
+            enemy_in_scan_range(unit, real_map)
+            or unseen_city_in_scan(unit, real_map)
+        ):
+            unit.standing_order = None
+            interrupted.append(unit.id)
+            moved.append(unit.id)
+            return
+
+        unit.standing_order = next_order_on_success
+        if unit.standing_order is None:
+            # PatrolPath naturally exhausted (one-shot finished).
+            interrupted.append(unit.id)
+        moved.append(unit.id)
 
     # Snapshot the list so removals during iteration don't trip us up.
     own_units = [u for u in real_map.board_units() if u.owner is player]
@@ -1601,90 +1742,17 @@ def apply_standing_orders(
             sentried.append(unit.id)
             continue
 
-        if isinstance(order, Heading):
-            target = unit.coord.step(order.direction)
-            next_order_on_success = order  # heading persists
-        else:
-            # PatrolPath — the only remaining variant after Sentry/Heading.
-            nxt = order.next_cell()
-            if nxt is None:
-                unit.standing_order = None
-                interrupted.append(unit.id)
-                continue
-            target = nxt
-            next_order_on_success = order.after_step()
+        _step_move_order(unit)
 
-        if not is_legal_step(unit, target, real_map, rules):
-            unit.standing_order = None
-            interrupted.append(unit.id)
+    # Second attempt for units whose step was blocked by FRIENDLY traffic in
+    # the first pass: the blocker has now had its move, so the cell may have
+    # cleared. A go-to that is STILL blocked tries a re-path around the jam;
+    # only when that fails too does the unit wake — a transient jam never
+    # costs an order.
+    for unit in deferred:
+        if real_map.unit_by_id(unit.id) is None or unit.standing_order is None:
             continue
-
-        # Never auto-attack: a unit on an order wakes BEFORE a step that
-        # would resolve as combat (enemy in the way) or a city capture.
-        # Engaging is always the human's deliberate call (a manual step),
-        # never something a heading / go-to / patrol walks into on its own.
-        if step_would_attack(unit, target, real_map):
-            unit.standing_order = None
-            interrupted.append(unit.id)
-            continue
-
-        # Never sleepwalk into artillery range: an order halts at the EDGE of a
-        # hostile city's gun range (spec §4.7) and wakes, exactly like it stops
-        # before an attack. Entering the red zone is a deliberate manual step,
-        # never something a heading / go-to / patrol walks into. (The mirror
-        # guard runs on the TUI's immediate first step, via the same predicate.)
-        if step_would_enter_artillery_zone(unit, target, real_map, rules):
-            unit.standing_order = None
-            interrupted.append(unit.id)
-            continue
-
-        # Friendly-blocking interrupt: don't fight your way through your own.
-        occupants = real_map.units_at(target)
-        if (
-            occupants
-            and not rules.allow_unit_stacking
-            and any(o.owner is player for o in occupants)
-        ):
-            unit.standing_order = None
-            interrupted.append(unit.id)
-            continue
-
-        outcome = execute_unit_path(
-            unit=unit,
-            path=((target.x, target.y),),
-            real_map=real_map,
-            rules=rules,
-            combat_resolver=combat_resolver,
-            rng=rng,
-        )
-
-        unit_alive = real_map.unit_by_id(unit.id) is not None
-        if not unit_alive or outcome.last_outcome is not StepOutcome.OK:
-            # Combat killed us, capture failed, or step otherwise failed.
-            if unit_alive:
-                unit.standing_order = None
-            interrupted.append(unit.id)
-            continue
-
-        # Step succeeded. Post-step wake triggers — autonomous movement stops
-        # on news the player must react to: an enemy in scan, or discovering a
-        # city. (Entering a hostile artillery zone is handled BEFORE the step —
-        # the order halts at the edge — so there's no post-step zone wake.)
-        # Applies to every unit kind (armies, fighters, ships alike).
-        if (
-            enemy_in_scan_range(unit, real_map)
-            or unseen_city_in_scan(unit, real_map)
-        ):
-            unit.standing_order = None
-            interrupted.append(unit.id)
-            moved.append(unit.id)
-            continue
-
-        unit.standing_order = next_order_on_success
-        if unit.standing_order is None:
-            # PatrolPath naturally exhausted (one-shot finished).
-            interrupted.append(unit.id)
-        moved.append(unit.id)
+        _step_move_order(unit, retry=True)
 
     return StandingOrderResult(
         moved_unit_ids=tuple(moved),

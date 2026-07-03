@@ -4,7 +4,7 @@ mid-turn.
 When the engine encounters one of these during turn execution, it delegates
 to `AIController.revise_move()` for a single revised step. The AI is not
 expected to re-strategize at this layer; that happens at the next turn
-boundary (see `planning/03-ai-design.md` §1 reactivity boundary).
+boundary (the reactivity boundary).
 """
 
 from __future__ import annotations
@@ -72,8 +72,7 @@ class TerrainImpassable(Surprise):
 
     Distinct from `PathBlocked(by=TERRAIN)` because this fires when the AI
     planned a path assuming unexplored cells were one terrain and they turned
-    out to be another (the predicted-terrain hazard called out in
-    `planning/03-ai-design.md` §3.1).
+    out to be another (the predicted-terrain hazard).
     """
 
     at: Coord

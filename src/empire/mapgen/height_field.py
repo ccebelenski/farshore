@@ -1,8 +1,6 @@
 """`HeightFieldMapGenerator`: smoothed height-field map generation.
 
-Algorithm (designed for this project; see
-`planning/01-game-rules-spec.md` §9.1 and
-`planning/04-class-hierarchy.md` §5):
+Algorithm (designed for this project; see `docs/RULES.md` §9.1):
 
 1. Each interior cell gets a uniform random height in `[0, 1)`.
 2. Smooth the field over `smooth_iterations` passes (3x3 box blur).

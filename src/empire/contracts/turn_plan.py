@@ -2,7 +2,7 @@
 
 A `TurnPlan` is the AI's intent for the turn. The engine applies it; the AI
 does not have side-effecting authority. All members are frozen at emission
-time. See `planning/03-ai-design.md` §1 for design rationale.
+time.
 """
 
 from __future__ import annotations
@@ -21,8 +21,9 @@ class UnitMove:
     `path` is an ordered tuple of coordinates the unit intends to enter, in
     order. An empty path is a no-op (the unit stays put — equivalent to a
     sentry for this turn). The engine resolves the path one cell at a time
-    and may abort early if a surprise invalidates a step (see
-    `planning/03-ai-design.md` §1 reactivity boundary).
+    and may abort early if a surprise invalidates a step (the reactivity
+    boundary: the AI revises single steps mid-turn; full re-planning waits
+    for the next turn).
     """
 
     unit_id: UnitId
@@ -35,8 +36,7 @@ class ProductionOrder:
 
     `target = None` clears the production (city goes idle). Setting a target
     different from the city's current build incurs the change penalty per
-    `planning/01-game-rules-spec.md` §5.2; the engine applies that, not the
-    AI.
+    `docs/RULES.md` §5.2; the engine applies that, not the AI.
     """
 
     city_id: CityId

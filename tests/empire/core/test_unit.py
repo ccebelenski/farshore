@@ -75,7 +75,7 @@ def test_every_subclass_declares_every_required_classvar() -> None:
 
 # --- golden attribute table ---------------------------------------------------
 
-# v1 design choices per planning/01-game-rules-spec.md §2. Changing any of
+# v1 design choices per docs/RULES.md §2. Changing any of
 # these is a deliberate game-balance decision; this test catches accidents.
 _GOLDEN: Final[dict[UnitKind, dict[str, object]]] = {
     UnitKind.ARMY: {"max_hits": 1, "speed": 1, "strength": 1, "build_time": 5, "symbol": "A"},

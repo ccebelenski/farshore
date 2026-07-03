@@ -1,5 +1,4 @@
-"""`PortfolioAI`: the stateful multi-focus successor to `SearchAI`
-(planning/07-portfolio-director.md).
+"""`PortfolioAI`: the stateful multi-focus successor to `SearchAI`.
 
 `SearchAI` picks ONE plan per turn — so naval can only happen by abandoning the
 land game, and "defend home AND invade overseas AND scout" can't be expressed.
@@ -34,18 +33,16 @@ from empire.core.unit import UnitKind
 
 # A focus must improve the whole-portfolio score by this much to be ADDED, and a
 # member must cost this much to justify DROPPING it — the hysteresis band that
-# makes change deliberate (planning/07 "deliberate abandonment"). In evaluator
-# units (city=100, army=10).
+# makes change deliberate, not churn. In evaluator units (city=100, army=10).
 ADD_MARGIN = 8.0
 DROP_MARGIN = 8.0
 # Scouts to field for sea discovery before reverting production to armies. A
 # couple of patrols recon the ocean concurrently with the land game; building
-# them indefinitely would starve army production and abandon home (a real
-# failure observed in v1's discovery mode).
+# them indefinitely would starve army production and abandon home.
 SCOUT_QUOTA = 2
 # Don't scout the sea until at least this many cities are held — establishing a
 # base first protects the early army buildup (scouting from the lone capital
-# regressed the land game on shared continents).
+# costs the buildup that decides shared-continent games).
 MIN_CITIES_TO_SCOUT = 3
 # Cap concurrent foci so the per-turn hill-climb stays cheap and the follower
 # isn't fragmenting force across too many objectives at once.
@@ -71,8 +68,8 @@ class PortfolioAI(SearchAI):
         # the portfolio's whole point). _invade_ok: credit invasions, set only
         # once an enemy city is actually found OVERSEAS (so island sideshows on a
         # shared continent are never funded). Neither depends on home being fully
-        # explored — that gate stalled SearchAI into a turtle and must not bind
-        # the portfolio.
+        # explored — a gate that may never open and would turtle the AI, so it
+        # must not bind the portfolio.
         self._discovery: bool = False
         self._invade_ok: bool = False
 
@@ -107,7 +104,7 @@ class PortfolioAI(SearchAI):
         return pool
 
     def _naval_warrants(self, view: WorldView) -> None:
-        """Set the discovery-driven naval flags for this turn (planning/07).
+        """Set the discovery-driven naval flags for this turn.
 
         Uses the generator's land/sea assessment (one flood) to classify the
         enemy: reachable by land, found overseas, or not yet found.
@@ -118,7 +115,7 @@ class PortfolioAI(SearchAI):
           - `_discovery`: there's unexplored sea, no enemy is land-reachable, and
             we haven't found the enemy overseas yet -> scout to find them, NOW and
             concurrently with the land game (not gated behind home exploration,
-            which never completes and turtled SearchAI)."""
+            which may never complete and would turtle the AI)."""
         land_targets, overseas, _ = self._generator._assess(view)
         land = {(c.x, c.y) for c in land_targets}
         sea = {(c.x, c.y) for c in overseas}
@@ -127,8 +124,8 @@ class PortfolioAI(SearchAI):
         enemy_overseas = any(e in sea for e in enemy)
         self._invade_ok = enemy_overseas
         # Don't scout from the lone capital: building patrols before a base exists
-        # sacrifices the critical early army buildup and loses winnable land games
-        # (the real land-brawl regression). Establish a base first, then scout.
+        # sacrifices the critical early army buildup and loses winnable land games.
+        # Establish a base first, then scout.
         established = len(view.own_cities) >= MIN_CITIES_TO_SCOUT
         self._discovery = (
             established
@@ -138,7 +135,7 @@ class PortfolioAI(SearchAI):
         )
 
     def _valid(self, obj: Objective, view: WorldView) -> bool:
-        """Relevance check (planning/07): does the goal still matter? Assault/
+        """Relevance check: does the goal still matter? Assault/
         invade targets must still be a known enemy/neutral city we don't own;
         defend targets must still be our city."""
         enemy = {(c.coord.x, c.coord.y) for c in view.known_enemy_cities}

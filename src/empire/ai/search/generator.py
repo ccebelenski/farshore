@@ -5,7 +5,7 @@ action a competent player might consider and let the playouts price them.
 It anchors on known cities (nearest first), offers two commitment levels
 per target (the rule-derived fist and an over-strength fist), multi-front
 splits, a defensive posture, and the do-nothing/scout baselines. K stays
-in the 8-32 band the design budgeted (`planning/03-ai-design.md` §9.1).
+in the 8-32 band the design budgets.
 
 Deliberately heuristic and cheap: anything the generator misses the search
 can never choose, but anything implausible it proposes merely wastes one
@@ -30,20 +30,16 @@ ALL_OUT_FAN = 6
 DEFEND_STRENGTH = 2
 # An enemy unit within this range of a home city marks it threatened.
 THREAT_RANGE = 6
-# Strength a single amphibious operation commits. Tested 3/6/8 against the probe
-# (held_end): raising it REGRESSED capture+hold (62/33 -> 54/29 -> 54/25) — a
+# Strength a single amphibious operation commits. Kept small deliberately: a
 # heavier invade objective is more expensive in the playout, so the portfolio's
-# contention pricing selects it LESS, yielding fewer captures. 3 is best; the
-# beachhead-hold problem is latency (waves arrive slower than counterattacks),
-# not assault strength.
+# contention pricing selects it less and fewer invasions launch. Holding a
+# beachhead is limited by wave latency (waves arrive slower than
+# counterattacks), not assault strength.
 INVADE_STRENGTH = 3
 # Transports to build for the invasion. More hulls = more frequent landings
-# (higher throughput). Tuned vs the probe (landed/captured/held): FT 2/3/4 gave
-# landed 75/92/100, captured 62/79/75, held 33/29/25. Landing rises monotonically
-# but CAPTURES peak at 3 — a 4th hull starves army production, so waves get too
-# thin to take the city. Held is flat-to-down (it's latency-bound, not throughput-
-# bound). 3 is the sweet spot. Kept on ONE target — concentration, not a
-# fragmenting trickle to several (which regressed projection to zero).
+# (higher throughput), but a 4th starves army production so waves get too thin
+# to take the city; 3 balances throughput against troop supply. Kept on ONE
+# target — concentration, not a fragmenting trickle to several.
 FLEET_TRANSPORTS = 3
 # Fighters to keep on hand for recon/strike. A couple of fast, far-seeing
 # scouts (scan 5, speed 8, fly anywhere) is plenty; more just starves ground
@@ -75,22 +71,21 @@ class CandidateGenerator:
         continent is exhausted. The playout prices the trade — a naval plan
         spends coastal-city production on hulls instead of armies — and the
         evaluator's intel term lets a scouting plan show progress the search
-        can see (without it, exploration never won a playout, so naval didn't
-        begin until no land target was left and the enemy continent had gone
-        undiscovered for a hundred turns). When no land target remains the
-        naval plans stand alone (the early-return branch below)."""
+        can see (without it, exploration never wins a playout and naval
+        starts only after the land game is exhausted). When no land target
+        remains the naval plans stand alone (the early-return branch below)."""
         fist = self._fist_size(view.rules)
         targets, overseas, has_land_frontier = self._assess(view)
         defenses = self._threatened_home_cities(view)
 
-        # Naval base value (planning/07) is credited ONLY when crossing water is
+        # Naval base value is credited ONLY when crossing water is
         # the genuine path to victory: my home landmass is fully explored (no land
         # frontier left — I'm boxed in by water) AND no enemy is reachable by land.
-        # Both matter, and the set-piece tests (test_decision_scenarios) pin why:
+        # Both matter:
         #   - has_land_frontier guards the PRE-CONTACT case — if there's still
         #     unexplored land I might be on a shared continent, so explore the land
-        #     before chasing the sea (dropping this credited sea-hunts on land maps
-        #     pre-contact: the land-brawl regression);
+        #     before chasing the sea (without this the AI sea-hunts on land maps
+        #     pre-contact);
         #   - enemy-land-reachable guards POST-CONTACT — once the enemy is found on
         #     my landmass, fight on land, don't sail to island sideshows.
         # On separate continents both become true once home is scouted, so naval is
@@ -120,7 +115,7 @@ class CandidateGenerator:
             #     not "home won" (skipping home scouting turtles the AI);
             #   - home is fully explored → drop SCOUT so naval/air projection
             #     takes over (offering SCOUT here lets it stick via hysteresis
-            #     and crowd out the ships, which stalls projection — navy=0).
+            #     and crowd out the ships, which stalls projection).
             # `has_land_frontier` is the gate, but it reads False on turn 0-1
             # before the opening scan populates vision, so force exploration then.
             naval = [
@@ -208,7 +203,7 @@ class CandidateGenerator:
         # trade-off (coastal production -> hulls; exploration value) beats
         # pressing the land fight.
         plans.extend(self._invade_plans(view, overseas, naval_warranted))
-        # CONCURRENCY (planning/07-portfolio-director.md): a single plan that
+        # CONCURRENCY: a single plan that
         # presses the home land fight AND builds/stages an invasion fleet at once.
         # Production is a sea kind, so the follower splits it per-city (coastal ->
         # transports, inland -> armies) — the inland armies storm the home target
@@ -308,7 +303,7 @@ class CandidateGenerator:
 
         One target, deliberately: the follower assembles its transports into a
         fleet and lands them concentrated there. Spreading invade plans across
-        several targets fragments the force and regressed projection to zero.
+        several targets fragments the force and kills projection.
         Production builds hulls up to `FLEET_TRANSPORTS`, then armies to fill
         them — by the time an overseas city is known the home continent usually
         holds an army surplus, so hulls are the bottleneck, not troops.
@@ -342,7 +337,7 @@ class CandidateGenerator:
         invade plan's choice (transports until the fleet exists, then armies); the
         follower builds ships only at coastal cities and armies inland, so inland
         production still feeds the home assault. This is the stateless concurrency
-        gate (planning/07); the stateful portfolio generalizes it."""
+        gate; the stateful portfolio generalizes it."""
         if not targets:
             return []
         coastal = [t for t in overseas if is_ocean_coastal(view, t)]
@@ -366,7 +361,7 @@ class CandidateGenerator:
         naval_warranted: bool = False,
     ) -> list[Plan]:
         """A concurrent press-home + scout-the-sea plan, tagged SCOUT_SEA so the
-        scorer credits the horizon-free discovery goal (planning/07).
+        scorer credits the horizon-free discovery goal.
 
         DISCOVERY is the wall on a two-continent map: the enemy is overseas and
         undiscovered, so no invade plan can exist until a patrol finds the coast —
@@ -454,8 +449,3 @@ class CandidateGenerator:
                 ranked.append((nearest, city.coord.y, city.coord.x, city.coord))
         ranked.sort()
         return [c for _, _, _, c in ranked]
-
-
-# Production note: every candidate currently builds armies (`Plan.production`
-# defaults to ARMY). Fighter-quota candidates join the generator when the
-# combined-arms increment lands (Step 3).

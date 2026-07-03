@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class TerrainKind(Enum):
-    """The three terrain kinds. See `planning/01-game-rules-spec.md` §1.2.
+    """The three terrain kinds. See `docs/RULES.md` §1.2.
 
     Values are short strings so save-file representations are stable across
     schema versions and human-readable.
@@ -35,8 +35,7 @@ class Tile:
     """A single cell of the map.
 
     Tile holds terrain and (optionally) a `City` reference; unit occupancy is
-    tracked by `Map`'s spatial index, not on the tile (see
-    `planning/04-class-hierarchy.md` §2).
+    tracked by `Map`'s spatial index, not on the tile.
     """
 
     coord: Coord

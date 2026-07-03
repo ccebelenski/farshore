@@ -10,9 +10,9 @@ objectives take their `strength` nearest armies in plan-priority order
 Recomputing — rather than remembering — is what keeps an objective-level
 plan executable over a playout horizon where units die and new ones appear.
 
-Movement discipline under city artillery (both measured —
-71% of armies lost to artillery died with no friendly within 3 cells, and
-the survivors were bleeding on *transit* through unrelated cities' rings):
+Movement discipline under city artillery — unsupported armies die alone to
+the guns, and even survivors bleed on *transit* through unrelated cities'
+rings, so both rules below matter:
 
 - **Danger-aware routing**: every hostile city's artillery ring (enemy AND
   neutral — neutral cities shoot everyone) is masked out of the movement
@@ -358,13 +358,12 @@ class PlanFollower:
             return self._advance(unit, target, raw_field, view)
         # No frontier at all (late game, board explored): under artillery
         # rules, rally behind the nearest active assault instead of freezing
-        # in place — otherwise unassigned armies stand
-        # standing as statues at distance 6 while 3-army fists ground
-        # themselves on the gauntlet; reserves massed at the ring make the
-        # next re-assignment instant. WITHOUT artillery there is nothing to
-        # mass against — a reserve loitering beside an enemy city is pure
-        # wasted tempo (measured: STANDARD 51%->45.5% with the rally on) —
-        # so hold as before and let assignment pull units when needed.
+        # in place — otherwise unassigned armies stand as statues at a
+        # distance while thin fists grind themselves on the gauntlet;
+        # reserves massed at the ring make the next re-assignment instant.
+        # WITHOUT artillery there is nothing to mass against — a reserve
+        # loitering beside an enemy city is pure wasted tempo — so hold as
+        # before and let assignment pull units when needed.
         if view.rules.city_artillery_range > 0:
             return self._rally_move(unit, field, raw_field, view)
         return idle_step(unit, view)

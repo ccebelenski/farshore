@@ -77,11 +77,10 @@ def plan_naval(view: WorldView, plan: Plan) -> NavalResult:
         # each sails AUTONOMOUSLY once IT carries a near-full wave (`_run_operation`
         # commits at >= _OP_FORCE - _SEAT_SLACK, a 5-6 army wave — no thin
         # trickle). We deliberately do NOT hold the whole fleet until every hull
-        # assembles: fleet-wide staging deadlocked with multiple hulls + ongoing
-        # army production (there was always one underfilled hull with an army
-        # "imminent" that could never actually board, so the fleet never
-        # committed and full hulls idled near home — measured 38% -> 75% landed
-        # when dropped). Same-coast hulls still fill at the same time (implicit
+        # assembles: with ongoing army production there is always one
+        # underfilled hull with an army "imminent" that can never actually
+        # board, so a fleet-wide brake keeps full hulls idling near home
+        # forever. Same-coast hulls still fill at the same time (implicit
         # concentration), and the return-and-reload recycling turns the cadence
         # into sustained reinforcement waves.
         target = invade_targets[0]
@@ -110,16 +109,16 @@ def _wave_ready(
     land_grid: PassabilityGrid,
     claimed: set[UnitId],
 ) -> bool:
-    """Should THIS transport sail its wave now? Two commit rules, each curing a
-    staging deadlock that stranded loaded hulls near home:
+    """Should THIS transport sail its wave now? Two commit rules, each keeping
+    a loaded hull from idling near home:
       - NEAR-FULL: it carries within `_SEAT_SLACK` of a full wave. Insisting on
-        the LAST seat deadlocked a 5/6 hull forever when the boarding cells were
-        too crowded to fill it (armies stay "imminent" yet can never board) — a
+        the LAST seat can strand a 5/6 hull when the boarding cells are too
+        crowded to fill it (armies stay "imminent" yet can never board) — a
         5-6 army wave is force enough; stragglers ride the next recycled wave.
       - NO IMMINENT: it has >=1 aboard and no free army is *imminent* — within
         `_BOARD_PATIENCE` land-steps of the hull (excluding troops already on the
-        target landmass). An unbounded "any reachable army" test never committed
-        while the home continent kept producing armies. We wait only for armies
+        target landmass). An unbounded "any reachable army" test never commits
+        while the home continent keeps producing armies. We wait only for armies
         about to arrive; distant ones ride the next recycled wave."""
     want = min(transport.effective_capacity(), _OP_FORCE)
     aboard = len(transport.cargo)
@@ -154,7 +153,7 @@ def _run_operation(
     """Drive one transport's invasion of `target` this turn — load, sail and
     storm ashore, or return-and-reload if emptied. The hull sails autonomously
     once it carries a near-full wave (`_wave_ready`); there is no fleet-wide
-    staging brake (it deadlocked — see `plan_naval`)."""
+    staging brake (see `plan_naval` for why)."""
     want = min(transport.effective_capacity(), _OP_FORCE)
     aboard = len(transport.cargo)
 
@@ -181,7 +180,7 @@ def _run_operation(
         # lands one per cell). Landing *away* from the city (not against its
         # wall) lets the troops pool into a mass before the land follower's
         # massed-assault doctrine marches them on the city; landing right beside
-        # it fed them to the defenders piecemeal and never converted (§10.1.1).
+        # it feeds them to the defenders piecemeal (§10.1.1).
         landings = _landing_cells(view, transport, target, land_grid, target_land)
         if landings:
             for cargo_id, cell in zip(list(transport.cargo), landings, strict=False):
@@ -207,13 +206,13 @@ def _run_operation(
                 result.moves[transport.id] = move
         return
 
-    # RETURN-AND-RELOAD (the recycling that turns one doomed wave into sustained
+    # RETURN-AND-RELOAD (the recycling that turns one wave into sustained
     # reinforcement). An empty hull with nothing to board *here* has delivered
     # its wave and drifted off the target coast — its reachable land is the enemy
     # continent, so the home army surplus is unreachable and it would otherwise
-    # sit forever (the seed-16 deadlock). Sail it back to a home embark coast
-    # where free armies wait, then it re-enters LOADING next turn. Cheaper than
-    # building a fresh transport: reuse the hull we already paid for.
+    # sit idle forever. Sail it back to a home embark coast where free armies
+    # wait, then it re-enters LOADING next turn. Cheaper than building a fresh
+    # transport: reuse the hull we already paid for.
     if aboard == 0 and not boarders and not _in_drydock(view, transport):
         dest = _reload_destination(view, transport, armies, land_grid, target_land)
         if dest is not None:
@@ -377,28 +376,26 @@ def _board_move(
 # How many armies a single amphibious operation tries to carry. Filling the
 # transport (capacity 6) matters for holding: capture consumes the storming
 # army (§4.5), so a 3-army wave that loses one or two crossing the beach takes
-# the city with its last soldier and leaves it empty — recaptured next turn
-# (the t146->t147 loss the projection probe found). A full wave lands enough
-# survivors to both capture and garrison. `want` is still min()'d with the
-# transport's damage-scaled capacity, so this just stops under-filling.
+# the city with its last soldier and leaves it empty — recaptured next turn.
+# A full wave lands enough survivors to both capture and garrison. `want` is
+# still min()'d with the transport's damage-scaled capacity, so this just
+# stops under-filling.
 _OP_FORCE = 6
 
 # How close (Chebyshev, land steps) a free army must be to a not-yet-full hull
 # to count as "still boarding" and justify the fleet waiting another turn.
 # Armies march ~1 cell/turn, so this is roughly "arrives within N turns." Small
 # enough that the fleet commits and sails its imminent force instead of idling
-# for the whole continent's production to funnel in (the staging-commit deadlock
-# that stranded loaded fleets at home — the loaded->landed wall); large enough
-# that a coast-massed wave still fills before sailing. Stragglers ride the next
-# recycled wave. Tunable via the amphib probe.
+# while the whole continent's production funnels in; large enough that a
+# coast-massed wave still fills before sailing. Stragglers ride the next
+# recycled wave.
 _BOARD_PATIENCE = 3
 
 # How many seats short of full still counts as a committable wave. Armies massed
 # at the embark coast can be near a hull yet unable to actually board (boarding
 # cells crowded, or the hull floated a cell too far), so insisting on the LAST
-# seat deadlocks a 5/6 hull a few cells from the target forever. One seat of
-# slack lets a near-full wave commit; the recycled return-and-reload brings the
-# rest. Tunable via the amphib probe.
+# seat can strand a 5/6 hull indefinitely. One seat of slack lets a near-full
+# wave commit; the recycled return-and-reload brings the rest.
 _SEAT_SLACK = 1
 
 # Landing-zone selection (§10.1.2). `_LAND_MARCH`: how far from the target a
@@ -507,9 +504,9 @@ def _landing_zone(
             # Reachability is second only to gun-avoidance: each transport picks
             # the nearest acceptable beach to ITSELF, so a fleet spreads across
             # distinct landing cells instead of all converging on one globally-
-            # "best" cell — which made them block each other (stacking-off) and
-            # never complete the approach, so a loaded fleet hovered offshore
-            # forever without landing. Screen/width/march break ties after that.
+            # "best" cell — converging hulls block each other (stacking-off) and
+            # hover offshore without ever completing the approach. Screen/width/
+            # march break ties after that.
             key = (in_gun, sea_steps, screen, -width, march, s.y, s.x)
             if best_key is None or key < best_key:
                 best_key, best_sea = key, s

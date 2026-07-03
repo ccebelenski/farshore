@@ -14,7 +14,7 @@ its planning cost bounds every playout): one BFS
 distances at once, and the winner's path is reconstructed by descending the
 same field — no per-(unit, target) searches. Distances (hence scores and the
 chosen objective) are exactly what per-pair `find_path` produced; only ties
-between equal-length *routes* may break differently (arena-revalidated).
+between equal-length *routes* may break differently.
 """
 
 from __future__ import annotations

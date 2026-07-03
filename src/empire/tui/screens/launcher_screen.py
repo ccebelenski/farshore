@@ -91,7 +91,7 @@ _SETUP_ROWS: tuple[_Row, ...] = (
 class LauncherScreen(Screen[None]):
     """Title + menus; builds a `GameConfig` and asks the app to launch it."""
 
-    # Layout lesson (two bugs in a row): a fractional-height Vertical
+    # Layout constraints: a fractional-height Vertical
     # swallows menu rows, and a width:auto Vertical collapses its
     # fraction-width children into a sliver. Fixed width + auto height +
     # full-width children is the stable combination; the screen's own

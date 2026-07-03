@@ -1,8 +1,7 @@
 """`BeliefBuilder`: a playable `Game` built from one player's fog view.
 
 `SearchAI` is fog-honest: playouts simulate the world the searcher *knows*,
-never the real map (design: `planning/03-ai-design.md` §9.2). The belief
-game contains:
+never the real map. The belief game contains:
 
 - **Terrain**: visible cells as they are, remembered cells as last seen,
   never-seen cells **inferred from the nearest seen cell's domain** (land vs

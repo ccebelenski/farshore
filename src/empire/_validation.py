@@ -1,9 +1,8 @@
-"""Phase-10 validation harness: 50-game `BaselineAI` self-play.
+"""Validation harness: N-game `BaselineAI` self-play plus a save/load check.
 
 Not a real package — a private CLI helper. Lives outside the layered
 packages so it can freely depend on `mapgen`, `combat`, `ai`, and
-`persistence`. See `planning/05-implementation-plan.md` Phase 10 for the
-exit-gate criteria this harness measures.
+`persistence`.
 
 Outputs:
   - per-game outcome row (seed, turn, winner, captures, etc.)

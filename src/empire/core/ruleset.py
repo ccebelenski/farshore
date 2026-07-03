@@ -1,8 +1,8 @@
 """Rule presets and map profiles.
 
-A `RuleSet` is a coherent bundle of rule values, shipped as a named preset
-(see `planning/02-design-decisions.md` D-003). A `MapProfile` is the size
-and density parameters used by map generation.
+A `RuleSet` is a coherent bundle of rule values, shipped as a named preset —
+presets are play-tested as a whole, not assembled à la carte. A `MapProfile`
+is the size and density parameters used by map generation.
 
 `MapProfile` lives here rather than in `empire.mapgen` because `RuleSet`
 holds one, and `core` cannot depend on `mapgen` per the dependency matrix.
@@ -24,8 +24,8 @@ class MapProfile:
 
 
 # Shipped profile presets. Values chosen so HeightFieldMapGenerator can
-# pack the requested city count reliably; tuned by playtesting in later
-# phases. The packing constraint is roughly num_cities * (2*d+1)^2 < land
+# pack the requested city count reliably.
+# The packing constraint is roughly num_cities * (2*d+1)^2 < land
 # cells available; greedy random placement runs at ~60% efficiency vs
 # perfect packing, so we stay well clear of the ceiling.
 SMALL = MapProfile(
@@ -52,7 +52,7 @@ class RuleSet:
     name: str
     map_profile: MapProfile
 
-    # Per-unit rule values (initial v1 defaults; tuned by playtesting).
+    # Per-unit rule values (v1 defaults, tuned through play).
     fighter_base_range: int = 20            # cells a fighter can fly before refueling
     satellite_range: int = 50               # turns of orbital lifetime
     production_change_penalty_divisor: int = 5
@@ -91,7 +91,7 @@ STANDARD = RuleSet(name="STANDARD", map_profile=STANDARD_PROFILE)
 # Cities have ranged artillery, so capture is gated by a gauntlet of fire
 # rather than a coin flip — an army that survives the approach takes the city
 # deterministically (the gauntlet was the cost). Classic/STANDARD keep the
-# inert 50% capture roll. See `project_city_artillery` for the rationale.
+# inert 50% capture roll.
 FORTIFIED_CITIES = RuleSet(
     name="FORTIFIED_CITIES",
     map_profile=STANDARD_PROFILE,

@@ -4,7 +4,7 @@ The search keeps its lookahead short — beyond ~10-20 turns the simulation
 diverges from reality (fog, stochastic combat, opponent-model error) — so
 the long-term judgment lives here: what is this position *worth*?
 
-Terms, in dominance order (see `planning/03-ai-design.md` §9.1):
+Terms, in dominance order:
 - **Decided game**: an outright win/loss at the horizon dwarfs everything.
 - **Cities**: the production base; the win condition is "all of them".
 - **Production in flight**: a city 9/10 of the way to an army is worth most
@@ -13,10 +13,10 @@ Terms, in dominance order (see `planning/03-ai-design.md` §9.1):
 
 - **Exploration / information** (§10.2): seen area is rewarded —
   land worth more than sea (cities live on land; open ocean is the low-prior
-  side of the frontier). This *replaces* the original perimeter-penalty `intel`
-  term, which we measured to be counterproductive: a perimeter count *rises* as
+  side of the frontier). This *replaces* a perimeter-penalty `intel`
+  term, which is counterproductive: a perimeter count *rises* as
   you push the fog back (a growing seen region has a growing boundary), so it
-  penalised the very scouting it was meant to reward, and a sea-ringed continent
+  penalises the very scouting it is meant to reward, and a sea-ringed continent
   never reaches the self-flattening zero. Rewarding seen-area instead is monotone
   in exploration and one-sided (only our own fog; not zero-sum). The legacy
   `intel` weight defaults to 0; `_frontier_penalty` is kept for comparison only.
@@ -38,10 +38,10 @@ Terms, in dominance order (see `planning/03-ai-design.md` §9.1):
   *sustain*: the lean middle of a campaign reads as progress, not waste. See
   `_contested_balance`.
 
-Deliberately absent in v1 (add only if the arena demands them): a Lanchester
+Deliberately absent in v1 (add only if play demands it): a Lanchester
 concentration term (massed > scattered at equal count). Weights are a frozen
-value type so variants are explicit objects, and the arena — not intuition —
-is what tunes them.
+value type so variants are explicit objects, tuned empirically — not by
+intuition.
 """
 
 from __future__ import annotations
@@ -75,10 +75,10 @@ class EvalWeights:
     city: float = 100.0
     army: float = 10.0
     production: float = 8.0  # one *completed* build ≈ most of an army
-    # Legacy perimeter-penalty. Measured counterproductive — it
-    # penalised scouting and never self-flattened on a sea-ringed continent — so
+    # Legacy perimeter-penalty. Counterproductive — it
+    # penalises scouting and never self-flattens on a sea-ringed continent — so
     # it is disabled (0.0) and superseded by the exploration term below. Kept as
-    # a weight so the old behavior can still be A/B'd in the curve simulator.
+    # a weight so the old behavior remains selectable for comparison.
     intel: float = 0.0
     # Exploration / information (§10.2): reward per seen cell, land worth more
     # than sea. Small — a ~100-cell home continent at 0.5/land ≈ 50, well under a
@@ -289,7 +289,7 @@ class Evaluator:
         # the fleet is committed/built/loaded — because the transport (build 30)
         # cannot finish + load + sail + capture inside ANY honest horizon, so a
         # realized-value-only evaluator would forever see invade as dominated
-        # (measured: it loses on material with zero in-horizon progress). The
+        # (behind on material, with zero in-horizon progress). The
         # COMMITMENT is front-loaded (allocating a city's production to a hull is
         # the valued act); it ramps with build/cargo and converts into the +city
         # on capture. Kept below `city` so capturing is always a further gain.

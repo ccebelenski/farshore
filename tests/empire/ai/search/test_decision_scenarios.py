@@ -4,7 +4,7 @@ The arena/probes measure ENTANGLED, emergent outcomes over long noisy games —
 useless for proving a single factor in isolation and too slow to iterate on. This
 module does the opposite: hand-built positions ("set pieces") that assert the AI
 *offers and credits the predicted plan*, deterministically, in one decision. Each
-scenario isolates one rule of the naval split-score (planning/07), so a tweak that
+scenario isolates one rule of the naval split-score, so a tweak that
 breaks a rule fails here in <1s instead of surfacing as an unmodelled regression
 in a week of simulated games.
 
@@ -275,7 +275,7 @@ def test_decisions_are_deterministic_and_numbers_justified() -> None:
 
 
 def test_portfolio_holds_land_and_naval_foci_at_once() -> None:
-    """The headline of the stateful portfolio (planning/07): with a home neutral
+    """The headline of the stateful portfolio: with a home neutral
     to take AND an enemy overseas, the AI must hold BOTH foci concurrently — a
     land ASSAULT and an overseas INVADE in the same portfolio — which the
     single-plan SearchAI structurally cannot do."""
