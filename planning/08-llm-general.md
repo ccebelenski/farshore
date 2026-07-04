@@ -168,12 +168,20 @@ COMBAT  (the engine resolves it; you only weigh it)
   side can lose HP or be destroyed. Strength-0 units (transport, satellite)
   never fight — a transport caught by an enemy warship is destroyed.
 
-CROSSING WATER
-  An army cannot enter water. To move armies across water: load them into a
-  transport at a coast/city, sail, unload onto adjacent land. Cargo is
-  kind-locked — transports carry armies only, carriers carry fighters only;
-  ships never carry ships. If a loaded carrier is destroyed, everything aboard
-  is lost with it.
+SEA TRANSPORT  (how armies cross water — and what is expected of you)
+  An army can never enter water. Transports carry them: a transport loads up
+  to 6 armies at a city or coastal tile, sails, and unloads onto adjacent
+  land. YOUR OFFICERS DO ALL OF THIS. If a task force contains armies and a
+  transport and you give it an objective across water, the officers march
+  the armies to the transport, load, sail, escort, unload, and press the
+  objective — you never order the rendezvous, the loading, or the landing.
+  Expected use: put the armies, the transport, and (if the sea is not safe)
+  a warship into ONE task force and name the objective. A transport has
+  strength 0 — alone it is a target, not a warship; a warship in the same
+  task force escorts it automatically. Never STAGE land units on water.
+  Cargo is kind-locked — transports carry armies only, carriers carry
+  fighters only; ships never carry ships. If a loaded transport or carrier
+  is destroyed, everything aboard is lost with it.
 
 CAPTURING CITIES
   Only an army captures a city, by entering it. Capture is a 50% roll, and a
@@ -202,6 +210,11 @@ VISION / FOG
 
 Confirm vs RULES.md if reused: fighter refuel site; undefended-city-capture roll detail.
 For a FORTIFIED game, add a city-artillery line (cities fire on adjacent enemies).
+Primer revision log: VICTORY neutral wording (grounding A/B, confirmed 3/3); SEA
+TRANSPORT mechanics-and-expectations section replacing CROSSING WATER (user ask after
+lift2's rendezvous micromanagement — officers-handle-lift made a first-class
+convention; lift3 tests it). The transport role line ("a hauler, not a warship") is
+now IN this section, closing that queued item.
 
 ## ARTIFACT: the test BOARD + TASK (raw data, turn 38)
 
