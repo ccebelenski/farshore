@@ -509,15 +509,20 @@ by the code, amended by the general. One source of truth; there is never a momen
   Still the pre-baked recipe (we wire the stages), not agentic. Do it ONLY on a
   demonstrable reason — the candidate trigger already on film: v2 THINK-s3's runaway
   looked like grid-decode and order-accounting fighting over one deliberation budget;
-  if non-convergence or budget-exhaustion grounding errors show up at meaningful rates
-  (watch the Q4 qualification), "split digest from decision" is the named fix. Note a
+  if non-convergence or budget-exhaustion grounding errors show up at meaningful rates,
+  "split digest from decision" is the named fix. Note a
   model-written digest is exempt from the engine-native rule (model-to-model words, no
   Python taxonomy) — but each stage multiplies CPU-floor latency, so it pays rent or
   stays out.
 - **Multimodal board input** (rendered map screenshot instead of ASCII; server already
   loads mmproj) — sidesteps char-grid geometry entirely; revisit after the text line
   is understood.
-- **Q4 min-spec qualification** before any prompt result is treated as shipping truth.
+- ~~Q4 min-spec qualification~~ **RETIRED (user, 2026-07-04): OBE** — BYO means we
+  don't control the model choice, and the quant delta on short-prompt structured
+  output isn't expected to matter (same for KV-cache quantization: our epochs are
+  few-k-token prompts, not chat chains). Residue: when managed mode pins its GGUF,
+  run the current battery once against that artifact as a pin-time smoke check —
+  one command, not a qualification program.
 - **Rules-clarification rev** for unit-role misuse ("TRANSPORT — a hauler, not a
   warship") — fold into the next primer touch.
 
