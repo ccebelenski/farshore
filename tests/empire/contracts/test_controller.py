@@ -24,21 +24,13 @@ def _tiny_world() -> WorldView:
 # --- Protocol satisfaction ---------------------------------------------------
 
 
-def test_null_controller_satisfies_protocol() -> None:
-    """isinstance(NullController(), AIController) confirms runtime Protocol checking."""
+def test_null_controller_satisfies_protocol_and_is_named() -> None:
+    """NullController satisfies the AIController protocol at runtime and reports
+    its name. (Static-type acceptance is enforced by pyright; the negative case
+    is below.) Consolidates three overlapping isinstance/name canaries."""
     c = NullController()
     assert isinstance(c, AIController)
-
-
-def test_null_controller_fixture_is_protocol_instance(
-    null_controller: AIController,
-) -> None:
-    """The conftest fixture (typed as AIController) satisfies the protocol at
-    runtime. Static-type acceptance is enforced by pyright; here we
-    confirm the runtime `isinstance` check passes too — the previous
-    name promised this but only checked `name()`."""
-    assert isinstance(null_controller, AIController)
-    assert null_controller.name() == "Null"
+    assert c.name() == "Null"
 
 
 def test_arbitrary_object_does_not_satisfy_protocol() -> None:
@@ -46,10 +38,6 @@ def test_arbitrary_object_does_not_satisfy_protocol() -> None:
 
 
 # --- NullController behavior -------------------------------------------------
-
-
-def test_null_controller_name() -> None:
-    assert NullController().name() == "Null"
 
 
 def test_null_controller_plan_turn_returns_empty_plan() -> None:

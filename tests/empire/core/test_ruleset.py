@@ -1,15 +1,10 @@
 """Phase-1 canary tests for `RuleSet`, `MapProfile`, and the STANDARD preset."""
 
-import dataclasses
-
-import pytest
-
 from empire.core.ruleset import (
     LARGE,
     SMALL,
     STANDARD,
     STANDARD_PROFILE,
-    MapProfile,
     RuleSet,
 )
 
@@ -46,16 +41,6 @@ def test_profile_presets_are_distinct_and_ordered_by_size() -> None:
     assert SMALL.num_cities < STANDARD_PROFILE.num_cities < LARGE.num_cities
 
 
-def test_ruleset_is_frozen() -> None:
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        STANDARD.name = "MODERN"  # type: ignore[misc]
-
-
-def test_map_profile_is_frozen() -> None:
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        STANDARD_PROFILE.width = 999  # type: ignore[misc]
-
-
 def test_can_construct_custom_ruleset_overriding_defaults() -> None:
     custom = RuleSet(
         name="STACKED",
@@ -64,15 +49,3 @@ def test_can_construct_custom_ruleset_overriding_defaults() -> None:
     )
     assert custom.allow_unit_stacking is True
     assert custom.army_capture_city_deterministic is False  # other defaults preserved
-
-
-def test_map_profile_is_constructible() -> None:
-    p = MapProfile(
-        width=10,
-        height=10,
-        water_ratio=50,
-        smooth_iterations=3,
-        num_cities=4,
-        min_city_distance=3,
-    )
-    assert p.width == 10

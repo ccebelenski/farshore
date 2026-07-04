@@ -263,16 +263,9 @@ def test_load_rejects_root_that_is_not_an_object(tmp_path: Path) -> None:
 def test_load_rejects_unknown_intermediate_version_with_no_migration(
     tmp_path: Path,
 ) -> None:
-    """If we're at v3 and the save is v1 but no v1→v2 migration is registered,
-    the loader should fail clearly rather than silently mis-deserialize.
-    Tested by lying about the current schema temporarily? No — simpler: assert
-    that the current SCHEMA_VERSION matches the v1 we're using.
-
-    For Phase 4 with only v1 existing, an old version would always fail
-    because no migrations exist. This is the "no migration path" error.
-    """
-    # Phase 4 has only v1; an older "v0" save would have no migration.
-    # We construct a v0 payload (one less than current).
+    """A save one schema version older than current, with no migration
+    registered for it, must fail loudly rather than silently mis-deserialize."""
+    # A "v0" payload (one below the current SCHEMA_VERSION) has no migration.
     bad_payload = {"schema_version": V1Serializer.SCHEMA_VERSION - 1}
     path = tmp_path / "v0.json"
     path.write_text(json.dumps(bad_payload))

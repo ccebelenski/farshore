@@ -57,17 +57,11 @@ def test_clone_is_independent_of_original() -> None:
 
 
 def test_clone_combat_resolver_is_wired() -> None:
-    """A playout fights; the null resolver raising mid-playout would kill it.
-
-    Running several turns of a mid-game land brawl exercises combat with
-    overwhelming probability, but the wiring itself is what we assert.
-    """
+    """The clone carries a real CombatResolver, not the null resolver whose
+    resolve() would raise mid-playout. (Combat itself is exercised bit-for-bit
+    by the replay tests above, which run six turns of a land brawl.)"""
     game = _land_brawl_at_turn(12)
     clone = PlayoutModel().clone(game, _controllers(game))
     from empire.combat.resolver import CombatResolver
 
     assert isinstance(clone.combat_resolver, CombatResolver)
-    for _ in range(4):
-        clone.run_turn()
-        if clone.is_over():
-            break

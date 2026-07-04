@@ -158,7 +158,7 @@ def test_no_target_when_range_empty(p1: Player) -> None:
 # --- hit / miss / pin --------------------------------------------------------
 
 
-def test_hit_kills_one_hp_unit_and_pins(p1: Player, p2: Player) -> None:
+def test_hit_kills_one_hp_unit(p1: Player, p2: Player) -> None:
     city = City(id=CityId(1), coord=Coord(0, 0), owner=p1)
     m = _map(["CL"], cities={Coord(0, 0): city})
     army = _place(m, Army(UnitId(1), p2, Coord(1, 0)))

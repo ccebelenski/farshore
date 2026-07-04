@@ -37,17 +37,18 @@ def test_builds_two_separate_capital_continents() -> None:
 
 
 def test_land_only_challenger_cannot_project() -> None:
-    """A short game: BaselineAI (land-only) confined to its island ends
-    unfinished with zero off-home captures — the gate's starting point."""
+    """A short game: the SearchAI challenger — which can't yet cross water —
+    is confined to its home island and ends unfinished with zero off-home
+    captures. This is the baseline the naval work has to move."""
     out = play_match(
-        NAVAL_PROFILE, seed=1, challenger_first=True, cap=40, ai="strategic"
+        NAVAL_PROFILE, seed=1, challenger_first=True, cap=40, ai="search"
     )
     assert out is not None
     outcome, turns, peak_off_home, end_off_home, peak_ships, peak_fighters = out
-    # A land-only AI can neither reach nor hold ground across water, so both
+    # A land-locked AI can neither reach nor hold ground across water, so both
     # the ever-projected (peak) and held-at-cap (end) counts must be zero.
-    assert peak_off_home == 0, "a land-only AI must not capture across water"
+    assert peak_off_home == 0, "a land-locked AI must not capture across water"
     assert end_off_home == 0
-    # 40 turns is far too short to conquer two continents; expect unfinished.
-    assert outcome in ("unfinished", "strategic", "baseline", "draw")
+    # 40 turns is far too short to conquer two continents across the sea.
+    assert outcome == "unfinished"
     del turns, peak_ships, peak_fighters

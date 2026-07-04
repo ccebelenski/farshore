@@ -87,12 +87,23 @@ def test_dump_map_renders_each_profile() -> None:
 # --- main entry point --------------------------------------------------------
 
 
-def test_main_with_empty_argv_prints_help_and_returns_zero(
-    capsys: pytest.CaptureFixture[str],
+def test_main_with_empty_argv_launches_tui(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Bare invocation (no argv) launches the TUI menu — not help.
+
+    `EmpireApp.run` is patched to a no-op: the real one enters a blocking
+    asyncio event loop that never returns without a terminal, which would
+    hang the suite. We assert dispatch, not the live UI.
+    """
+    import empire.tui
+
+    launched: list[bool] = []
+    monkeypatch.setattr(
+        empire.tui.EmpireApp, "run", lambda self: launched.append(True)
+    )
     assert main([]) == 0
-    captured = capsys.readouterr()
-    assert "Empire development CLI" in captured.out or "dump-map" in captured.out
+    assert launched == [True]
 
 
 def test_main_dump_map_subcommand_runs(capsys: pytest.CaptureFixture[str]) -> None:

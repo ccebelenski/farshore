@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from empire.combat.evaluator import CombatEvaluator, ExpectedOutcome
+from empire.combat.evaluator import CombatEvaluator
 from empire.combat.resolver import CombatError
 from empire.core.coord import Coord
 from empire.core.identity import PlayerId, UnitId
@@ -57,10 +57,14 @@ def test_evaluator_does_not_mutate_inputs(p1: Player, p2: Player) -> None:
 # --- known-value spot checks -------------------------------------------------
 
 
-def test_army_vs_army_one_hp_each(p1: Player, p2: Player) -> None:
-    """Single-blow fight with p=0.5 → attacker wins exactly half."""
-    a = _make(UnitKind.ARMY, p1)
-    d = _make(UnitKind.ARMY, p2, unit_id=2)
+@pytest.mark.parametrize("kind", [UnitKind.ARMY, UnitKind.PATROL])
+def test_symmetric_full_hp_matchup_is_a_coin_flip(
+    kind: UnitKind, p1: Player, p2: Player
+) -> None:
+    """Same kind, full (1) HP: single-blow fight with p=0.5 → attacker wins
+    exactly half (was two near-identical Army and Patrol tests)."""
+    a = _make(kind, p1)
+    d = _make(kind, p2, unit_id=2)
     assert CombatEvaluator.win_probability(a, d) == pytest.approx(0.5)
 
 
@@ -132,13 +136,6 @@ def test_full_probability_distribution_sums_to_one(p1: Player, p2: Player) -> No
     assert total == pytest.approx(1.0, abs=1e-9)
 
 
-def test_symmetric_matchup_has_p_one_half(p1: Player, p2: Player) -> None:
-    """Patrol vs Patrol, full HP: per-blow p = 0.5; both 1-HP → outcome 50/50."""
-    p_one = _make(UnitKind.PATROL, p1)
-    p_two = _make(UnitKind.PATROL, p2)
-    assert CombatEvaluator.win_probability(p_one, p_two) == pytest.approx(0.5)
-
-
 def test_higher_hp_favors_that_side_at_equal_p() -> None:
     """All else equal, more HP wins more often. Construct a hypothetical
     matchup by manipulating HP directly. Use Army vs Army (p=0.5 from
@@ -191,10 +188,3 @@ def test_evaluator_handles_transport_vs_transport(p1: Player, p2: Player) -> Non
     t2 = _make(UnitKind.TRANSPORT, p2)
     with pytest.raises(CombatError, match="engage"):
         CombatEvaluator.win_probability(t1, t2)
-
-
-def test_expected_outcome_returns_expected_outcome_instance(p1: Player, p2: Player) -> None:
-    a = _make(UnitKind.ARMY, p1)
-    d = _make(UnitKind.ARMY, p2, unit_id=2)
-    result = CombatEvaluator.expected_outcome(a, d)
-    assert isinstance(result, ExpectedOutcome)

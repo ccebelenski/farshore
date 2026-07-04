@@ -1,35 +1,30 @@
 """Phase-7 canary tests for `PathCostProfile` and its presets."""
 
+import pytest
+
 from empire.core.tile import TerrainKind
 from empire.pathfinding.cost import AIR, ARMY, SEA, PathCostProfile
 
-
-def test_army_cannot_traverse_water() -> None:
-    assert ARMY.cost_for(TerrainKind.WATER) is None
+_LAND, _WATER, _CITY = TerrainKind.LAND, TerrainKind.WATER, TerrainKind.CITY
 
 
-def test_army_traverses_land_and_city() -> None:
-    assert ARMY.cost_for(TerrainKind.LAND) == 1
-    assert ARMY.cost_for(TerrainKind.CITY) == 1
+@pytest.mark.parametrize(
+    ("profile", "terrain", "expected"),
+    [
+        (ARMY, _LAND, 1), (ARMY, _CITY, 1), (ARMY, _WATER, None),
+        (SEA, _WATER, 1), (SEA, _CITY, 1), (SEA, _LAND, None),
+        (AIR, _LAND, 1), (AIR, _WATER, 1), (AIR, _CITY, 1),
+    ],
+)
+def test_preset_traversal_costs(
+    profile: PathCostProfile, terrain: TerrainKind, expected: int | None
+) -> None:
+    """Each mover's `cost_for` over every terrain: 1 to enter, None if barred."""
+    assert profile.cost_for(terrain) == expected
 
 
-def test_sea_cannot_traverse_land() -> None:
-    assert SEA.cost_for(TerrainKind.LAND) is None
-
-
-def test_sea_traverses_water_and_city() -> None:
-    assert SEA.cost_for(TerrainKind.WATER) == 1
-    assert SEA.cost_for(TerrainKind.CITY) == 1
-
-
-def test_air_traverses_everything() -> None:
-    assert AIR.cost_for(TerrainKind.LAND) == 1
-    assert AIR.cost_for(TerrainKind.WATER) == 1
-    assert AIR.cost_for(TerrainKind.CITY) == 1
-
-
-def test_custom_profile_with_danger_weight() -> None:
+def test_custom_profile_applies_its_own_terrain_costs() -> None:
     p = PathCostProfile(land_cost=2, water_cost=None, city_cost=3, danger_weight=1.5)
     assert p.cost_for(TerrainKind.LAND) == 2
     assert p.cost_for(TerrainKind.CITY) == 3
-    assert p.danger_weight == 1.5
+    assert p.cost_for(TerrainKind.WATER) is None

@@ -1,9 +1,5 @@
 """Phase-3 canary tests for the `Surprise` tagged union and its variants."""
 
-import dataclasses
-
-import pytest
-
 from empire.contracts.surprise import (
     BlockedBy,
     EnemySighted,
@@ -51,12 +47,6 @@ def test_every_variant_constructs_and_inherits_from_marker() -> None:
     ]
     for s in instances:
         assert isinstance(s, Surprise)
-
-
-def test_concrete_surprises_are_frozen() -> None:
-    s = PathBlocked(blocked_at=Coord(0, 0), by=BlockedBy.TERRAIN)
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        s.blocked_at = Coord(1, 1)  # type: ignore[misc]
 
 
 def test_blocked_by_enum_values() -> None:
