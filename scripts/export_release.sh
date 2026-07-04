@@ -18,7 +18,7 @@ if [ -e "$TARGET" ]; then
 fi
 
 # ---- what ships ------------------------------------------------------------
-SHIP_DIRS=(src tests docs)
+SHIP_DIRS=(src tests docs packaging .github)
 SHIP_FILES=(README.md LICENSE pyproject.toml Makefile uv.lock .gitignore)
 # Lab equipment that stays home (dev probes; _arena/_naval_arena are test
 # fixtures and _validation backs the CLI gate, so those three ship).

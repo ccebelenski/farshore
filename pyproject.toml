@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "empire"
-version = "0.0.0"
+version = "0.1.0"
 description = "TUI reimplementation of Empire: Wargame of the Century"
 readme = "README.md"
 requires-python = ">=3.11"
