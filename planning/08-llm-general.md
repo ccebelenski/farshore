@@ -579,6 +579,33 @@ Other findings:
 - **1 non-convergence (GRIND-s2, the longest ledger)** — third budget-exhaustion of
   the night; evidence for the parked multi-call trigger keeps accumulating.
 
+## RESULTS: lift2 (WHY-bearing ledger × representation, 5/6 converged)
+
+**WHY persistence works — motivationally.** With the stage's reason replayed in the
+ledger, every converged run turned invasion-ward (prior LIFT: 0/3 even looked east).
+But only **1/6 composed a legal launch**: WHY-UNI-s1's textbook amendment set —
+DISBAND TF-1 + TF-3, FORM TF-4 from the six staged armies + transport + destroyer,
+CAPTURE (11,1), capacity-aware and escorted — the best single output of the night.
+
+**New failure mode exposed: rendezvous micromanagement.** 4 runs expressed "armies
+must meet the transport" as `STAGE <water tile>` — staging ARMIES at sea coordinates
+like (7,2)/(6,0). The model doesn't trust "your officers handle the sea lift" (that
+clause only annotated the CAPTURE verb). Primer/contract rev: state the lift
+convention prominently — a TF containing armies + a transport ordered CAPTURE across
+water loads/sails/unloads automatically; STAGE never targets water. Also seen once:
+warship-only TFs ordered to CAPTURE (no armies — compiler catches it).
+
+**Marker leakage (unified board):** WHY-UNI runs ordered `UNITS c d e f g h n p` —
+map letters instead of #ids. Expected risk, mild remedy: the validator accepts
+markers as our own published deterministic aliases and normalizes to ids
+(lenient-trivia rule), keeping #ids canonical in the registry.
+
+**Representation verdict: no token win (means ~11.4k OLD vs ~10.5k UNI), no harm,
+and the one flawless composition came from the unified board.** Weak positive at
+n=3; keep UNI as the default going forward (it is also simply the truer rendering of
+the game's own display), re-evaluate as sample grows. 4th budget-exhaustion runaway
+of the night (WHY-OLD-s2) — multi-call receipts keep accumulating.
+
 **Order compiler (lab/compile_orders.py, user ask):** the second half of the compile
 step, prototyped — takes parsed orders + the SAME board text the model read (terrain
 from the ASCII grid, landmasses by flood fill, roster parsed from the prompt) and
