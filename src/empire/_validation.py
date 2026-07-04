@@ -23,7 +23,7 @@ from empire.core.game import Game
 from empire.core.player import Player
 from empire.core.ruleset import MapProfile
 from empire.persistence.save_manager import SaveManager
-from empire.persistence.schema_v1 import V1Serializer
+from empire.persistence.schema import Serializer
 from empire.setup import build_game
 
 
@@ -86,7 +86,7 @@ def _run_one_game(profile: MapProfile, seed: int, turn_cap: int) -> GameOutcome:
 def _save_load_identity(profile: MapProfile, seed: int, snapshot_turn: int) -> bool:
     """Build a game, run `snapshot_turn` turns, save, load, compare payloads.
 
-    The check is intentionally payload-equality: V1Serializer is bijective by
+    The check is intentionally payload-equality: Serializer is bijective by
     construction, so a save→load→re-save round-trip must produce byte-identical
     JSON. This is the same equality used in the persistence test suite, scaled
     up to a real BaselineAI mid-game state.
@@ -97,7 +97,7 @@ def _save_load_identity(profile: MapProfile, seed: int, snapshot_turn: int) -> b
         if g.is_over():
             break
 
-    serializer = V1Serializer()
+    serializer = Serializer()
     payload_before = serializer.to_dict(g)
     mgr = SaveManager()
     with tempfile.TemporaryDirectory() as td:

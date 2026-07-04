@@ -20,14 +20,14 @@ from empire.combat.resolver import CombatResolver
 from empire.contracts.controller import AIController
 from empire.core.game import Game
 from empire.core.identity import PlayerId
-from empire.persistence.schema_v1 import V1Serializer
+from empire.persistence.schema import Serializer
 
 
 class PlayoutModel:
     """Forward-model factory: independent game copies for candidate playouts."""
 
     def __init__(self) -> None:
-        self._serializer = V1Serializer()
+        self._serializer = Serializer()
 
     def clone(
         self,

@@ -8,7 +8,7 @@ from empire.contracts.controller import AIController
 from empire.core.game import Game
 from empire.core.identity import PlayerId
 from empire.core.ruleset import FORTIFIED_CITIES
-from empire.persistence.schema_v1 import V1Serializer
+from empire.persistence.schema import Serializer
 
 
 def _land_brawl_at_turn(turn: int) -> Game:
@@ -37,14 +37,14 @@ def test_clone_replays_original_bit_for_bit() -> None:
         game.run_turn()
         clone.run_turn()
 
-    serializer = V1Serializer()
+    serializer = Serializer()
     assert serializer.to_dict(clone) == serializer.to_dict(game)
 
 
 def test_clone_is_independent_of_original() -> None:
     """Running the clone must not move a single bit of the original."""
     game = _land_brawl_at_turn(12)
-    serializer = V1Serializer()
+    serializer = Serializer()
     before = serializer.to_dict(game)
 
     clone = PlayoutModel().clone(game, _controllers(game))

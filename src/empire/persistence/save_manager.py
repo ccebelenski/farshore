@@ -15,14 +15,14 @@ from typing import Any, cast
 
 from empire.core.game import Game
 from empire.persistence.migration import MIGRATIONS
-from empire.persistence.schema_v1 import V1Serializer
+from empire.persistence.schema import Serializer
 
 
 class SaveManager:
     """File-level save/load with migration dispatch."""
 
     def save(self, game: Game, path: Path) -> None:
-        payload = V1Serializer().to_dict(game)
+        payload = Serializer().to_dict(game)
         path.write_text(json.dumps(payload, indent=2, sort_keys=False))
 
     def load(self, path: Path) -> Game:
@@ -39,7 +39,7 @@ class SaveManager:
         if not isinstance(version, int):
             raise ValueError(f"Save 'schema_version' must be int, got {type(version).__name__}")
 
-        current = V1Serializer.SCHEMA_VERSION
+        current = Serializer.SCHEMA_VERSION
         if version > current:
             raise ValueError(
                 f"Save is from a newer schema version ({version}); "
@@ -58,4 +58,4 @@ class SaveManager:
             version = migration.to_version
             upgraded["schema_version"] = version
 
-        return V1Serializer().from_dict(upgraded)
+        return Serializer().from_dict(upgraded)

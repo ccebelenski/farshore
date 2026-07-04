@@ -1,4 +1,4 @@
-"""V1 (de)serializers for the game state.
+"""(De)serializers for the current save-schema version.
 
 Save format is JSON. Topological load order: RuleSet → Players (with empty
 ViewMaps) → Cities (refs Players) → Tiles (with City refs) → Map → Units
@@ -19,7 +19,7 @@ from empire.core.game import Game
 from empire.core.identity import CityId, PlayerId, UnitId
 from empire.core.map import Map, RememberedTile, UnitSnapshot, ViewMap
 from empire.core.player import Player
-from empire.core.ruleset import MapProfile, RuleSet
+from empire.core.ruleset import FORTIFIED_CITIES, STANDARD, RuleSet
 from empire.core.standing_order import (
     Explore,
     Heading,
@@ -32,11 +32,28 @@ from empire.core.standing_order import (
 from empire.core.tile import TerrainKind, Tile
 from empire.core.unit import UNIT_REGISTRY, Unit, UnitKind
 
+# Rules are configuration, not game state: a save records WHICH named preset was
+# in effect, and load rebuilds it from this registry (rules-by-name). This keeps
+# saves as true state snapshots and decouples the save format from RuleSet's fields.
+_RULESET_PRESETS: dict[str, RuleSet] = {
+    STANDARD.name: STANDARD,
+    FORTIFIED_CITIES.name: FORTIFIED_CITIES,
+}
 
-class V1Serializer:
-    """Serializes/deserializes `Game` to/from the schema-v1 dict format."""
 
-    SCHEMA_VERSION: ClassVar[int] = 1
+def _ruleset_by_name(name: str) -> RuleSet:
+    try:
+        return _RULESET_PRESETS[name]
+    except KeyError:
+        raise ValueError(
+            f"unknown ruleset {name!r}; known presets: {sorted(_RULESET_PRESETS)}"
+        ) from None
+
+
+class Serializer:
+    """Serializes/deserializes `Game` to/from the current schema's dict format."""
+
+    SCHEMA_VERSION: ClassVar[int] = 2
 
     # ---- top-level --------------------------------------------------------
 
@@ -46,7 +63,7 @@ class V1Serializer:
             "turn": game.turn,
             "next_unit_id": game.next_unit_id,
             "rng_state": _pack_rng_state(game.rng.getstate()),
-            "rules": self._rules_to_dict(game.rules),
+            "ruleset": game.rules.name,
             "players": [self._player_to_dict(p) for p in game.players],
             "cities": [self._city_to_dict(c) for c in game.map.cities()],
             "map": self._map_to_dict(game.map),
@@ -56,12 +73,13 @@ class V1Serializer:
     def from_dict(self, payload: Mapping[str, Any]) -> Game:
         if payload.get("schema_version") != self.SCHEMA_VERSION:
             raise ValueError(
-                f"V1Serializer.from_dict requires schema_version={self.SCHEMA_VERSION}, "
+                f"Serializer.from_dict requires schema_version={self.SCHEMA_VERSION}, "
                 f"got {payload.get('schema_version')!r}"
             )
 
-        # 1. RuleSet (no refs).
-        rules = self._rules_from_dict(payload["rules"])
+        # 1. RuleSet — restored by name from the preset registry. Rules are
+        # configuration, not state: the save pins WHICH preset, not its fields.
+        rules = _ruleset_by_name(str(payload["ruleset"]))
 
         # 2. Players (with empty ViewMaps; populated in step 6).
         players: list[Player] = [self._player_from_dict(p) for p in payload["players"]]
@@ -110,68 +128,6 @@ class V1Serializer:
         game.rng.setstate(_unpack_rng_state(payload["rng_state"]))
         game.turn = int(payload["turn"])
         return game
-
-    # ---- RuleSet / MapProfile ---------------------------------------------
-
-    def _rules_to_dict(self, r: RuleSet) -> dict[str, Any]:
-        return {
-            "name": r.name,
-            "map_profile": self._profile_to_dict(r.map_profile),
-            "fighter_base_range": r.fighter_base_range,
-            "satellite_range": r.satellite_range,
-            "production_change_penalty_divisor": r.production_change_penalty_divisor,
-            "allow_unit_stacking": r.allow_unit_stacking,
-            "army_capture_city_deterministic": r.army_capture_city_deterministic,
-            "asymmetric_combat_bonus": r.asymmetric_combat_bonus,
-            "seven_terrain_types": r.seven_terrain_types,
-            "transport_escort_required_for_unload": r.transport_escort_required_for_unload,
-            "city_artillery_range": r.city_artillery_range,
-            "city_artillery_hit_prob": r.city_artillery_hit_prob,
-            "city_artillery_pin_prob": r.city_artillery_pin_prob,
-            "fog_cheat": r.fog_cheat,
-        }
-
-    def _rules_from_dict(self, d: Mapping[str, Any]) -> RuleSet:
-        return RuleSet(
-            name=str(d["name"]),
-            map_profile=self._profile_from_dict(d["map_profile"]),
-            fighter_base_range=int(d["fighter_base_range"]),
-            satellite_range=int(d["satellite_range"]),
-            production_change_penalty_divisor=int(d["production_change_penalty_divisor"]),
-            allow_unit_stacking=bool(d["allow_unit_stacking"]),
-            army_capture_city_deterministic=bool(d["army_capture_city_deterministic"]),
-            asymmetric_combat_bonus=float(d["asymmetric_combat_bonus"]),
-            seven_terrain_types=bool(d["seven_terrain_types"]),
-            transport_escort_required_for_unload=bool(
-                d["transport_escort_required_for_unload"]
-            ),
-            # Artillery fields are absent from older saves; default to
-            # the inert/classic values.
-            city_artillery_range=int(d.get("city_artillery_range", 0)),
-            city_artillery_hit_prob=float(d.get("city_artillery_hit_prob", 0.5)),
-            city_artillery_pin_prob=float(d.get("city_artillery_pin_prob", 0.5)),
-            fog_cheat=bool(d["fog_cheat"]),
-        )
-
-    def _profile_to_dict(self, p: MapProfile) -> dict[str, Any]:
-        return {
-            "width": p.width,
-            "height": p.height,
-            "water_ratio": p.water_ratio,
-            "smooth_iterations": p.smooth_iterations,
-            "num_cities": p.num_cities,
-            "min_city_distance": p.min_city_distance,
-        }
-
-    def _profile_from_dict(self, d: Mapping[str, Any]) -> MapProfile:
-        return MapProfile(
-            width=int(d["width"]),
-            height=int(d["height"]),
-            water_ratio=int(d["water_ratio"]),
-            smooth_iterations=int(d["smooth_iterations"]),
-            num_cities=int(d["num_cities"]),
-            min_city_distance=int(d["min_city_distance"]),
-        )
 
     # ---- Player / ViewMap -------------------------------------------------
 

@@ -1,9 +1,8 @@
-"""Schema migration framework.
+"""Schema migration framework, plus the migration chain itself.
 
 A `Migration` upgrades a save payload from one schema version to the next.
 The `MIGRATIONS` registry maps `from_version -> Migration` so the loader can
-walk old saves up to current. No migrations exist while v1 is the only
-schema version.
+walk old saves up to current.
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ class Migration:
 
 MIGRATIONS: dict[int, Migration] = {}
 """Keyed by `from_version`. Lookup yields the migration that takes the payload
-to `from_version + 1` (typically). Empty while v1 is current."""
+to `from_version + 1` (typically)."""
 
 
 def register(migration: Migration) -> None:
@@ -34,3 +33,15 @@ def register(migration: Migration) -> None:
             f"Migration from version {migration.from_version} already registered"
         )
     MIGRATIONS[migration.from_version] = migration
+
+
+def _v1_to_v2(payload: dict[str, Any]) -> dict[str, Any]:
+    """v1 serialized the full `RuleSet` under "rules"; v2 records only the
+    preset's name under "ruleset" (rules are configuration, not state). The
+    v1 dict already carried the name, so migration keeps just that."""
+    upgraded = dict(payload)
+    upgraded["ruleset"] = str(upgraded.pop("rules")["name"])
+    return upgraded
+
+
+register(Migration(from_version=1, to_version=2, apply=_v1_to_v2))

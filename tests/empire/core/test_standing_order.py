@@ -405,7 +405,7 @@ def test_loading_order_round_trips_through_save() -> None:
     from empire.core.game import Game
     from empire.core.standing_order import Loading
     from empire.core.unit import Transport
-    from empire.persistence.schema_v1 import V1Serializer
+    from empire.persistence.schema import Serializer
 
     p1 = Player(id=PlayerId(1), name="P1", is_ai=False, view=ViewMap())
     p2 = Player(id=PlayerId(2), name="P2", is_ai=True, view=ViewMap())
@@ -415,7 +415,7 @@ def test_loading_order_round_trips_through_save() -> None:
     transport.standing_order = Loading()
     game = Game(rules=STANDARD, real_map=m, players=[p1, p2], seed=1)
 
-    loaded = V1Serializer().from_dict(V1Serializer().to_dict(game))
+    loaded = Serializer().from_dict(Serializer().to_dict(game))
     restored = loaded.map.unit_by_id(UnitId(1))
     assert restored is not None
     assert isinstance(restored.standing_order, Loading)

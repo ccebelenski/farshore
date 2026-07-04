@@ -1,4 +1,4 @@
-"""Phase-4 canary tests for `SaveManager` / `V1Serializer`.
+"""Phase-4 canary tests for `SaveManager` / `Serializer`.
 
 Headline canary: a Game saved to JSON and loaded back deep-equals the
 original on every observable field, including RNG state.
@@ -17,11 +17,11 @@ from empire.core.game import Game
 from empire.core.identity import CityId, PlayerId, UnitId
 from empire.core.map import Map, RememberedTile, UnitSnapshot, ViewMap
 from empire.core.player import Player
-from empire.core.ruleset import STANDARD, MapProfile, RuleSet
+from empire.core.ruleset import FORTIFIED_CITIES, STANDARD
 from empire.core.tile import TerrainKind, Tile
 from empire.core.unit import Army, Battleship, UnitKind
 from empire.persistence.save_manager import SaveManager
-from empire.persistence.schema_v1 import V1Serializer
+from empire.persistence.schema import Serializer
 
 # --- builders ----------------------------------------------------------------
 
@@ -100,8 +100,8 @@ def _build_tiny_game() -> Game:
 
 def test_round_trip_preserves_top_level_fields() -> None:
     original = _build_tiny_game()
-    payload = V1Serializer().to_dict(original)
-    loaded = V1Serializer().from_dict(payload)
+    payload = Serializer().to_dict(original)
+    loaded = Serializer().from_dict(payload)
     assert loaded.turn == original.turn
     assert loaded.rules.name == original.rules.name
     assert loaded.rules.map_profile.width == original.rules.map_profile.width
@@ -111,20 +111,20 @@ def test_round_trip_preserves_top_level_fields() -> None:
 
 def test_round_trip_preserves_rng_state() -> None:
     original = _build_tiny_game()
-    payload = V1Serializer().to_dict(original)
+    payload = Serializer().to_dict(original)
 
     # Next number from original.
     next_from_original = original.rng.random()
 
     # Loaded game starts from the same state, so first random should match.
-    loaded = V1Serializer().from_dict(payload)
+    loaded = Serializer().from_dict(payload)
     next_from_loaded = loaded.rng.random()
     assert next_from_loaded == next_from_original
 
 
 def test_round_trip_preserves_terrain_grid() -> None:
     original = _build_tiny_game()
-    loaded = V1Serializer().from_dict(V1Serializer().to_dict(original))
+    loaded = Serializer().from_dict(Serializer().to_dict(original))
     for x in range(original.map.width):
         for y in range(original.map.height):
             c = Coord(x, y)
@@ -133,7 +133,7 @@ def test_round_trip_preserves_terrain_grid() -> None:
 
 def test_round_trip_preserves_cities_and_owners() -> None:
     original = _build_tiny_game()
-    loaded = V1Serializer().from_dict(V1Serializer().to_dict(original))
+    loaded = Serializer().from_dict(Serializer().to_dict(original))
 
     by_id_o = {c.id: c for c in original.map.cities()}
     by_id_l = {c.id: c for c in loaded.map.cities()}
@@ -150,7 +150,7 @@ def test_round_trip_preserves_cities_and_owners() -> None:
 
 def test_round_trip_preserves_production_state() -> None:
     original = _build_tiny_game()
-    loaded = V1Serializer().from_dict(V1Serializer().to_dict(original))
+    loaded = Serializer().from_dict(Serializer().to_dict(original))
     city = next(c for c in loaded.map.cities() if c.id == CityId(1))
     assert city.production.building is UnitKind.ARMY
     assert city.production.work == 2
@@ -159,7 +159,7 @@ def test_round_trip_preserves_production_state() -> None:
 
 def test_round_trip_preserves_units_and_their_state() -> None:
     original = _build_tiny_game()
-    loaded = V1Serializer().from_dict(V1Serializer().to_dict(original))
+    loaded = Serializer().from_dict(Serializer().to_dict(original))
     by_id_o = {u.id: u for u in original.map.all_units()}
     by_id_l = {u.id: u for u in loaded.map.all_units()}
     assert set(by_id_l.keys()) == set(by_id_o.keys())
@@ -174,7 +174,7 @@ def test_round_trip_preserves_units_and_their_state() -> None:
 
 def test_round_trip_preserves_view_maps() -> None:
     original = _build_tiny_game()
-    loaded = V1Serializer().from_dict(V1Serializer().to_dict(original))
+    loaded = Serializer().from_dict(Serializer().to_dict(original))
     p1_loaded = next(p for p in loaded.players if p.id == PlayerId(1))
     assert p1_loaded.view.visible == {Coord(0, 0), Coord(1, 0)}
     assert Coord(3, 3) in p1_loaded.view.remembered
@@ -191,7 +191,7 @@ def test_topological_load_leaves_no_id_typed_reference_fields() -> None:
     arise from a phase-then-link load strategy.
     """
     original = _build_tiny_game()
-    loaded = V1Serializer().from_dict(V1Serializer().to_dict(original))
+    loaded = Serializer().from_dict(Serializer().to_dict(original))
     for u in loaded.map.all_units():
         assert isinstance(u.owner, Player), f"Unit {u.id}.owner is {type(u.owner).__name__}"
     for c in loaded.map.cities():
@@ -234,7 +234,7 @@ def test_load_rejects_newer_schema(tmp_path: Path) -> None:
         "schema_version": 999,
         "turn": 0,
         "rng_state": [3, [0] * 625, None],
-        "rules": {},
+        "ruleset": "STANDARD",
         "players": [],
         "cities": [],
         "map": {"width": 0, "height": 0, "tiles": [], "off_board": []},
@@ -263,48 +263,63 @@ def test_load_rejects_root_that_is_not_an_object(tmp_path: Path) -> None:
 def test_load_rejects_unknown_intermediate_version_with_no_migration(
     tmp_path: Path,
 ) -> None:
-    """A save one schema version older than current, with no migration
-    registered for it, must fail loudly rather than silently mis-deserialize."""
-    # A "v0" payload (one below the current SCHEMA_VERSION) has no migration.
-    bad_payload = {"schema_version": V1Serializer.SCHEMA_VERSION - 1}
+    """A save from an old schema version with no migration registered for it
+    must fail loudly rather than silently mis-deserialize."""
+    # No migration is registered from "v0" (the chain starts at v1).
+    bad_payload = {"schema_version": 0}
     path = tmp_path / "v0.json"
     path.write_text(json.dumps(bad_payload))
     with pytest.raises(ValueError, match="No migration"):
         SaveManager().load(path)
 
 
-# --- Custom RuleSet ----------------------------------------------------------
-
-
-def test_round_trip_with_custom_ruleset() -> None:
-    """A non-STANDARD ruleset (toggles flipped) round-trips correctly."""
-    profile = MapProfile(
-        width=4, height=4, water_ratio=50, smooth_iterations=2, num_cities=2, min_city_distance=2
-    )
-    custom = RuleSet(
-        name="STACKED",
-        map_profile=profile,
-        allow_unit_stacking=True,
-        army_capture_city_deterministic=True,
-        fog_cheat=True,
-    )
+def test_v1_save_migrates_to_current_schema(tmp_path: Path) -> None:
+    """A v0.1.0-era save (schema v1: full RuleSet dict under "rules") walks the
+    migration chain and loads, restoring the preset by its recorded name."""
     tiles = {
         Coord(x, y): Tile(coord=Coord(x, y), terrain=TerrainKind.LAND)
         for x in range(4)
         for y in range(4)
     }
     g = Game(
-        rules=custom,
+        rules=STANDARD,
         real_map=Map(width=4, height=4, tiles=tiles),
         players=[Player(id=PlayerId(1), name="P", is_ai=False, view=ViewMap())],
         seed=1,
     )
-    loaded = V1Serializer().from_dict(V1Serializer().to_dict(g))
-    assert loaded.rules.name == "STACKED"
-    assert loaded.rules.allow_unit_stacking is True
+    payload = Serializer().to_dict(g)
+    # Downgrade the payload to the v1 shape: "rules" was the serialized
+    # RuleSet, of which only the name matters to the migration.
+    payload["schema_version"] = 1
+    payload["rules"] = {"name": payload.pop("ruleset"), "fog_cheat": False}
+    path = tmp_path / "v1.json"
+    path.write_text(json.dumps(payload))
+
+    loaded = SaveManager().load(path)
+    assert loaded.rules is STANDARD
+
+
+# --- Named RuleSet -----------------------------------------------------------
+
+
+def test_round_trip_restores_named_ruleset_from_registry() -> None:
+    """The ruleset is saved by NAME and rebuilt from the preset registry, so a
+    non-STANDARD preset's rules survive the round-trip — identically."""
+    tiles = {
+        Coord(x, y): Tile(coord=Coord(x, y), terrain=TerrainKind.LAND)
+        for x in range(4)
+        for y in range(4)
+    }
+    g = Game(
+        rules=FORTIFIED_CITIES,
+        real_map=Map(width=4, height=4, tiles=tiles),
+        players=[Player(id=PlayerId(1), name="P", is_ai=False, view=ViewMap())],
+        seed=1,
+    )
+    loaded = Serializer().from_dict(Serializer().to_dict(g))
+    assert loaded.rules is FORTIFIED_CITIES  # the very same preset object
     assert loaded.rules.army_capture_city_deterministic is True
-    assert loaded.rules.fog_cheat is True
-    assert loaded.rules.map_profile.width == 4
+    assert loaded.rules.city_artillery_range == 2
 
 
 def test_round_trip_preserves_standing_orders(tmp_path: Path) -> None:
@@ -399,5 +414,5 @@ def test_round_trip_preserves_cargo_mid_voyage(tmp_path: Path) -> None:
     assert loaded_cargo not in list(loaded.map.board_units())
     assert list(loaded.map.units_at(Coord(0, 3))) == [loaded_transport]
     # Byte-identical re-serialization confirms a clean round-trip.
-    s = V1Serializer()
+    s = Serializer()
     assert s.to_dict(loaded) == s.to_dict(game)

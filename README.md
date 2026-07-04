@@ -14,6 +14,22 @@ take every city on the map.
 
 ## Install & run
 
+### Download a release (no Python needed)
+
+Grab the single-file binary for your platform — nothing to install, no runtime:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ccebelenski/farshore/main/packaging/install.sh | bash
+farshore
+```
+
+That drops one binary in `~/.local/bin`. Prefer to do it by hand? Download the
+build for your OS (Linux, macOS, Windows) from the
+[latest release](https://github.com/ccebelenski/farshore/releases/latest) and
+run it directly.
+
+### From source
+
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```sh
