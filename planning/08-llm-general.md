@@ -377,10 +377,18 @@ the coupling we wanted — all 3 runs addressed orders to region nouns unprompte
 (1) naming collision — "FARSHORE CONTINENT" vs the game's title sent s2 into
 which-side-am-I deliberation (fix: enemy landmass renamed EASTERN CONTINENT);
 (2) s3 leaked its self-revision into the answer ("Correction: … Revised Plan:") —
-the output contract exists to forbid exactly this. **Verdict: REGIONS stays, for the
-orders-vocabulary coupling, not for tokens.** The token lever is the thinking dial
-(OFF is the intended shipping default and had never been measured) → folded into the
-doctrine battery as a THINK/NOTHINK arm.
+the output contract exists to forbid exactly this. ~~Verdict: REGIONS stays, for the orders-vocabulary coupling, not for tokens.~~
+**OVERRULED — REGIONS REJECTED (user course-correction, same day).** Named regions are
+not a game construct: the derivation/naming/turn-to-turn-identity layer is new engine
+machinery whose bugs would masquerade as model behavior in every later experiment, and
+its nouns flow outward as order targets the engine can't execute without a resolver.
+The raw board was presented deliberately so our heuristics don't become another
+variable — and the data agrees: 9/9 grid runs had zero coordinate-grounding errors
+(the grid is slow to read, never wrong). **STANDING RULE: prompts and contracts use
+engine-native constructs only** — raw board, city coordinates, unit ids, at most
+universal primitives (compass directions). The token lever is the thinking dial
+(OFF is the intended shipping default), measured by the doctrine battery's
+THINK/NOTHINK arms (those results are representation-independent and stand).
 
 ## DOCTRINE SCHEMA: action verbs + parsable output (draft, test after sitrep)
 
@@ -394,7 +402,12 @@ contract. Draft:
 - `SCOUT <target>` — reveal a region / refresh stale contacts
 - `PATROL <target>` — sea control of a region (interdict, screen, blockade)
 - `STAGE <target>` — mass and wait there; explicit not-yet-committed posture
-Targets: a city `(x,y)` or a REGION NAME from the theater briefing. Coverage check:
+Targets **(v2, per the engine-native rule)**: a city `(x,y)` for
+CAPTURE/DEFEND/STAGE — cities are the game's strategic currency and map 1:1 onto how
+the executor already plans; for SCOUT/PATROL, a coordinate anchor or a bare compass
+direction (universal primitive, compiles onto existing explore/patrol behaviors with
+no region machinery). ~~a REGION NAME from the theater briefing~~ (rejected — not
+executable). Coverage check:
 every sound TF objective in the 9 grounding-ab transcripts maps onto these five
 (blockade→PATROL, home guard→DEFEND, amphib assault→CAPTURE, await-strength→STAGE).
 ESCORT is not a verb — a warship in a TF with a transport IS the escort (membership

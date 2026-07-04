@@ -16,7 +16,12 @@ from pathlib import Path
 ROSTER = {f"#{n}" for n in range(1, 11)}
 MY_CITIES = {"(2,0)", "(1,2)", "(4,3)"}
 BOARD_CITIES = MY_CITIES | {"(4,1)", "(11,1)", "(11,2)"}
+# v1-only: derived region nouns, REJECTED as order targets (engine-native rule);
+# accepted only under --allow-regions so v1 transcripts can still be graded.
 REGIONS = {"HOME CONTINENT", "CENTRAL SEA", "SOUTHERN WATER", "EASTERN CONTINENT"}
+COMPASS = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"}
+COORD_RE = re.compile(r"^\((\d+),(\d+)\)$")
+BOARD_W, BOARD_H = 14, 6
 VERBS = {"CAPTURE", "DEFEND", "SCOUT", "PATROL", "STAGE"}
 UNIT_KINDS = {
     "ARMY", "FIGHTER", "PATROL", "DESTROYER", "SUBMARINE",
@@ -57,6 +62,9 @@ class Report:
 class DoctrineValidator:
     """Validates one answer against the contract: grammar, roster, coverage."""
 
+    def __init__(self, allow_regions: bool = False) -> None:
+        self._allow_regions = allow_regions
+
     def validate(self, run_id: str, answer: str) -> Report:
         report = Report(run_id=run_id)
         assigned: dict[str, str] = {}  # unit id -> TF line no
@@ -93,8 +101,23 @@ class DoctrineValidator:
         if m["verb"] not in VERBS:
             r.errors.append(f"TF{m['n']}: unknown verb {m['verb']!r}")
         target = m["target"].strip()
-        if target.upper() not in REGIONS and target not in BOARD_CITIES:
+        if not self._target_ok(m["verb"], target):
             r.errors.append(f"TF{m['n']}: unresolvable target {target!r}")
+
+    def _target_ok(self, verb: str, target: str) -> bool:
+        if self._allow_regions and target.upper() in REGIONS:
+            return True
+        if verb in {"CAPTURE", "DEFEND", "STAGE"}:
+            return target in BOARD_CITIES
+        # SCOUT/PATROL: a compass direction or any on-board coordinate anchor.
+        if target.upper() in COMPASS:
+            return True
+        coord = COORD_RE.match(target)
+        return bool(
+            coord
+            and int(coord[1]) < BOARD_W
+            and int(coord[2]) < BOARD_H
+        )
 
     def _check_build(self, m: re.Match[str], built: set[str], r: Report) -> None:
         if m["city"] not in MY_CITIES:
@@ -108,11 +131,12 @@ class DoctrineValidator:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
+    args = [a for a in argv[1:] if a != "--allow-regions"]
+    if len(args) != 1:
         print(__doc__, file=sys.stderr)
         return 2
-    validator = DoctrineValidator()
-    for path in sorted(Path(argv[1]).glob("*.json")):
+    validator = DoctrineValidator(allow_regions="--allow-regions" in argv)
+    for path in sorted(Path(args[0]).glob("*.json")):
         payload = json.loads(path.read_text())
         answer = payload["response"]["choices"][0]["message"].get("content") or ""
         print(validator.validate(path.stem, answer).render())

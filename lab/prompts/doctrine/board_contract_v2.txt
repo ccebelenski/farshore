@@ -1,0 +1,37 @@
+MAP  legend: . land  ~ water  ? fog   O my city  E enemy city  N neutral city
+ r0  . . O . . . ~ ~ ~ ~ ? ? ? ?
+ r1  . . . . N . ~ ~ ~ ~ ? E ? ?
+ r2  . O . . . . ~ ~ ~ ~ . E . ?
+ r3  . . . . O . ~ ~ ~ ~ . . . ?
+ r4  . . . . . . ~ ~ ~ ~ ? ? ? ?
+ r5  ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ? ? ? ?
+
+AVAILABLE UNITS  (col,row) — this is your ENTIRE force; you have NOTHING else
+  army #1 (0,0) #2 (1,0) #3 (3,0) #4 (0,1) #5 (1,1) #6 (3,1) #7 (0,2) #8 (2,2)
+  transport #9 (6,2) empty
+  destroyer #10 (6,3)
+MY CITIES
+  (2,0) building ARMY, 2 turns left
+  (1,2) building TRANSPORT, 12 turns left
+  (4,3) building ARMY, 4 turns left
+NEUTRAL CITIES  (4,1) on my continent
+KNOWN ENEMY  city (11,1), city (11,2); destroyer near (10,2) seen 3t ago; army (11,1) seen 3t ago
+
+TASK: issue your orders. Output ONLY lines in exactly these two forms — no
+other prose, headers, or commentary:
+
+  TF <n>: UNITS <unit ids> | <VERB> <target> | WHY <one line>
+  BUILD (x,y): <UNIT KIND> | WHY <one line>
+
+One TF line per task force; every unit appears in exactly one TF. One BUILD
+line for each city you own — keep its current build or change it (changing
+discards accumulated work). VERB is one of:
+  CAPTURE <city (x,y)>             take that city; your officers handle any sea lift
+  DEFEND  <city (x,y)>             hold it against attack
+  SCOUT   <(x,y) or compass dir>   reveal the area there / refresh stale contacts
+  PATROL  <(x,y) or compass dir>   control the sea there; interdict enemy shipping
+  STAGE   <city (x,y)>             mass near it and wait; not yet committed
+A target city must be a coordinate from this briefing; a compass direction is
+one of N NE E SE S SW W NW. A warship grouped with a transport escorts it —
+there is no ESCORT order. Account for every unit and every city; anything
+deliberately left alone gets a TF line with DEFEND or STAGE explaining why.

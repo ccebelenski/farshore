@@ -1,0 +1,30 @@
+# Doctrine v2 — the engine-native contract on the RAW GRID board.
+# Course-correction battery: no derived regions anywhere. Targets = city
+# coordinates (CAPTURE/DEFEND/STAGE) or coordinate/compass (SCOUT/PATROL).
+# Arms mirror doctrine v1 (THINK/NOTHINK) so the two contracts compare
+# directly on parse rate, validity, strategy quality, and tokens.
+
+[battery]
+name = "doctrine-v2"
+prompt_dir = "lab/prompts/doctrine"
+transcript_dir = "lab/transcripts/doctrine-v2"
+seeds = [1, 2, 3]
+
+[sampling]
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+presence_penalty = 1.5
+max_tokens = 12288
+enable_thinking = true
+
+[[conditions]]
+name = "THINK"
+primer = "primer_b.txt"
+board = "board_contract_v2.txt"
+
+[[conditions]]
+name = "NOTHINK"
+primer = "primer_b.txt"
+board = "board_contract_v2.txt"
+enable_thinking = false
