@@ -434,3 +434,36 @@ Battery `doctrine` (after sitrep verdict): winner board + the contract appended 
 TASK vs the free-prose baseline. Measure: parse rate (mechanical), verb/target
 validity, and strategy quality — the known risk is format pressure degrading small-model
 reasoning; that is exactly the thing to measure, not assume.
+
+## RESULTS: doctrine v1 (regions board) + v2 (raw grid), THINK vs NOTHINK
+
+12 runs total (2 boards × {THINK,NOTHINK} × 3 seeds), graded by `lab/grade_doctrine.py`
+after making the parser lenient on trivia (optional WHY keyword, case, `#` prefixes,
+freeform TF labels), strict on semantics (roster, verbs, targets, coverage).
+
+**Headline — user's hypothesis CONFIRMED: think exists for a reason.**
+- THINK: 4/6 full PARSE OK; worst failures = 1 near-miss (single non-city STAGE
+  target) and 1 non-convergence (v2-s3 hit the 12,288 cap still thinking; no output).
+  Zero semantic howlers. 7k–12.3k tokens.
+- NOTHINK: **0/6** PARSE OK, and the failures are understanding, not formatting:
+  phantom units returned (#11–#13 invented, v2-s3), armies ordered to PATROL open
+  water (v1-s3), CAPTURE aimed at a destroyer sighting tile "to secure the neutral
+  destroyer" (v1-s2), and v2-s3 leaked 1.3k tokens of visible self-argument
+  ("Final Final Orders:") into the answer channel. 0.1k–1.3k tokens.
+
+**The roster-audit discipline lives in the thinking channel** — the "wait, do I have a
+satellite? no" loops that killed phantoms in every grounding run are exactly what
+NOTHINK skips, and phantoms promptly returned. The 50–90x token gap does not buy a
+usable general at 4B. Shipping question reframes to budgeted thinking: THINK at
+strategic cadence (~10k tokens every N turns is minutes even at the Q4 CPU floor),
+with finish=length treated as a failed epoch → validator rejects → executor fallback
+(the non-convergence guard).
+
+**Board trend (weak, n=3/arm):** THINK parsed 3/3 on the regions board but 1/3 on the
+raw grid (one near-miss, one runaway) — consistent with grid-decode + contract
+accounting competing for the same deliberation budget. Watch, don't conclude.
+
+**Contract v3 fixes queued from observed friction:** drop the WHY keyword (pure
+compliance risk — every model omitted it); TF labels freeform; STAGE should accept any
+coordinate, not just cities (two runs staged at sensible non-city marshaling points —
+engine-native and executor-compilable, the contract was wrong, not the model).

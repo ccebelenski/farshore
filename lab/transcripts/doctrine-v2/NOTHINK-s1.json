@@ -1,0 +1,61 @@
+{
+  "condition": "NOTHINK",
+  "seed": 1,
+  "enable_thinking": false,
+  "sampling": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "presence_penalty": 1.5,
+    "max_tokens": 12288,
+    "enable_thinking": true
+  },
+  "duration_s": 3.8,
+  "prompt": "=== FARSHORE \u2014 RULES PRIMER ===\n\nYOUR ROLE\n  You command at the strategic level. You form task forces and give each an\n  objective (\"Task Force 1: secure the eastern sea\"). You do NOT move\n  individual units, choose individual targets, or resolve combat \u2014 subordinate\n  officers carry out your intent and report back. If you find yourself naming a\n  unit's destination tile, you've dropped too low.\n\nVICTORY\n  You win when the enemy owns zero cities (a player with no cities cannot build\n  and is finished). Only cities build. A neutral city can be captured by an\n  army like any other city; it then builds for you \u2014 taking neutrals does not\n  win the game, but each one adds production.\n\nUNITS\n  name        moves-on  HP  spd  str  carries      builds-in\n  ARMY        land       1    1    1   \u2014             5 turns\n  FIGHTER     air        1    8    1   \u2014            10   (range 20; must refuel)\n  PATROL      sea        2    4    1   \u2014            15\n  DESTROYER   sea        3    3    2   \u2014            20\n  SUBMARINE   sea        2    2    3   \u2014            25\n  TRANSPORT   sea        3    2    0   6 armies     30   (str 0: cannot fight)\n  CARRIER     sea        8    2    1   8 fighters   40\n  BATTLESHIP  sea       18    2    4   \u2014            50\n  SATELLITE   orbit      1    1    0   \u2014            50   (recon only; cannot attack or be attacked; 50-turn life)\n\nMOVEMENT & TERRAIN\n  - Land units move on land + cities; they cannot enter water.\n  - Sea units move on water + cities; they cannot cross land, and must sail\n    around it. Cities are the only tiles where land and sea units meet.\n  - A unit moves up to its speed at full HP; damaged units move less. A unit\n    regains HP only on a turn it does not move.\n  - One unit per tile (exception: cargo, below).\n\nCOMBAT  (the engine resolves it; you only weigh it)\n  Probabilistic. Higher strength and higher current HP win more often; either\n  side can lose HP or be destroyed. Strength-0 units (transport, satellite)\n  never fight \u2014 a transport caught by an enemy warship is destroyed.\n\nCROSSING WATER\n  An army cannot enter water. To move armies across water: load them into a\n  transport at a coast/city, sail, unload onto adjacent land. Cargo is\n  kind-locked \u2014 transports carry armies only, carriers carry fighters only;\n  ships never carry ships. If a loaded carrier is destroyed, everything aboard\n  is lost with it.\n\nCAPTURING CITIES\n  Only an army captures a city, by entering it. Capture is a 50% roll, and a\n  successful capture consumes the army (it garrisons the city). A city can take\n  several armies to secure, and each attempt spends one.\n\nPRODUCTION\n  No currency. A city builds ONE unit at a time; it finishes after that unit's\n  build-time in turns, then starts the next. Switching what a city builds\n  DISCARDS all accumulated progress \u2014 effort toward one unit does not transfer\n  to another.\n\nAIR & SPECIAL\n  - Fighter: must reach a FRIENDLY city or a carrier within its range (20) or\n    it is lost. It cannot land on an enemy city.\n  - Satellite: reveals everything within scan radius 10 \u2014 terrain AND any enemy\n    units currently there \u2014 but far-reaching and deep in enemy territory. It\n    only sees; no other effect, cannot be shot down.\n\nVISION / FOG\n  You see within any of your units'/cities' scan radius (army 2, sub 1,\n  patrol/destroyer/battleship 3, transport 2, carrier 4, fighter 5, sat 10).\n  You remember terrain you've seen, but an enemy unit is known only where you\n  can see right now \u2014 remembered enemy positions may be stale.\n\nMAP  legend: . land  ~ water  ? fog   O my city  E enemy city  N neutral city\n r0  . . O . . . ~ ~ ~ ~ ? ? ? ?\n r1  . . . . N . ~ ~ ~ ~ ? E ? ?\n r2  . O . . . . ~ ~ ~ ~ . E . ?\n r3  . . . . O . ~ ~ ~ ~ . . . ?\n r4  . . . . . . ~ ~ ~ ~ ? ? ? ?\n r5  ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ? ? ? ?\n\nAVAILABLE UNITS  (col,row) \u2014 this is your ENTIRE force; you have NOTHING else\n  army #1 (0,0) #2 (1,0) #3 (3,0) #4 (0,1) #5 (1,1) #6 (3,1) #7 (0,2) #8 (2,2)\n  transport #9 (6,2) empty\n  destroyer #10 (6,3)\nMY CITIES\n  (2,0) building ARMY, 2 turns left\n  (1,2) building TRANSPORT, 12 turns left\n  (4,3) building ARMY, 4 turns left\nNEUTRAL CITIES  (4,1) on my continent\nKNOWN ENEMY  city (11,1), city (11,2); destroyer near (10,2) seen 3t ago; army (11,1) seen 3t ago\n\nTASK: issue your orders. Output ONLY lines in exactly these two forms \u2014 no\nother prose, headers, or commentary:\n\n  TF <n>: UNITS <unit ids> | <VERB> <target> | WHY <one line>\n  BUILD (x,y): <UNIT KIND> | WHY <one line>\n\nOne TF line per task force; every unit appears in exactly one TF. One BUILD\nline for each city you own \u2014 keep its current build or change it (changing\ndiscards accumulated work). VERB is one of:\n  CAPTURE <city (x,y)>             take that city; your officers handle any sea lift\n  DEFEND  <city (x,y)>             hold it against attack\n  SCOUT   <(x,y) or compass dir>   reveal the area there / refresh stale contacts\n  PATROL  <(x,y) or compass dir>   control the sea there; interdict enemy shipping\n  STAGE   <city (x,y)>             mass near it and wait; not yet committed\nA target city must be a coordinate from this briefing; a compass direction is\none of N NE E SE S SW W NW. A warship grouped with a transport escorts it \u2014\nthere is no ESCORT order. Account for every unit and every city; anything\ndeliberately left alone gets a TF line with DEFEND or STAGE explaining why.\n",
+  "response": {
+    "id": "chatcmpl-2YLam0d0tqUlUHPFDZk8kGjKE9v7PV1R",
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "logprobs": null,
+        "message": {
+          "content": "TF #3: UNITS #6 | CAPTURE (11,2) | Outflank the enemy destroyer at (10,2) and secure the western flank while #7 covers approach.\nTF #4: UNITS #8 | SCOUT NE | Refresh intelligence on the open sea north of my northern city to counteract stale enemy reports.\nTF #5: UNITS #9 #10 | STAGE (6,2) | Consolidate transport and destroyer at the coast; ready for amphibious assault or patrol rotation as needed.\nTF #6: UNITS #1 | CAPTURE (4,1) | Secure the neutral city on my continent to unlock production without losing it to enemy retaking.\nTF #7: UNITS #2 #3 #4 #5 | DEFEND (2,0) | Hold my primary garrison against any enemy army attempting to seize this strategic hub.\nBUILD (1,2): TRANSPORT | WHY Maintain logistics capacity for future large-scale amphibious operations.",
+          "refusal": null,
+          "role": "assistant",
+          "annotations": null,
+          "audio": null,
+          "function_call": null,
+          "tool_calls": null
+        }
+      }
+    ],
+    "created": 1783196163,
+    "model": "unsloth/Qwen3.5-4B-GGUF:UD-Q8_K_XL",
+    "object": "chat.completion",
+    "moderation": null,
+    "service_tier": null,
+    "system_fingerprint": "b9860-fdb1db877",
+    "usage": {
+      "completion_tokens": 214,
+      "prompt_tokens": 1629,
+      "total_tokens": 1843,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cached_tokens": 883
+      }
+    },
+    "timings": {
+      "cache_n": 883,
+      "prompt_n": 746,
+      "prompt_ms": 116.061,
+      "prompt_per_token_ms": 0.15557774798927615,
+      "prompt_per_second": 6427.65442310509,
+      "predicted_n": 214,
+      "predicted_ms": 3134.023,
+      "predicted_per_token_ms": 14.644967289719627,
+      "predicted_per_second": 68.28284285086613
+    }
+  }
+}

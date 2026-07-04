@@ -28,12 +28,19 @@ UNIT_KINDS = {
     "TRANSPORT", "CARRIER", "BATTLESHIP", "SATELLITE",
 }
 
+# Lenient on trivia (the WHY keyword is optional and case-insensitive, unit
+# ids may drop the '#'), strict on semantics (ids, verbs, targets, coverage).
+# Mandatory boilerplate tokens proved to be pure compliance risk: doctrine-v1
+# graded 0/6 on syntax when every model simply omitted the literal "WHY".
 TF_RE = re.compile(
-    r"^TF\s*(?P<n>\d+)\s*:\s*UNITS\s+(?P<units>[^|]+)\|\s*(?P<verb>[A-Z]+)\s+"
-    r"(?P<target>[^|]+)\|\s*WHY\s+(?P<why>.+)$"
+    r"^TF\s*#?(?P<n>[\d,\- ]+)\s*[:\-]\s*UNITS\s+(?P<units>[^|]+)\|\s*"
+    r"(?P<verb>[A-Za-z]+)\s+(?P<target>[^|]+)\|\s*(?:WHY\s+)?(?P<why>.+)$",
+    re.IGNORECASE,
 )
 BUILD_RE = re.compile(
-    r"^BUILD\s*(?P<city>\(\d+,\d+\))\s*:\s*(?P<kind>[A-Z]+)\s*\|\s*WHY\s+(?P<why>.+)$"
+    r"^BUILD\s*(?P<city>\(\d+,\d+\))\s*[:\-]\s*(?P<kind>[A-Za-z]+)\s*"
+    r"\|\s*(?:WHY\s+)?(?P<why>.+)$",
+    re.IGNORECASE,
 )
 
 
@@ -88,7 +95,7 @@ class DoctrineValidator:
         return report
 
     def _check_tf(self, m: re.Match[str], assigned: dict[str, str], r: Report) -> None:
-        ids = re.findall(r"#\d+", m["units"])
+        ids = [f"#{n}" for n in re.findall(r"#?(\d+)", m["units"])]
         for uid in ids:
             if uid not in ROSTER:
                 r.errors.append(f"TF{m['n']}: unknown unit {uid}")
@@ -98,10 +105,11 @@ class DoctrineValidator:
                 assigned[uid] = m["n"]
         if not ids:
             r.errors.append(f"TF{m['n']}: no unit ids")
-        if m["verb"] not in VERBS:
+        verb = m["verb"].upper()
+        if verb not in VERBS:
             r.errors.append(f"TF{m['n']}: unknown verb {m['verb']!r}")
         target = m["target"].strip()
-        if not self._target_ok(m["verb"], target):
+        if not self._target_ok(verb, target):
             r.errors.append(f"TF{m['n']}: unresolvable target {target!r}")
 
     def _target_ok(self, verb: str, target: str) -> bool:
@@ -126,7 +134,7 @@ class DoctrineValidator:
             r.errors.append(f"BUILD: duplicate line for {m['city']}")
         else:
             built.add(m["city"])
-        if m["kind"] not in UNIT_KINDS:
+        if m["kind"].upper() not in UNIT_KINDS:
             r.errors.append(f"BUILD: unknown unit kind {m['kind']!r}")
 
 
