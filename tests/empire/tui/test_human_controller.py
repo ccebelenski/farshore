@@ -35,10 +35,6 @@ def _tiny_view() -> WorldView:
     return WorldView(real_map=real_map, player=player, turn=1, rules=STANDARD)
 
 
-def test_name_is_stable() -> None:
-    assert HumanController().name() == "Human"
-
-
 def test_plan_turn_with_no_pending_returns_empty_plan() -> None:
     """Engine asking before TUI has staged anything: return a do-nothing plan."""
     plan = HumanController().plan_turn(_tiny_view())

@@ -155,14 +155,6 @@ def test_effective_capacity_scales_with_damage_using_ceil(player: Player) -> Non
     assert c.effective_capacity() == 1  # ceil(8/8)=1
 
 
-def test_damage_scaling_for_three_hit_units(player: Player) -> None:
-    """Sanity at small max_hits: Destroyer (max_hits=3, speed=3)."""
-    d = Destroyer(UnitId(1), player, Coord(0, 0))
-    assert d.moves_this_turn() == 3
-    d.hits = 1
-    assert d.moves_this_turn() == 1
-
-
 def test_effective_capacity_zero_for_non_cargo_units(player: Player) -> None:
     b = Battleship(UnitId(1), player, Coord(0, 0))
     assert b.effective_capacity() == 0

@@ -177,18 +177,7 @@ def test_unlaunched_satellite_decays_in_place(p1: Player) -> None:
 
     _, deorbited = advance_satellites(m)
     assert deorbited == (UnitId(1),)  # crashed without ever launching
-
-
-def test_satellite_deorbits_at_end_of_lifetime(p1: Player) -> None:
-    m = _build_map(["LLL"])
-    sat = Satellite(UnitId(1), p1, Coord(0, 0))
-    sat.range = 1
-    m.place_unit(sat, Coord(0, 0))
-
-    _, deorbited = advance_satellites(m)
-
-    assert deorbited == (UnitId(1),)
-    assert m.unit_by_id(UnitId(1)) is None
+    assert m.unit_by_id(UnitId(1)) is None  # deorbit removes it from the map
 
 
 def test_satellite_cannot_be_attacked(

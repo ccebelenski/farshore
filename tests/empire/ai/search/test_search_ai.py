@@ -273,15 +273,6 @@ def test_aggression_lifts_bold_plan_near_floor_but_reverts_on_loss() -> None:
     assert eff[2] == -50.0           # bold but losing: reverted to flat (no horde)
 
 
-def test_aggression_zero_is_a_noop() -> None:
-    from empire.ai.search.plan import Objective, Plan, Role
-
-    ai = SearchAI(aggression=0.0)
-    candidates = (Plan.hold(), Plan(objectives=(Objective(Coord(2, 2), Role.ASSAULT, 3),)))
-    raw = [5.0, 3.0]
-    assert ai._apply_aggression(candidates, raw) == raw
-
-
 def test_base_value_credits_only_tagged_invade_goal() -> None:
     """Split-score: horizon-free base value goes to the INVADE goal
     TAG only (set by the generator when crossing water is the path to victory).

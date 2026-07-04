@@ -6,6 +6,8 @@ control."
 
 from __future__ import annotations
 
+import pytest
+
 from empire.ai.baseline import BaselineAI
 from empire.core.engine import scan_set_for_player
 from empire.core.ruleset import SMALL
@@ -65,14 +67,19 @@ async def test_end_turn_advances_engine() -> None:
 
 
 async def test_help_modal_opens_and_dismisses() -> None:
+    from empire.tui.modals import HelpModal
+    from empire.tui.screens.play_screen import PlayScreen
+
     app, _, _ = _build_app()
     async with app.run_test(size=(80, 40)) as pilot:
         await pilot.pause()
         await pilot.press("question_mark")
         await pilot.pause()
+        assert isinstance(app.screen, HelpModal)
         # Any key dismisses HelpModal.
         await pilot.press("space")
         await pilot.pause()
+        assert isinstance(app.screen, PlayScreen)
 
 
 async def test_auto_turn_advances_without_keypress() -> None:
@@ -91,10 +98,13 @@ async def test_auto_turn_advances_without_keypress() -> None:
 
 async def test_end_turn_with_doomed_army_asks_confirmation() -> None:
     """An army parked on its own city would disband (§5.4); ending the turn
-    must go through a ConfirmModal instead of silently eating the unit."""
+    must go through a ConfirmModal instead of silently eating the unit.
+    Declining leaves the turn unadvanced AND lands the player on the at-risk
+    unit."""
     from empire.core.identity import UnitId
     from empire.core.unit import Army
     from empire.tui.modals import ConfirmModal
+    from empire.tui.screens.play_screen import PlayScreen
 
     app, _, _ = _build_app()
     assert app.game is not None
@@ -111,34 +121,10 @@ async def test_end_turn_with_doomed_army_asks_confirmation() -> None:
         await pilot.press("n", "e")
         await pilot.pause()
         assert isinstance(app.screen, ConfirmModal)
-        # Decline: turn must NOT have advanced.
+        # Decline: turn must NOT have advanced, and the cursor lands on the unit.
         await pilot.press("escape")
         await pilot.pause(0.3)
         assert game.turn == before
-
-
-async def test_declining_disband_confirm_selects_the_doomed_army() -> None:
-    """Declining the §5.4 confirm should put the player ON the unit at risk."""
-    from empire.core.identity import UnitId
-    from empire.core.unit import Army
-    from empire.tui.modals import ConfirmModal
-    from empire.tui.screens.play_screen import PlayScreen
-
-    app, _, _ = _build_app()
-    assert app.game is not None
-    game = app.game
-    human = next(p for p in game.players if not p.is_ai)
-    capital = next(c for c in game.map.cities() if c.owner is human)
-    army = Army(UnitId(901), human, capital.coord)
-    game.map.place_unit(army, capital.coord)
-
-    async with app.run_test(size=(60, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("n", "e")  # skip the army, try to end the turn
-        await pilot.pause()
-        assert isinstance(app.screen, ConfirmModal)
-        await pilot.press("escape")  # decline
-        await pilot.pause()
         screen = app.screen
         assert isinstance(screen, PlayScreen)
         assert screen._selected_unit_id == army.id  # pyright: ignore[reportPrivateUsage]
@@ -404,7 +390,7 @@ async def test_production_modal_picks_a_kind() -> None:
         await pilot.pause()
         assert isinstance(app.screen, PlayScreen)
         queued = screen._pending_production.get(capital.id)  # pyright: ignore[reportPrivateUsage]
-        assert queued is None or isinstance(queued, UnitKind)
+        assert isinstance(queued, UnitKind), "Enter should queue the current kind"
 
 
 async def test_wake_via_cursor_without_selecting_works_for_multiple() -> None:
@@ -714,8 +700,13 @@ async def test_city_report_opens_and_dismisses() -> None:
         assert isinstance(app.screen, PlayScreen)
 
 
-async def test_disband_removes_own_unit_after_confirm() -> None:
-    """'x' on an own unit → confirm → the unit is gone from the map."""
+@pytest.mark.parametrize(
+    ("key", "survives"),
+    [("y", False), ("n", True)],
+    ids=["confirm-removes", "cancel-keeps"],
+)
+async def test_disband_confirm_or_cancel(key: str, survives: bool) -> None:
+    """'x' on an own unit pops a confirm: 'y' removes it, 'n' keeps it."""
     from empire.core.identity import UnitId
     from empire.core.unit import Army
     from empire.tui.modals import ConfirmModal
@@ -738,38 +729,9 @@ async def test_disband_removes_own_unit_after_confirm() -> None:
         await pilot.press("x")
         await pilot.pause()
         assert isinstance(app.screen, ConfirmModal)
-        await pilot.press("y")  # confirm
+        await pilot.press(key)
         await pilot.pause()
-        assert game.map.unit_by_id(army.id) is None
-
-
-async def test_disband_cancel_keeps_unit() -> None:
-    """Declining the disband confirm leaves the unit on the map."""
-    from empire.core.identity import UnitId
-    from empire.core.unit import Army
-    from empire.tui.modals import ConfirmModal
-    from empire.tui.screens.play_screen import PlayScreen
-
-    app, _, _ = _build_app()
-    assert app.game is not None
-    game = app.game
-    human = next(p for p in game.players if not p.is_ai)
-    capital = next(c for c in game.map.cities() if c.owner is human)
-    army = Army(UnitId(961), human, capital.coord)
-    game.map.place_unit(army, capital.coord)
-
-    async with app.run_test(size=(60, 40)) as pilot:
-        await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, PlayScreen)
-        await pilot.press("escape")  # free cursor
-        screen._cursor = capital.coord  # pyright: ignore[reportPrivateUsage]
-        await pilot.press("x")
-        await pilot.pause()
-        assert isinstance(app.screen, ConfirmModal)
-        await pilot.press("n")  # decline
-        await pilot.pause()
-        assert game.map.unit_by_id(army.id) is army
+        assert game.map.unit_by_id(army.id) is (army if survives else None)
 
 
 async def test_patrol_route_sets_looping_cycle() -> None:

@@ -266,9 +266,13 @@ def test_decisions_are_deterministic_and_numbers_justified() -> None:
     assert [(repr(p), r, e) for p, r, e in a] == [(repr(p), r, e) for p, r, e in b], (
         "scoring must be deterministic"
     )
-    best = max(a, key=lambda t: t[2])
-    others = [t for t in a if t is not best]
-    assert all(best[2] >= o[2] for o in others), "chosen plan must be the argmax on the numbers"
+    # Call the real chooser: the plan it picks must carry the top effective
+    # score — the decision is won ON THE NUMBERS, not by a tiebreak or luck.
+    chosen = ai._choose_plan(view)  # pyright: ignore[reportPrivateUsage]
+    eff_by_plan = {repr(p): e for p, _, e in a}
+    assert eff_by_plan[repr(chosen)] == max(eff_by_plan.values()), (
+        "the chosen plan must carry the top effective score"
+    )
 
 
 # --- stateful portfolio: multiple concurrent foci ------------------------------
