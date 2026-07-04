@@ -619,6 +619,28 @@ n=3; keep UNI as the default going forward (it is also simply the truer renderin
 the game's own display), re-evaluate as sample grows. 4th budget-exhaustion runaway
 of the night (WHY-OLD-s2) — multi-call receipts keep accumulating.
 
+## RESULTS: lift3 (SEA TRANSPORT primer rev — predictions confirmed)
+
+2/2 converged runs produced the **textbook launch**: DISBAND the stage + the patrol,
+FORM one strike TF from the six staged armies + transport + destroyer, CAPTURE (11,1),
+explicitly citing escort. Water-staging: **zero** (was 4/6 in lift2). Legal launch:
+2/2 (was 1/6 across lift2). The lift convention was the missing knowledge, and one
+primer section fixed it. Third confirmed single-edit mechanism of the night
+(neutral wording → WHY persistence → lift convention), each: observed failure →
+one measured edit → falsifiable prediction → confirmed.
+
+Residue:
+- **BUILD lines went 0/3** — amendment mode consistently under-produces them. Better
+  design than policing it: contract v4 makes BUILD optional with "no BUILD line =
+  keep current build" as the stated default (thrash-averse, shorter output, and
+  tonight's omissions become correct behavior retroactively).
+- Grammar drift continues in trivial ways (`DISBAND TF 1 |` order-flipped; marker ids
+  in one run) — all within the accept-and-normalize policy.
+- **1 runaway (s2) — 5th tonight, a stable ~15-20% of THINK runs at the 12,288 cap.**
+  This is the real shipping-loop concern: mitigations to evaluate = retry-on-length in
+  the validator loop (cheap, ships first), raised cap (costs latency at the CPU
+  floor), or the parked multi-call split (evidence keeps accruing).
+
 **Order compiler (lab/compile_orders.py, user ask):** the second half of the compile
 step, prototyped — takes parsed orders + the SAME board text the model read (terrain
 from the ASCII grid, landmasses by flood fill, roster parsed from the prompt) and
