@@ -1,0 +1,34 @@
+# Doctrine battery — the verb/output contract, thinking ON vs OFF.
+# Board = the REGIONS theater briefing with two fixes folded in (enemy
+# continent renamed EASTERN CONTINENT to kill the game-title collision;
+# production lines disambiguated) and the free-prose TASK replaced by the
+# 5-verb line contract (TF/BUILD lines only).
+# Prose baseline for strategy comparison = lab/transcripts/sitrep/REGIONS-s*.
+# Measure: parse rate (mechanical), verb/target validity, strategy quality
+# vs prose baseline, and the thinking-OFF profile (the intended shipping
+# default) on both quality and tokens.
+
+[battery]
+name = "doctrine"
+prompt_dir = "lab/prompts/doctrine"
+transcript_dir = "lab/transcripts/doctrine"
+seeds = [1, 2, 3]
+
+[sampling]
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+presence_penalty = 1.5
+max_tokens = 12288
+enable_thinking = true
+
+[[conditions]]
+name = "THINK"
+primer = "primer_b.txt"
+board = "board_contract.txt"
+
+[[conditions]]
+name = "NOTHINK"
+primer = "primer_b.txt"
+board = "board_contract.txt"
+enable_thinking = false

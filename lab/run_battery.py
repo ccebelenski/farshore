@@ -54,6 +54,7 @@ class RunSpec:
     condition: str
     seed: int
     prompt: str
+    enable_thinking: bool
 
     @property
     def run_id(self) -> str:
@@ -75,6 +76,7 @@ class Battery:
         battery = manifest["battery"]
         prompt_dir = Path(battery["prompt_dir"])
         seeds = [int(s) for s in battery["seeds"]]
+        sampling = Sampling.from_dict(manifest["sampling"])
         runs = tuple(
             RunSpec(
                 condition=cond["name"],
@@ -82,6 +84,10 @@ class Battery:
                 prompt=(prompt_dir / cond["primer"]).read_text()
                 + "\n"
                 + (prompt_dir / cond["board"]).read_text(),
+                # A condition may override the battery-wide thinking dial.
+                enable_thinking=bool(
+                    cond.get("enable_thinking", sampling.enable_thinking)
+                ),
             )
             for cond in manifest["conditions"]
             for seed in seeds
@@ -89,7 +95,7 @@ class Battery:
         return Battery(
             name=str(battery["name"]),
             transcript_dir=Path(battery["transcript_dir"]),
-            sampling=Sampling.from_dict(manifest["sampling"]),
+            sampling=sampling,
             runs=runs,
         )
 
@@ -127,6 +133,7 @@ class Transcript:
                 {
                     "condition": self.spec.condition,
                     "seed": self.spec.seed,
+                    "enable_thinking": self.spec.enable_thinking,
                     "sampling": asdict(self.sampling),
                     "duration_s": round(self.duration_s, 1),
                     "prompt": self.spec.prompt,
@@ -192,7 +199,7 @@ class BatteryRunner:
             timeout=1800,
             extra_body={
                 "top_k": s.top_k,
-                "chat_template_kwargs": {"enable_thinking": s.enable_thinking},
+                "chat_template_kwargs": {"enable_thinking": spec.enable_thinking},
             },
         )
         return Transcript(

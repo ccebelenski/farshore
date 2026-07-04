@@ -1,0 +1,27 @@
+# SITREP battery — GRID vs REGIONS map representation.
+# The GRID arm is NOT re-run: it is the grounding-ab battery's condition B
+# (identical prompt), transcripts lab/transcripts/grounding-ab/B-s*.  This
+# battery runs only the REGIONS arm: same primer, same roster/task, the ASCII
+# map replaced by a derived fog-honest theater briefing (named regions,
+# distances pre-computed — arithmetic, not conclusions).
+# Measure: completion tokens (B baseline: 6648/6751/8223), grounding accuracy,
+# strategic core intact.
+
+[battery]
+name = "sitrep"
+prompt_dir = "lab/prompts/sitrep"
+transcript_dir = "lab/transcripts/sitrep"
+seeds = [1, 2, 3]
+
+[sampling]
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+presence_penalty = 1.5
+max_tokens = 12288
+enable_thinking = true
+
+[[conditions]]
+name = "REGIONS"
+primer = "primer_b.txt"
+board = "board_regions.txt"

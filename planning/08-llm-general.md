@@ -342,3 +342,82 @@ Runs took 70–110s at ~75 tok/s; thinking 4.9k–8.2k tokens (B ~15% longer).
 account-for-everything). Next battery: spatial/capability stress — a board + primer rev
 targeting the remaining error family (unit-role misuse, direction errors), and
 qualification runs at the Q4 CPU floor before any result is called shipping truth.
+
+## SITREP: replace the grid with a theater briefing (experiment in flight)
+
+User observation from the transcripts, confirmed: the model burns a large share of its
+thinking re-deriving coordinates from the ASCII grid, with self-corrections ("col 1 is
+N? no, col 4"). Char-grid → coordinate mapping is a known LLM weakness — and the
+strategic altitude doesn't need tiles anyway. A general reads a labeled briefing map,
+not raw terrain.
+
+**Design:** the engine derives a fog-honest THEATER section deterministically (connected
+components + distance fields — machinery the AI layer already has): named regions
+(HOME CONTINENT, CENTRAL SEA, FARSHORE CONTINENT, …) with extent, coasts, adjacency,
+crossing widths (arithmetic pre-done: "4 water tiles — a transport crosses in 2 turns"),
+what each region holds, and explicit fog edges ("its eastern extent is unseen").
+Pre-chew line respected: distances and membership are arithmetic; corridor/priority
+judgments stay the model's. **The region names double as the addressable nouns for
+orders** — perception and command share a vocabulary. That coupling is why this
+experiment runs before the schema one.
+
+Battery `sitrep` (lab/prompts/sitrep/): REGIONS arm only — the GRID arm is
+grounding-ab's condition B verbatim (completion tokens 6648/6751/8223, mean ~7.2k).
+Measure: thinking tokens, grounding accuracy, strategic core. Predict: big token drop,
+no strategy loss, fewer coordinate slips.
+
+**RESULTS (ran 2026-07-04, 3/3 converged): token prediction WRONG, everything else
+RIGHT.** Tokens went UP: 9901/12024/6845 (mean ~9.6k, +33% vs GRID) — the surplus is
+NOT map confusion (zero grid-reconstruction lines) but *deeper operational planning*:
+the pre-computed logistics facts gave the model hooks for wave scheduling and
+embarkation grouping it previously couldn't reason about precisely. Wins: neutral
+capture-tasked 3/3, capacity-exact 6-army lift 3/3, zero unit grounding errors, and —
+the coupling we wanted — all 3 runs addressed orders to region nouns unprompted
+("Cross the Central Sea", "secure Farshore West Coast"). Two new defects, both ours:
+(1) naming collision — "FARSHORE CONTINENT" vs the game's title sent s2 into
+which-side-am-I deliberation (fix: enemy landmass renamed EASTERN CONTINENT);
+(2) s3 leaked its self-revision into the answer ("Correction: … Revised Plan:") —
+the output contract exists to forbid exactly this. **Verdict: REGIONS stays, for the
+orders-vocabulary coupling, not for tokens.** The token lever is the thinking dial
+(OFF is the intended shipping default and had never been measured) → folded into the
+doctrine battery as a THINK/NOTHINK arm.
+
+## DOCTRINE SCHEMA: action verbs + parsable output (draft, test after sitrep)
+
+Second user observation: prose objectives aren't actionable — the executor needs a
+contract. Draft:
+
+**Verb vocabulary (5, strategic altitude only):**
+- `CAPTURE <target>` — take the city/cities (across water if the TF has lift; the
+  executor compiles the amphib pipeline — the general never says "load/sail/unload")
+- `DEFEND <target>` — hold cities/region against attack
+- `SCOUT <target>` — reveal a region / refresh stale contacts
+- `PATROL <target>` — sea control of a region (interdict, screen, blockade)
+- `STAGE <target>` — mass and wait there; explicit not-yet-committed posture
+Targets: a city `(x,y)` or a REGION NAME from the theater briefing. Coverage check:
+every sound TF objective in the 9 grounding-ab transcripts maps onto these five
+(blockade→PATROL, home guard→DEFEND, amphib assault→CAPTURE, await-strength→STAGE).
+ESCORT is not a verb — a warship in a TF with a transport IS the escort (membership
+encodes it). LIFT is not a verb — lift is how the executor implements CAPTURE/STAGE
+across water.
+
+**Output contract (line-oriented; model-natural, regex-parsable, no JSON brace
+fragility for small models — managed mode can grammar-enforce later):**
+```
+TF <n>: UNITS <id list> | <VERB> <target> | WHY <one line>
+BUILD (x,y): <UNIT KIND> | WHY <one line>        (one per owned city)
+```
+`BUILD` lines answer finding #5 (the model folds production into TFs on its own):
+production intent gets its own channel instead of contaminating TF membership. Maps
+onto the existing `ProductionOrder` contract; TF lines become the future
+`Doctrine`/`TaskForceOrder` TYPES (schema-first now, dataclasses when the seam is
+built).
+
+**Validation = the total compile step (BYO trust boundary):** ids ⊆ roster, every unit
+in exactly one TF, verb ∈ vocabulary, target resolves (on-board city / known region
+name), kind ∈ buildable; anything else → reject → executor-only fallback.
+
+Battery `doctrine` (after sitrep verdict): winner board + the contract appended to
+TASK vs the free-prose baseline. Measure: parse rate (mechanical), verb/target
+validity, and strategy quality — the known risk is format pressure degrading small-model
+reasoning; that is exactly the thing to measure, not assume.
