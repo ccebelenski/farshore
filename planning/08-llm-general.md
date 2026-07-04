@@ -541,6 +541,44 @@ If the 4B reads stalls off raw ledgers, the no-analyst design is confirmed with 
 Python smarts; if not, the minimal annotation goes in as a measured fix, not a
 precaution. Uses contract v3.
 
+## RESULTS: two-epoch amendment battery (LIFT/GRIND/LOSS ×3, THINK, 8/9 converged)
+
+**HEADLINE — intent does not survive epochs on its own: the registry must persist each
+TF's WHY.** LIFT went 0/3: with the ledger recording only `STAGE (5,2)` + events, all
+three runs read the staged force as "holding" and NOBODY launched the invasion — the
+new transport #16 sat idle in every run, while attention went to retasking the patrol
+at the fresh destroyer sighting and (finally) capturing the neutral. The stage's
+*purpose* lived in the WHY line of the epoch-1 output and my hand-built ledger dropped
+it. Fix (cheap, and engine-native-safe since it's the model's own words replayed
+model-to-model): the registry stores the WHY given at FORM/RETASK time and CURRENT
+TASKINGS replays it — `STAGE (5,2) — "awaiting second transport before striking east"`.
+Re-run LIFT with intent-bearing ledgers as the next battery.
+
+Other findings:
+- **Grounding under loss HOLDS: 3/3.** No dead unit id (of #3-#9) appeared in any LOSS
+  order; TF-1's fate was handled explicitly (2 DISBAND, 1 retask-to-protect-survivor).
+  No phantom ids anywhere in the battery.
+- **LOSS recovery coherence mixed:** s1 formed a NEW one-army unescorted convoy into
+  the same sea with the ambusher still at large — grounded in the roster, blind to the
+  lesson in the ledger. Doctrine-learning-from-events is a real, separate axis.
+- **DISBAND semantics gap (contract):** disbanding a TF with survivors (#10) leaves
+  their disposition unspecified — s1 orphaned the damaged destroyer. Contract v4:
+  DISBAND releases members to UNASSIGNED (say so), or require explicit re-homing.
+- **GRIND was too soft to discriminate:** with 4 armies still ashore, CONTINUE is
+  *defensible*, and both converged runs continued (with acknowledgment language, no
+  reinforcement). Stall-noticing needs a hopeless ledger (all landed armies spent,
+  captures failed) to be a real test. Not evidence for engine-side stall analysis yet.
+- **UNASSIGNED pool works:** every converged run FORMed with unassigned units —
+  the pool did not get forgotten (though transports in it mostly did).
+- **Neutral drive now over-fires:** 7/8 runs formed a (4,1) capture TF; LIFT-s3
+  double-tasked it (TWO TFs, 9 armies, one neutral city).
+- **Amendment-grammar drift:** bare `TF 3: PATROL (8,3)` (RETASK keyword dropped) in
+  2 runs — parser should treat a bare verb as RETASK (lenient-trivia rule).
+- **BUILD coverage erodes in amendment mode** (3/3 in epoch-1 THINK-v2 → spotty here;
+  one run also switched builds to CARRIER/BATTLESHIP on a whim at temp 1.0).
+- **1 non-convergence (GRIND-s2, the longest ledger)** — third budget-exhaustion of
+  the night; evidence for the parked multi-call trigger keeps accumulating.
+
 **Order compiler (lab/compile_orders.py, user ask):** the second half of the compile
 step, prototyped — takes parsed orders + the SAME board text the model read (terrain
 from the ASCII grid, landmasses by flood fill, roster parsed from the prompt) and
