@@ -502,6 +502,25 @@ by the code, amended by the general. One source of truth; there is never a momen
   the ledger) vs re-plan thrash (dissolving a healthy invasion because it re-read the
   map cold). These are the two failure axes of the next battery.
 
+## PARKED (with trigger conditions)
+
+- **Multi-call decomposition** (user, 2026-07-04): the epoch need not be one prompt —
+  the model can digest/group/rank in separate fixed pipeline stages before deciding.
+  Still the pre-baked recipe (we wire the stages), not agentic. Do it ONLY on a
+  demonstrable reason — the candidate trigger already on film: v2 THINK-s3's runaway
+  looked like grid-decode and order-accounting fighting over one deliberation budget;
+  if non-convergence or budget-exhaustion grounding errors show up at meaningful rates
+  (watch the Q4 qualification), "split digest from decision" is the named fix. Note a
+  model-written digest is exempt from the engine-native rule (model-to-model words, no
+  Python taxonomy) — but each stage multiplies CPU-floor latency, so it pays rent or
+  stays out.
+- **Multimodal board input** (rendered map screenshot instead of ASCII; server already
+  loads mmproj) — sidesteps char-grid geometry entirely; revisit after the text line
+  is understood.
+- **Q4 min-spec qualification** before any prompt result is treated as shipping truth.
+- **Rules-clarification rev** for unit-role misuse ("TRANSPORT — a hauler, not a
+  warship") — fold into the next primer touch.
+
 **Next battery — two-epoch amendment test:** epoch-1 output becomes CURRENT TASKINGS
 (hand-built registry + ledger), board mutated by events (e.g. transport sunk
 mid-crossing; a TF grinding at a city with two failed captures). Grade: does it
