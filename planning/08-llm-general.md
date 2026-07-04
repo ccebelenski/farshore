@@ -211,3 +211,39 @@ ERRORS (ranked):
 - Then: the spatial choke-point confusion (has the rule, mis-applies it spatially).
 - Bigger picture, when ready to build: start the schema (task-force + briefing TYPES) and
   the `FakeGeneral`-backed eval harness per the build order above. The LLM integrates last.
+  This is a long way off: the prompts are the hard part, not the wiring — stay in the
+  experimentation loop until the prompt line is well understood.
+
+## NEXT EXPERIMENT: the grounding A/B (run-ready)
+
+One run proves nothing at nonzero temperature — establish a base rate, then flip one
+lever at a time. Three conditions, **3 runs each** (thinking ON; suggested sampling per
+model card: temp 1.0, top_p 0.95, top_k 20, presence_penalty 1.5):
+
+- **BASE ×3** — the primer + board above, verbatim. Measures the base rate of the three
+  error classes (phantom unit / spatial illegality / missed neutral) before any fix.
+- **A ×3 (roster frame only)** — same primer; in the board, replace the line
+  `MY UNITS  (col,row)` with:
+  `AVAILABLE UNITS  (col,row) — this is your ENTIRE force; you have NOTHING else`
+  Tests the grounding fix in isolation. Prediction: phantom satellite dies.
+- **B ×3 (A + both neutral fixes)** — A's board line, plus:
+  1. primer VICTORY paragraph becomes:
+     "You win when the enemy owns zero cities (a player with no cities cannot build
+     and is finished). Only cities build. A neutral city can be captured by an army
+     like any other city; it then builds for you — taking neutrals does not win the
+     game, but each one adds production."
+  2. append to TASK:
+     "Account for every unit and every city on the board — yours, enemy, and neutral:
+     each must appear in a task force, or be named with one line saying why it is
+     deliberately left alone."
+  Prediction: the free neutral at (4,1) gets tasked (or at least consciously declined).
+
+**Grade each run on 4 axes** (score = count across the 3 runs):
+1. phantom units — any unit referenced that is not on the roster;
+2. spatial legality — any land-interdicts-sea / sea-crosses-land style assignment;
+3. neutral (4,1) — tasked / consciously declined / ignored;
+4. strategic core intact — transport escorted, invasion staged not rushed (the thesis
+   result; must NOT regress while we fix grounding).
+
+If B's extra discipline bloats output or degrades axis 4, fall back to A + primer
+wording only (drop the account-for-everything clause) and re-test.
