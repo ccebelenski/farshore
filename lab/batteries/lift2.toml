@@ -1,0 +1,33 @@
+# LIFT round 2 — intent persistence (constant) x representation (lever).
+# Both arms carry the WHY-bearing ledger ("awaiting second transport before
+# striking east"); WHY-OLD keeps the disjoint tables (roster + taskings +
+# unassigned, units absent from the map); WHY-UNI is the unified board:
+# units as a-p markers ON the map, one cross-index UNITS table (marker, id,
+# kind, position, tasking), taskings without member re-lists. Also both
+# boards state DISBAND-releases-to-UNASSIGNED (contract v4 fix).
+# Metrics: invasion launch rate (the epoch2 LIFT failure was 0/3 without
+# WHY), completion tokens, grounding.
+
+[battery]
+name = "lift2"
+prompt_dir = "lab/prompts/epoch2"
+transcript_dir = "lab/transcripts/lift2"
+seeds = [1, 2, 3]
+
+[sampling]
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+presence_penalty = 1.5
+max_tokens = 12288
+enable_thinking = true
+
+[[conditions]]
+name = "WHY-OLD"
+primer = "primer_b.txt"
+board = "board_lift_why.txt"
+
+[[conditions]]
+name = "WHY-UNI"
+primer = "primer_b.txt"
+board = "board_lift_uni.txt"
