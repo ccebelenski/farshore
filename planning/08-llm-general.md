@@ -534,3 +534,22 @@ ledger alone (retask/reinforce/explicit recommit all pass; oblivious CONTINUE fa
 If the 4B reads stalls off raw ledgers, the no-analyst design is confirmed with zero
 Python smarts; if not, the minimal annotation goes in as a measured fix, not a
 precaution. Uses contract v3.
+
+**Order compiler (lab/compile_orders.py, user ask):** the second half of the compile
+step, prototyped — takes parsed orders + the SAME board text the model read (terrain
+from the ASCII grid, landmasses by flood fill, roster parsed from the prompt) and
+answers "what would the game do": pipeline (LAND ASSAULT / AMPHIBIOUS ASSAULT /
+GARRISON / MARSHAL / SEA PATROL / RECON), feasibility (lift present, capacity, terrain
+class, ownership), and the action skeleton. First run over doctrine-v2 found what
+validation could not:
+- caught INFEASIBLE orders that were grammatically valid (CAPTURE (11,2) by one army
+  with no transport; land units patrolling sea; CAPTURE of an own city ×5 in the
+  NOTHINK-s3 meltdown);
+- exposed a CONTRACT GAP: both clean THINK-v2 runs compiled to fully-feasible but
+  entirely defensive plans (marshal + garrison + patrol + BUILD TRANSPORT, no enemy
+  CAPTURE at all). Coherent build-up-first posture — but the contract cannot express
+  sequenced intent ("stage now, strike when the second transport launches"), so a
+  staged plan is indistinguishable from turtling. The tasking-continuity design is the
+  intended answer (intent persists as standing TFs amended across epochs) — the
+  two-epoch battery should test exactly this: does the staged TF convert to CAPTURE
+  once the lift exists?
