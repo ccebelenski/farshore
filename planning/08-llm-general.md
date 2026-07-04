@@ -525,6 +525,12 @@ by the code, amended by the general. One source of truth; there is never a momen
   one command, not a qualification program.
 - **Rules-clarification rev** for unit-role misuse ("TRANSPORT — a hauler, not a
   warship") — fold into the next primer touch.
+- **Early-game spot check** (user): one city, world in fog — expected doctrine is
+  EXPLORE. Doubles as the contract's degenerate case: the correct order set is nearly
+  empty (one BUILD line, maybe one tiny SCOUT tasking), so it probes whether the model
+  can issue almost nothing when almost nothing is right, or whether it invents task
+  forces to fill the template. Also the purest BUILD-decision test (army-first
+  opening from rules alone). Run once the amendment loop is solid.
 
 **Next battery — two-epoch amendment test:** epoch-1 output becomes CURRENT TASKINGS
 (hand-built registry + ledger), board mutated by events (e.g. transport sunk
