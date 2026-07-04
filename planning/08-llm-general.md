@@ -68,6 +68,38 @@ The harness shares TYPES with the game, mocks the PRODUCERS; two integration han
   = teacher; AlphaZero spine on a prose layer). Use a LoRA adapter to keep base fluency
   for narration.
 
+## Deployment architecture (settled): ONE SEAM, TWO MODES
+
+The game talks to the model through exactly one seam — **OpenAI-compatible chat
+completions against a `base_url`** — and self-contained vs external-server differ only
+in who starts the server:
+
+- **Managed mode (self-contained; the Ollama pattern).** `--install-general` fetches two
+  pinned, sha256-verified artifacts into the app data dir: a llama-server release binary
+  for the platform (llama.cpp publishes static builds for our whole CI matrix, ~20MB)
+  and the GGUF weights (~3GB). At play time the add-on spawns
+  `llama-server -m weights.gguf --port <ephemeral>`, waits on `/health`, talks to
+  localhost, reaps it on exit. The runtime is a *fetched artifact* like the weights —
+  pinned, not owned: no pip dependency, no ABI coupling, nothing compiled. Inference
+  stays out-of-process (a runtime crash/OOM can't take the TUI down; no GIL contention
+  with the Textual event loop).
+- **BYO mode (external server / hosted opt-in).** User sets the endpoint (their own
+  llama.cpp/vLLM/LM Studio, or a hosted API key); we spawn nothing. Same client code,
+  one config field.
+
+**Rejected for this role: in-process PyTorch/transformers.** CPU generation is
+memory-bandwidth-bound and torch has no production 4-bit CPU path, so the same 4B runs
+~BF16: ~8.4GB of weights vs 2.9GB GGUF, ~3 tok/s vs ~15-25 — a thinking block goes from
+minutes to a quarter-hour — in ~3x the RAM, inside our process. Torch remains the
+*training-side* tool if/when LoRA fine-tuning happens (offline, not shipped).
+
+Client discipline: strictly OpenAI-compatible — no llama.cpp-specific endpoints — with
+one passthrough: `chat_template_kwargs` via `extra_body` (the thinking-mode dial).
+Known costs to plan for: resume-and-verify download plumbing for the ~3GB fetch, and
+unsigned-executable friction on macOS/Windows (same code-signing question already
+deferred for our own binary). The lab runner for prompt experiments builds on this same
+seam (`openai` package in a dev-only dependency group, never in the game's deps).
+
 ## Methodology win
 
 **Ask the model what it needs.** A fresh 4B with no shared context found real gaps in the
