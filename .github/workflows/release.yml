@@ -1,0 +1,64 @@
+name: release
+
+# Cut a release: push a tag like v0.1.0 (or run manually). Builds a
+# single-file binary on each OS — PyInstaller can't cross-compile, so unlike
+# opencode's one-machine Bun build we need a real runner per platform — then
+# attaches every asset to one GitHub Release. install.sh downloads from here.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  target: linux-x64 }
+          - { os: macos-latest,   target: darwin-arm64 }
+          - { os: windows-latest, target: windows-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+
+      # Unix: the build script does everything (build + smoke test + tar.gz).
+      - name: Build (unix)
+        if: runner.os != 'Windows'
+        run: bash packaging/build_binary.sh
+
+      # Windows: run PyInstaller directly, then zip (no bash build script).
+      - name: Build (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          uv run --with pyinstaller pyinstaller --onefile --name farshore `
+            --paths src --collect-all textual --collect-submodules empire `
+            --distpath dist --workpath build/pyi --specpath build/pyi `
+            --noconfirm --clean src/empire/__main__.py
+          dist/farshore.exe dump-map --profile SMALL --seed 0 | Out-Null
+          Compress-Archive dist/farshore.exe "dist/farshore-${{ matrix.target }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: farshore-${{ matrix.target }}
+          path: |
+            dist/farshore-*.tar.gz
+            dist/farshore-*.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/farshore-*.tar.gz
+            dist/farshore-*.zip

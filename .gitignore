@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code: project-local user settings (NOT shared)
+.claude/settings.local.json
+
+# Save files (game saves are user data, not source)
+*.empsave
+*.empsave.json
+
+# Local LLM models (large binaries)
+models/
+*.gguf
+
+# Vendored reference: cloned separately by developers who want it;
+# referenced by planning docs but not part of this project.
+Empire-for-VMS/
+
+# Claude Code harness state (transient, per-session)
+.claude/
