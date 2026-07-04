@@ -74,9 +74,12 @@ else
     echo -e "${DIM}downloading${NC} $asset"
     curl -fsSL "$base/$asset" -o "$tmp/$asset" \
         || err "could not download $base/$asset (no such release/asset?)"
-    if [ "$ext" = tar.gz ]; then tar -xzf "$tmp/$asset" -C "$tmp"
-    else command -v unzip >/dev/null || err "unzip required"; unzip -q "$tmp/$asset" -d "$tmp"; fi
-    install_binary "$tmp/$APP"* "${version:-latest}"
+    # Extract into a clean subdir: the archive sits in $tmp alongside, and a
+    # bare "$tmp/$APP"* glob would match BOTH the binary and the tarball.
+    mkdir -p "$tmp/x"
+    if [ "$ext" = tar.gz ]; then tar -xzf "$tmp/$asset" -C "$tmp/x"
+    else command -v unzip >/dev/null || err "unzip required"; unzip -q "$tmp/$asset" -d "$tmp/x"; fi
+    install_binary "$tmp/x/$APP"* "${version:-latest}"
 fi
 
 # --- put ~/.local/bin on PATH if it isn't already ---
