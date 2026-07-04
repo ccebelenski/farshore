@@ -30,7 +30,6 @@ def test_standard_leaves_all_optional_toggles_off() -> None:
 
 
 def test_standard_default_rule_values() -> None:
-    assert STANDARD.production_change_penalty_divisor == 5
     assert STANDARD.fighter_base_range == 20
     assert STANDARD.satellite_range == 50
 

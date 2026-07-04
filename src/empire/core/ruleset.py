@@ -55,7 +55,6 @@ class RuleSet:
     # Per-unit rule values (v1 defaults, tuned through play).
     fighter_base_range: int = 20            # cells a fighter can fly before refueling
     satellite_range: int = 50               # turns of orbital lifetime
-    production_change_penalty_divisor: int = 5
 
     # Optional rule toggles. The STANDARD preset leaves all of these at False/0.
     allow_unit_stacking: bool = False

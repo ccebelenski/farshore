@@ -35,7 +35,7 @@ class ProductionOrder:
     """An order to set a city's production target.
 
     `target = None` clears the production (city goes idle). Setting a target
-    different from the city's current build incurs the change penalty per
+    different from the city's current build discards accumulated work per
     `docs/RULES.md` §5.2; the engine applies that, not the AI.
     """
 

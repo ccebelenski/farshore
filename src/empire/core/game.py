@@ -3,7 +3,7 @@
 - Construction with `RuleSet`, `Map`, players, optional seed, optional bus.
 - `attach_controller` / `controllers` dict for AI wiring (controllers are
   externally injected; they do *not* round-trip through save/load — see
-  `empire.persistence.schema_v1`).
+  `empire.persistence.schema`).
 - `run_turn()` delegates to a `TurnManager` that runs the production /
   movement / combat / fog phases for every player.
 - `is_over()` / `winner()` implement the spec's "zero cities" rule
@@ -405,9 +405,7 @@ class TurnManager:
                 city.production.building = None
                 city.production.work = 0
             else:
-                city.production.set_target(
-                    order.target, self.game.rules.production_change_penalty_divisor
-                )
+                city.production.set_target(order.target)
 
         # Standing-order set/clear declarations. Applied before moves so
         # that a controller declaring "clear my heading" + "walk this

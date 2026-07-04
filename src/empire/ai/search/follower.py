@@ -121,7 +121,7 @@ class PlanFollower:
             # keeps churning out the same kind), so guarding on "is None"
             # would lock a city to its first-ever order forever — fatal the
             # moment a plan needs to switch army->transport. `set_target`
-            # applies the §5.2 change penalty on a real switch and is a no-op
+            # discards accumulated work on a real switch (§5.2) and is a no-op
             # when the kind already matches.
             if c.production.building is target:
                 continue

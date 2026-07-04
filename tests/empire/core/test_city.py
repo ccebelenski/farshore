@@ -52,38 +52,25 @@ def test_production_state_default_idle() -> None:
     assert p.ready() is False
 
 
-def test_setting_target_from_idle_imposes_no_penalty() -> None:
+def test_setting_target_from_idle_keeps_the_accumulator() -> None:
     p = ProductionState()
-    p.set_target(UnitKind.ARMY, penalty_divisor=5)
+    p.set_target(UnitKind.ARMY)
     assert p.building is UnitKind.ARMY
     assert p.work == 0
 
 
 def test_setting_same_target_does_nothing() -> None:
     p = ProductionState(building=UnitKind.ARMY, work=3)
-    p.set_target(UnitKind.ARMY, penalty_divisor=5)
+    p.set_target(UnitKind.ARMY)
     assert p.work == 3
 
 
-def test_changing_target_applies_penalty() -> None:
-    """Switching from Army (build_time=5) → Fighter incurs a 5//5 = 1 setback."""
-    p = ProductionState(building=UnitKind.ARMY, work=3)
-    p.set_target(UnitKind.FIGHTER, penalty_divisor=5)
-    assert p.building is UnitKind.FIGHTER
-    assert p.work == 2  # 3 - (5//5)
-
-
-def test_changing_to_battleship_applies_full_penalty() -> None:
-    """Switching from Battleship (build_time=50) → Army: 50//5 = 10 setback."""
+def test_changing_target_discards_all_work() -> None:
+    """Effort toward one unit does not carry to another: a switch dumps it."""
     p = ProductionState(building=UnitKind.BATTLESHIP, work=20)
-    p.set_target(UnitKind.ARMY, penalty_divisor=5)
-    assert p.work == 10
-
-
-def test_penalty_can_take_work_negative() -> None:
-    p = ProductionState(building=UnitKind.BATTLESHIP, work=2)
-    p.set_target(UnitKind.ARMY, penalty_divisor=5)
-    assert p.work < 0
+    p.set_target(UnitKind.ARMY)
+    assert p.building is UnitKind.ARMY
+    assert p.work == 0
 
 
 def test_tick_accumulates_work() -> None:

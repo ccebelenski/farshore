@@ -182,7 +182,7 @@ When an Army successfully moves into an enemy or neutral city's cell (combat res
 - The city's ownership transfers to the Army's player.
 - Any units stationed inside the city are destroyed.
 - **The Army is consumed by the capture**: it disbands into the city at capture time, becoming its abstract defence. It never occupies the cell as a board unit.
-- The new owner inherits the city's production state (the in-progress build continues; the new owner may change target, paying the change penalty — see §5.2).
+- The new owner inherits the city's production state (the in-progress build continues; the new owner may change target, discarding accumulated work — see §5.2).
 
 Under the STANDARD ruleset, city capture succeeds on a probability check (50%) — even after defeating the defender, the city may "resist" and the Army is destroyed instead. Under FORTIFIED_CITIES (§10), capture is deterministic — the artillery gauntlet (§4.7) is the cost instead. Either way the Army is gone: success disbands it into the city; failure destroys it.
 
@@ -224,7 +224,7 @@ A produced unit may share the city cell even when something is already there —
 
 ### 5.2 Changing production
 
-The player (or AI) may change a city's production target at any time. Doing so imposes a setback: accumulated work is reduced by one fifth of the current target's build time. The penalty is to discourage thrash and reward commitment. The accumulator may go negative.
+The player (or AI) may change a city's production target at any time. Doing so **discards all accumulated work**: effort toward one unit does not transfer to another (a half-built battleship is not partial progress toward an army). This discourages thrash and rewards commitment.
 
 ### 5.3 Default orders
 

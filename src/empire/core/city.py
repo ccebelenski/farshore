@@ -49,16 +49,17 @@ class ProductionState:
         self.building: UnitKind | None = building
         self.work: int = work
 
-    def set_target(self, kind: UnitKind, penalty_divisor: int) -> None:
+    def set_target(self, kind: UnitKind) -> None:
         """Set the production target.
 
-        If the new target differs from the current one, apply a setback
-        proportional to the *current* target's build time divided by
-        `penalty_divisor` (see spec §5.2). Setback may take `work` negative.
+        Switching to a *different* unit kind discards all accumulated work:
+        effort toward one unit does not transfer to another (a half-built
+        battleship is not partial progress toward an army — see spec §5.2).
+        Re-setting the current target, or setting one from idle, keeps the
+        accumulator untouched.
         """
         if self.building is not None and self.building is not kind:
-            current_build_time = UNIT_REGISTRY[self.building].build_time
-            self.work -= current_build_time // penalty_divisor
+            self.work = 0
         self.building = kind
 
     def tick(self) -> None:
