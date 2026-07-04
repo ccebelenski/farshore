@@ -93,6 +93,23 @@ memory-bandwidth-bound and torch has no production 4-bit CPU path, so the same 4
 minutes to a quarter-hour — in ~3x the RAM, inside our process. Torch remains the
 *training-side* tool if/when LoRA fine-tuning happens (offline, not shipped).
 
+**BYO trust boundary (accepted: caveat emptor).** In BYO mode we cannot control or
+verify what model actually answers — accepted, because the design already absorbs it:
+- The compile step (LLM text → task-force assignments) is TOTAL regardless of mode:
+  validate against the real roster/cities, reject nonconforming output, fall back to
+  executor-only doctrine. A swapped model can degrade quality, never correctness —
+  the executor floor catches bad strategy, the validator catches bad format. BYO adds
+  no new failure class, only frequency.
+- Log the response's reported `model` id into every transcript (catches the common
+  honest mistake — wrong server/model loaded — and keeps the fine-tuning corpus
+  attributable) and surface it in-game. Unverifiable against a lying endpoint; fine.
+- Posture: managed mode = the tested configuration; BYO = modding territory. Warn once
+  on an unrecognized model id; don't police. Later, the eval-harness scenario battery
+  doubles as a model-qualification check for serious BYO users.
+- Never depend on reasoning format: thinking arrives as `reasoning_content`, inline
+  `<think>` tags, or not at all depending on backend — parse only the final structured
+  section.
+
 Client discipline: strictly OpenAI-compatible — no llama.cpp-specific endpoints — with
 one passthrough: `chat_template_kwargs` via `extra_body` (the thinking-mode dial).
 Known costs to plan for: resume-and-verify download plumbing for the ~3GB fetch, and
