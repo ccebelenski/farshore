@@ -467,3 +467,46 @@ accounting competing for the same deliberation budget. Watch, don't conclude.
 compliance risk — every model omitted it); TF labels freeform; STAGE should accept any
 coordinate, not just cities (two runs staged at sensible non-city marshaling points —
 engine-native and executor-compilable, the contract was wrong, not the model).
+
+## TASKING CONTINUITY (settled in discussion): the TF registry is ENGINE state
+
+The two-regimes problem (code's idea of tasking vs the model's) and the
+snapshot problem (each epoch is a fresh board) share one answer: **task forces are
+persistent engine objects** — id, member unit ids, verb, target, formed-on-turn — owned
+by the code, amended by the general. One source of truth; there is never a moment when
+"what is TF-2" has two answers.
+
+- **Executor side:** each TF compiles to a scoped planning problem (these units, this
+  objective); PortfolioAI's plan/playout machinery works *within* TF boundaries. The
+  general owns what/with-whom; the staff owns how — the competence floor survives as
+  tactical freedom inside each tasking. Compile-time feasibility check: an impossible
+  order (CAPTURE across water, no lift) → "cannot comply", reported back, never
+  silently reinterpreted. Engine bookkeeping only it can do: attrition updates TF
+  rosters; new production lands in an UNASSIGNED pool surfaced in the next briefing.
+- **Briefing side: CURRENT TASKINGS as a pure EVENT LEDGER.** Per TF: formed turn,
+  roster then/now, combat/capture events since last epoch with outcomes, target
+  ownership now. **No status adjectives** — "stalled" is a judgment, and judging is
+  what the general is FOR (engine = bookkeeper, not analyst; the temporal cousin of
+  the regions rejection). Even summary selection is editorial: report events
+  ("capture attempted twice, failed twice"), not curated headlines ("no progress in
+  4 turns").
+      TF-1  formed t38 · CAPTURE (11,1)
+        members then: #3 #4 #5 #6 #7 #9 · now: #3 #4 #6
+        since last epoch: lost #5, #7 in combat at (11,1); capture attempted x2, failed x2
+        (11,1) still enemy-owned
+- **Output side: amendments, not fresh plans** — CONTINUE (default), RETASK, FORM,
+  DISBAND. Persistence becomes the path of least resistance (the command-interface
+  mirror of §5.2's anti-thrash production rule), and the model's own past intent is
+  its strongest grounding anchor.
+- **Risks, both measurable:** rubber-stamp anchoring (CONTINUE forever, oblivious to
+  the ledger) vs re-plan thrash (dissolving a healthy invasion because it re-read the
+  map cold). These are the two failure axes of the next battery.
+
+**Next battery — two-epoch amendment test:** epoch-1 output becomes CURRENT TASKINGS
+(hand-built registry + ledger), board mutated by events (e.g. transport sunk
+mid-crossing; a TF grinding at a city with two failed captures). Grade: does it
+CONTINUE what's healthy, amend what broke, and NOTICE the grinding TF from the raw
+ledger alone (retask/reinforce/explicit recommit all pass; oblivious CONTINUE fails)?
+If the 4B reads stalls off raw ledgers, the no-analyst design is confirmed with zero
+Python smarts; if not, the minimal annotation goes in as a measured fix, not a
+precaution. Uses contract v3.
