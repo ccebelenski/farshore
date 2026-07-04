@@ -1,0 +1,34 @@
+# Grounding A/B battery — see planning/08-llm-general.md §"NEXT EXPERIMENT".
+# BASE = last session's prompt verbatim (base rate for the 3 error classes).
+# A    = roster completeness frame only.
+# B    = A + neutral primer wording + account-for-everything task discipline.
+
+[battery]
+name = "grounding-ab"
+prompt_dir = "lab/prompts/grounding"
+transcript_dir = "lab/transcripts/grounding-ab"
+seeds = [1, 2, 3]
+
+[sampling]
+# Model-card recommendation for thinking-mode general tasks.
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+presence_penalty = 1.5
+max_tokens = 12288
+enable_thinking = true
+
+[[conditions]]
+name = "BASE"
+primer = "primer_base.txt"
+board = "board_base.txt"
+
+[[conditions]]
+name = "A"
+primer = "primer_base.txt"
+board = "board_a.txt"
+
+[[conditions]]
+name = "B"
+primer = "primer_b.txt"
+board = "board_b.txt"

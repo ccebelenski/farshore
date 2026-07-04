@@ -296,3 +296,49 @@ model card: temp 1.0, top_p 0.95, top_k 20, presence_penalty 1.5):
 
 If B's extra discipline bloats output or degrades axis 4, fall back to A + primer
 wording only (drop the account-for-everything clause) and re-test.
+
+## RESULTS: grounding A/B (2026-07-04, Qwen3.5-4B UD-Q8_K_XL, thinking ON, 9/9 converged)
+
+Ran via `lab/run_battery.py` (transcripts: `lab/transcripts/grounding-ab/`).
+Runs took 70–110s at ~75 tok/s; thinking 4.9k–8.2k tokens (B ~15% longer).
+
+| axis | BASE (×3) | A (×3) | B (×3) |
+|---|---|---|---|
+| phantom units | 0 | 0 | 0 |
+| spatial-legality errors | 1 wobble | 0 | 1 wobble |
+| neutral (4,1) capture-tasked | 0 (ignored/hedged) | 0 (ignored/guarded) | **3/3** |
+| strategic core intact | 3/3 | 3/3 | 3/3 |
+
+1. **Phantom base rate is ZERO on this setup** — every run, BASE included, ran an
+   explicit roster audit in its thinking ("Wait, I missed the Satellite? … no satellite
+   to command"). The original hallucination was a tail event and/or serving-config
+   difference (quant/params/seed), so the completeness-frame hypothesis is UNTESTABLE
+   here — nothing to kill. Lesson kept: grounding errors at 4B are a low-rate tail →
+   the validator layer is the defense, not prompt wording. (B-s2's thinking did anchor
+   its audit on the frame — "the prompt says ENTIRE force… so only" — so the frame is
+   used when present; keep it, cheap insurance.)
+2. **The neutral fix WORKED, 3/3, mechanism visible.** B runs task the capture with the
+   production rationale; B-s3's thinking quotes the new primer line verbatim before
+   deciding. The bias really was our old "do not decide the game" wording. KEEP: new
+   VICTORY wording + account-for-everything discipline.
+3. **The choke-point error did not recur** (0/9 land-interdicts-sea). One capability
+   wobble instead: BASE-s2 tasked the str-0 transport to "threaten" the enemy destroyer.
+   Same family (has the rule, misapplies to a unit). → Next primer rev: add ROLE
+   framing to the units table — factual category, not decision: e.g. "TRANSPORT — a
+   hauler, not a warship; contributes nothing to sea combat or sea control." Also one
+   direction slip (B-s2 "advance south" toward an eastern target).
+4. **Unprompted competence, new:** 4/9 runs sized the amphibious lift to EXACTLY 6
+   armies = transport capacity (all three A runs + B-s3), holding the remainder back.
+   Capacity-aware force sizing from the raw units table.
+5. **Schema insight from B:** told to account for cities, the model folded CITIES and
+   production into its task forces as members ("TF-1: Army #1-8 + Production Hubs at
+   (2,0),(4,3)"). It naturally thinks of production as part of a TF's order of battle →
+   the Doctrine/TaskForce schema should carry an explicit cities/production slot per TF.
+6. **Altitude discipline self-enforces:** B thinking shows it policing the role rule on
+   itself ("Do NOT say 'Move to (4,1)'. Say 'Capture Neutral City'"). The ROLE pillar
+   is doing work inside deliberation, not just in the output.
+
+**Verdict:** B is the new baseline prompt (roster frame + neutral wording +
+account-for-everything). Next battery: spatial/capability stress — a board + primer rev
+targeting the remaining error family (unit-role misuse, direction errors), and
+qualification runs at the Q4 CPU floor before any result is called shipping truth.

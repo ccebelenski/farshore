@@ -1,0 +1,18 @@
+MAP  legend: . land  ~ water  ? fog   O my city  E enemy city  N neutral city
+ r0  . . O . . . ~ ~ ~ ~ ? ? ? ?
+ r1  . . . . N . ~ ~ ~ ~ ? E ? ?
+ r2  . O . . . . ~ ~ ~ ~ . E . ?
+ r3  . . . . O . ~ ~ ~ ~ . . . ?
+ r4  . . . . . . ~ ~ ~ ~ ? ? ? ?
+ r5  ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ? ? ? ?
+
+AVAILABLE UNITS  (col,row) — this is your ENTIRE force; you have NOTHING else
+  army #1 (0,0) #2 (1,0) #3 (3,0) #4 (0,1) #5 (1,1) #6 (3,1) #7 (0,2) #8 (2,2)
+  transport #9 (6,2) empty
+  destroyer #10 (6,3)
+MY CITIES  (2,0) build ARMY 2 left · (1,2) build TRANSPORT 12 left · (4,3) build ARMY 4 left
+NEUTRAL CITIES  (4,1) on my continent
+KNOWN ENEMY  city (11,1), city (11,2); destroyer near (10,2) seen 3t ago; army (11,1) seen 3t ago
+
+TASK: group your units into TASK FORCES, one objective each. Output per TF: member
+units + one-line objective. No individual moves.
