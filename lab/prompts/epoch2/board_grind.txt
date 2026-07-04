@@ -1,0 +1,53 @@
+TURN 50  (your last orders were issued t38)
+
+MAP  legend: . land  ~ water  ? fog   O my city  E enemy city  N neutral city
+ r0  . . O . . . ~ ~ ~ ~ ? ? ? ?
+ r1  . . . . N . ~ ~ ~ ~ . E ? ?
+ r2  . O . . . . ~ ~ ~ ~ . E . ?
+ r3  . . . . O . ~ ~ ~ ~ . . . ?
+ r4  . . . . . . ~ ~ ~ ~ ? ? ? ?
+ r5  ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ? ? ? ?
+
+AVAILABLE UNITS  (col,row) — this is your ENTIRE force; you have NOTHING else
+  army #1 (2,0) #2 (2,1) #5 (10,1) #6 (10,2) #7 (10,3) #8 (11,3)
+  army #11 (2,0) #12 (1,1) #13 (4,3) #15 (3,3)
+  transport #9 (9,2) empty · transport #14 (1,2) empty, completed this turn
+  destroyer #10 (9,3)
+MY CITIES
+  (2,0) building ARMY, 5 turns left
+  (1,2) building TRANSPORT, 30 turns left (just delivered transport #14)
+  (4,3) building ARMY, 2 turns left
+NEUTRAL CITIES  (4,1) on my continent
+KNOWN ENEMY  city (11,1), city (11,2); army in city (11,1) seen 2 turns ago;
+  destroyer not seen since t38 (12 turns)
+
+CURRENT TASKINGS  (standing orders from t38; events since, as reported)
+  TF-1  formed t38 · CAPTURE (11,1)
+    members then: #3 #4 #5 #6 #7 #8 #9 #10 · now: #5 #6 #7 #8 #9 #10
+    since: loaded 6 armies at (5,2) t40; crossed; unloaded t44 at (10,1)-(10,3);
+      defeated an enemy army outside (11,1) at t45; capture attempted t46 —
+      failed, #3 lost; attempted again t48 — failed, #4 lost;
+      (11,1) still enemy-owned
+  TF-2  formed t38 · DEFEND (2,0)
+    members then: #1 #2 · now: #1 #2 (no losses)
+    since: garrisoned; no contact
+UNASSIGNED  (completed since t38, awaiting orders)
+  army #11 (2,0) · #12 (1,1) · #13 (4,3) · #15 (3,3)
+  transport #14 (1,2)
+
+TASK: amend your standing orders. Output ONLY lines in these forms — no other
+prose, headers, or commentary:
+
+  TF <id>: CONTINUE | <one line>
+  TF <id>: RETASK <VERB> <target> | <one line>
+  TF <id>: DISBAND | <one line>
+  FORM TF <new id>: UNITS <ids> | <VERB> <target> | <one line>
+  BUILD (x,y): <UNIT KIND> | <one line>
+
+Every standing TF gets exactly one line. To change a TF's membership, DISBAND
+it and FORM anew. UNASSIGNED units only enter play through FORM. One BUILD
+line per city you own (keep or change its build; changing discards
+accumulated work). VERB is one of:
+  CAPTURE <city (x,y)> · DEFEND <city (x,y)> · SCOUT <(x,y) or compass> ·
+  PATROL <(x,y) or compass> · STAGE <(x,y)>
+A warship grouped with a transport escorts it — there is no ESCORT order.

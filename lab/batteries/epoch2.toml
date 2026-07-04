@@ -1,0 +1,44 @@
+# Two-epoch amendment battery — the tasking-continuity design under fire.
+# All boards are t50 evolutions of the t38 scenario with honest production
+# bookkeeping (new units in an UNASSIGNED pool); CURRENT TASKINGS is a pure
+# event ledger (no status judgments). Contract v3 amendments:
+# CONTINUE / RETASK / DISBAND / FORM / BUILD.
+#
+# LIFT  — staged invasion + second transport just delivered. Pass: stage
+#         converts toward CAPTURE (lift + escort + armies aimed east).
+#         Fail: everything CONTINUEs, transport #16 idles.
+# GRIND — invasion ashore, two failed captures (#3, #4 spent), ledger only.
+#         Pass: NOTICES from raw events (reinforce/second wave/recommit/
+#         withdraw). Fail: oblivious CONTINUE. Tests engine-as-bookkeeper.
+# LOSS  — convoy ambushed, transport + 6 armies dead. Pass: coherent
+#         recovery, NO dead unit ids in any order (grounding under loss).
+# THINK only (NOTHINK settled).
+
+[battery]
+name = "epoch2"
+prompt_dir = "lab/prompts/epoch2"
+transcript_dir = "lab/transcripts/epoch2"
+seeds = [1, 2, 3]
+
+[sampling]
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+presence_penalty = 1.5
+max_tokens = 12288
+enable_thinking = true
+
+[[conditions]]
+name = "LIFT"
+primer = "primer_b.txt"
+board = "board_lift.txt"
+
+[[conditions]]
+name = "GRIND"
+primer = "primer_b.txt"
+board = "board_grind.txt"
+
+[[conditions]]
+name = "LOSS"
+primer = "primer_b.txt"
+board = "board_loss.txt"
