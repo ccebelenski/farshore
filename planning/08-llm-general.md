@@ -45,6 +45,17 @@ don't draw the conclusion.** BUT — with raw board + rules the model derived th
 caution on its own (see findings), so lean toward raw + rules and let it reason;
 pre-chew only where it visibly can't.
 
+## The SHOULD gate (user, 2026-07-05, via Ian Malcolm)
+
+Capability is not the ship criterion. The executor already plays a competent game at
+zero seconds per turn, so the command general ships ONLY if playtesting says the game
+is BETTER with it on — a more interesting, characterful, narratable opponent at equal
+difficulty, worth its minutes. That is a fun question, not a benchmark question, and
+it can fail while every battery passes. Acceptable outcome: the general remains the
+narrator tier + a lab program that hardened the executor, and the command tier never
+ships. Standing safeguards: the deterministic game never depends on the model;
+difficulty never scales with hardware; opt-in behind a measured probe.
+
 ## Build order (settled): the LLM is integrated LAST
 
 1. `Doctrine`/task-force + `Briefing` schema (shared TYPES). 2. Compiler/executor seam,
