@@ -168,6 +168,16 @@ def render(e: Epoch) -> str:
     return "\n".join(lines) + "\n"
 
 
+def fog_except(x0: int, x1: int, y0: int, y1: int) -> dict[tuple[int, int], str]:
+    """Fog every tile outside the inclusive box — the opening-turn worldview."""
+    return {
+        (x, y): "?"
+        for y in range(len(BASE_TERRAIN))
+        for x in range(len(BASE_TERRAIN[0].split()))
+        if not (x0 <= x <= x1 and y0 <= y <= y1)
+    }
+
+
 # ---- the canonical WHYs ------------------------------------------------------
 
 WHY_TF1 = '"awaiting second transport before striking east at the enemy cities"'
@@ -190,6 +200,27 @@ STAGED_TF1 = [
 ]
 
 EPOCHS = [
+    # ---- START: the opening turn (degenerate near-empty-output probe) -------
+    Epoch(
+        name="START",
+        turn=6,
+        # Visible: Chebyshev-2 box around the capital. City (1,2) is inside
+        # the box and NEUTRAL at game start, like every city but ours.
+        terrain_overrides=fog_except(0, 4, 0, 2) | {(1, 2): "N"},
+        units=[
+            U(1, "army", 2, 0, "UNASSIGNED", "in city, NEW t5"),
+        ],
+        cities=[
+            "(2,0) building ARMY, 5 turns left",
+        ],
+        neutral="(1,2) and (4,1), both near the capital",
+        enemies=[
+            Enemy("", "none sighted — the world beyond your walls is unexplored"),
+        ],
+        taskings="""\
+  (none — the war has just begun; you have issued no orders yet.
+   Every unit is UNASSIGNED.)""",
+    ),
     # ---- ARC A: buildup -> trigger -> mid-crossing --------------------------
     Epoch(
         name="A1",

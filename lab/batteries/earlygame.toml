@@ -1,0 +1,27 @@
+# Early-game fog probe (user): one city, one army, world in fog. Expected
+# doctrine = explore/expand; the CONTRACT test is the degenerate case — the
+# correct order set is nearly empty (one or two FORM lines + a BUILD at
+# most). Grades: restraint (does it invent task forces to fill the
+# template?), legality (verbs/targets for a 1-army world), and the opening
+# read (scout vs capture-a-neutral, both defensible; phantom units fail).
+
+[battery]
+name = "earlygame"
+prompt_dir = "lab/prompts/stability"
+transcript_dir = "lab/transcripts/earlygame"
+seeds = [1, 2, 3]
+retry_on_length = 2
+
+[sampling]
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+min_p = 0.0
+presence_penalty = 1.5
+max_tokens = 12288
+enable_thinking = true
+
+[[conditions]]
+name = "START"
+primer = "primer_c.txt"
+board = "board_START.txt"
