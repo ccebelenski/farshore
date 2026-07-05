@@ -641,6 +641,36 @@ Residue:
   the validator loop (cheap, ships first), raised cap (costs latency at the CPU
   floor), or the parked multi-call split (evidence keeps accruing).
 
+## RESULTS: runaway mitigation (autopsy + sampler battery + budget probe)
+
+**Autopsy first:** the capped runs are decision churn, NOT token loops (3-4 near-dup
+lines out of ~360; GRIND-s2 wrote a complete correct plan inside its thinking, then
+died re-litigating contract fine print). Repetition penalties target a disease we
+don't have — and would endanger our inherently repetitive answer format.
+
+**Sampler battery (vs lift3 baseline 1/3 runaway):**
+- TEMP06 (temp 0.6, presence 1.5): **2/3 runaway — WORSE.** Matches the vendor
+  warning that low temperature causes non-termination in thinking models (user called
+  this). Temp 1.0 IS the tuned operating point; do not lower it.
+- CLAR (ambiguities closed, BUILD-optional): 1/3 runaway — **no better.** The v4
+  clarifications stay for design reasons, but they did not move convergence.
+- Every converged run in every arm produced the textbook launch. **Composition is
+  solved; convergence is a ~1-in-3 lottery no prompt/sampler lever moved.**
+
+**Thinking-budget probe:** per-request `reasoning_budget`/`thinking_budget` fields are
+silently ignored by this llama-server build via the OpenAI endpoint (byte-identical
+outputs, same seed). Not standard OpenAI (their knob is `reasoning_effort`;
+Anthropic's is a token budget). A launch-flag budget on the server side remains
+possible but is global, not per-epoch — and a budget only truncates churn anyway;
+GRIND-s2 would have been saved at 10k, but a mid-spiral interrupt answers from
+half a decision.
+
+**Mitigation shipped: retry-on-length** (`retry_on_length = N` per battery; runner
+re-rolls a finish=length run with seed+1000·attempt, records attempt count; default 0
+so lab batteries keep observing runaways as data). At ~1/3 runaway rate, 2 retries
+give ~96% epoch delivery; the validator's executor-fallback covers the tail. This is
+the shipping loop's shape: a runaway is a failed roll, not a failed epoch.
+
 **Order compiler (lab/compile_orders.py, user ask):** the second half of the compile
 step, prototyped — takes parsed orders + the SAME board text the model read (terrain
 from the ASCII grid, landmasses by flood fill, roster parsed from the prompt) and

@@ -74,6 +74,7 @@ class Battery:
     transcript_dir: Path
     sampling: Sampling
     runs: tuple[RunSpec, ...]
+    retry_on_length: int
 
     @staticmethod
     def load(manifest_path: Path) -> Battery:
@@ -106,6 +107,9 @@ class Battery:
             transcript_dir=Path(battery["transcript_dir"]),
             sampling=sampling,
             runs=runs,
+            # 0 (default) = observe runaways as data; N = production profile,
+            # re-roll a finish=length run up to N times with a shifted seed.
+            retry_on_length=int(battery.get("retry_on_length", 0)),
         )
 
 
@@ -197,25 +201,31 @@ class BatteryRunner:
     def _execute(self, spec: RunSpec) -> Transcript:
         s = spec.sampling
         started = time.monotonic()
-        response = self._client.chat.completions.create(
-            model=self._model,
-            messages=[{"role": "user", "content": spec.prompt}],
-            temperature=s.temperature,
-            top_p=s.top_p,
-            presence_penalty=s.presence_penalty,
-            max_tokens=s.max_tokens,
-            seed=spec.seed,
-            timeout=1800,
-            extra_body={
-                "top_k": s.top_k,
-                "min_p": s.min_p,
-                "chat_template_kwargs": {"enable_thinking": spec.enable_thinking},
-            },
-        )
+        for attempt in range(1 + self._battery.retry_on_length):
+            response = self._client.chat.completions.create(
+                model=self._model,
+                messages=[{"role": "user", "content": spec.prompt}],
+                temperature=s.temperature,
+                top_p=s.top_p,
+                presence_penalty=s.presence_penalty,
+                max_tokens=s.max_tokens,
+                # Retries re-roll the sampling path; the offset keeps them
+                # reproducible.
+                seed=spec.seed + 1000 * attempt,
+                timeout=1800,
+                extra_body={
+                    "top_k": s.top_k,
+                    "min_p": s.min_p,
+                    "chat_template_kwargs": {"enable_thinking": spec.enable_thinking},
+                },
+            )
+            if response.choices[0].finish_reason != "length":
+                break
+            print(f"    {spec.run_id}: finish=length, retrying...", flush=True)
         return Transcript(
             spec=spec,
             sampling=spec.sampling,
-            response=response.model_dump(),
+            response=response.model_dump() | {"attempts": attempt + 1},
             duration_s=time.monotonic() - started,
         )
 

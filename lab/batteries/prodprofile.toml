@@ -1,0 +1,25 @@
+# Production-profile demo: CLAR board with retry-on-length enabled.
+# Sampler battery showed CLAR seed 3 runs away; with retry_on_length = 2 the
+# runner re-rolls (seed+1000 per attempt) and the epoch should deliver.
+# This is the shipping loop's shape: runaway = failed roll, not failed epoch.
+
+[battery]
+name = "prodprofile"
+prompt_dir = "lab/prompts/epoch2"
+transcript_dir = "lab/transcripts/prodprofile"
+seeds = [1, 2, 3]
+retry_on_length = 2
+
+[sampling]
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+min_p = 0.0
+presence_penalty = 1.5
+max_tokens = 12288
+enable_thinking = true
+
+[[conditions]]
+name = "PROD"
+primer = "primer_c.txt"
+board = "board_lift_uni_clar.txt"
