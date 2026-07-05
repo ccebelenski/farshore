@@ -811,6 +811,38 @@ Delivery stats: retry loop proven (8 firings, incl. one 2-attempt save), but A2-
 ran away on ALL THREE attempts — same-prompt persistent runaway means some prompts
 are churn attractors, not lottery tickets; the multi-call receipts pile grows.
 
+## RESULTS: stability2 (instrument fixes; 16/21 delivered)
+
+**The instruments came clean:** zero neutral-capture orders (the (4,1) obsession was
+100% our board artifact — repaired history eliminated it outright, including round-1's
+worst incoherence), and REINFORCE was adopted immediately and heavily (12+ uses),
+including its exact intended composition: `TF-1: REINFORCE UNITS #16` — the transport
+docks into the staged force with no disband dance.
+
+**With clean instruments, the true signature is now unmistakable:**
+- **Commitment: 8/8 held** (A3 crossing, C1/C2 beachhead — pressed every time, no
+  abandonment, naval threat handled implicitly by the embedded escort).
+- **THE standing failure is trigger-to-launch conversion: 0/3.** B2 runs docked the
+  awaited transport into TF-1 and STILL left the objective at STAGE — staging past
+  their own stated trigger even with the lift physically in formation. A2's only
+  delivered run reinforced correctly then gave the CAPTURE order to the wrong TF.
+  Doctrine maxim #5 ("a staged force exists to launch") now has a precise target and
+  a clean baseline.
+- **Shock response FLIPPED failure modes: 2/2 oblivious** (round 1: 3/3 overreacted).
+  With REINFORCE available, both B1 runs fed the invasion staging and ignored two
+  enemy armies beside (4,3) — reinforce-existing-TFs may have displaced
+  form-a-defense as the salient move. Judgment deficit confirmed in both directions;
+  doctrine maxim #2's target.
+- **New REINFORCE misuse: cross-water reinforcement** (home armies "added" to a fleet
+  mid-ocean / beachhead overseas, 4 instances) — grammatically valid, physically
+  impossible. The compile step needs a reachability check + a "cannot comply" report
+  channel (already designed for infeasible CAPTUREs; REINFORCE joins it).
+- **Delivery REGRESSED: 16/21 vs 20/21** — runaways clustered on the high-load epochs
+  (A1/A2/B1/B2 each lost a seed). Cannot attribute (three changes bundled): suspects
+  are the layout flip (contract moved off the anchor position) and REINFORCE
+  enlarging the decision space. If the doctrine arm (same layout) stays this bad,
+  layout-vs-load gets its own A/B; the multi-call trigger evidence keeps mounting.
+
 **Order compiler (lab/compile_orders.py, user ask):** the second half of the compile
 step, prototyped — takes parsed orders + the SAME board text the model read (terrain
 from the ASCII grid, landmasses by flood fill, roster parsed from the prompt) and
