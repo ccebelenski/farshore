@@ -55,6 +55,7 @@ class RunSpec:
     seed: int
     prompt: str
     enable_thinking: bool
+    sampling: Sampling
 
     @property
     def run_id(self) -> str:
@@ -84,9 +85,13 @@ class Battery:
                 prompt=(prompt_dir / cond["primer"]).read_text()
                 + "\n"
                 + (prompt_dir / cond["board"]).read_text(),
-                # A condition may override the battery-wide thinking dial.
+                # A condition may override the battery-wide thinking dial and
+                # any sampling field (e.g. sampling = { temperature = 0.6 }).
                 enable_thinking=bool(
                     cond.get("enable_thinking", sampling.enable_thinking)
+                ),
+                sampling=Sampling.from_dict(
+                    dict(manifest["sampling"]) | dict(cond.get("sampling", {}))
                 ),
             )
             for cond in manifest["conditions"]
@@ -186,7 +191,7 @@ class BatteryRunner:
             )
 
     def _execute(self, spec: RunSpec) -> Transcript:
-        s = self._battery.sampling
+        s = spec.sampling
         started = time.monotonic()
         response = self._client.chat.completions.create(
             model=self._model,
@@ -204,7 +209,7 @@ class BatteryRunner:
         )
         return Transcript(
             spec=spec,
-            sampling=s,
+            sampling=spec.sampling,
             response=response.model_dump(),
             duration_s=time.monotonic() - started,
         )

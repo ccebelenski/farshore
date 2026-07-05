@@ -1,0 +1,33 @@
+# Runaway mitigation A/B — decision churn, not token loops (autopsy: 3-4
+# near-dup lines out of ~360; repetition penalties target a disease we do
+# not have). Two levers, separately, vs lift3 SEALIFT as baseline
+# (1 runaway / 3 runs):
+#   TEMP06 — model-card "precise task" sampling (temp 0.6), same board.
+#   CLAR   — baseline sampling, contract ambiguities closed (DISBAND counts
+#            as the TF's line; FORM lines are additional; BUILD optional =
+#            keep current build). The runaways ruminated on exactly these.
+
+[battery]
+name = "sampler"
+prompt_dir = "lab/prompts/epoch2"
+transcript_dir = "lab/transcripts/sampler"
+seeds = [1, 2, 3]
+
+[sampling]
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+presence_penalty = 1.5
+max_tokens = 12288
+enable_thinking = true
+
+[[conditions]]
+name = "TEMP06"
+primer = "primer_c.txt"
+board = "board_lift_uni.txt"
+sampling = { temperature = 0.6 }
+
+[[conditions]]
+name = "CLAR"
+primer = "primer_c.txt"
+board = "board_lift_uni_clar.txt"
