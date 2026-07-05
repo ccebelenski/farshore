@@ -543,6 +543,15 @@ by the code, amended by the general. One source of truth; there is never a momen
   one command, not a qualification program.
 - **Rules-clarification rev** for unit-role misuse ("TRANSPORT — a hauler, not a
   warship") — fold into the next primer touch.
+- **FORTIFIED assault-sizing probe** (user, 2026-07-05; for game-integration time, not
+  the lab batteries): under FORTIFIED_CITIES the approach to a city is an artillery
+  killing field — does the general intuit that force is needed, or walk armies into
+  death one by one? Two-phase: (1) FORTIFIED scenario with NO artillery text in the
+  primer, casualty ledger showing approach losses — does it read the attrition and
+  size the next wave up? (this is the doctrine-learning-from-events axis from the
+  LOSS scenario, sharpened); (2) add the factual artillery line ("cities fire on
+  adjacent enemy units each turn; a lone army rarely survives the approach") and
+  measure the delta. Mechanics fact only — never "bring N armies" (pre-chew line).
 - **Early-game spot check** (user): one city, world in fog — expected doctrine is
   EXPLORE. Doubles as the contract's degenerate case: the correct order set is nearly
   empty (one BUILD line, maybe one tiny SCOUT tasking), so it probes whether the model
