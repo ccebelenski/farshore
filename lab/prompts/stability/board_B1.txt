@@ -1,12 +1,44 @@
-TURN 52  (your last orders were issued as shown per TF)
+=== ORDERS CONTRACT ===
+
+Your orders are AMENDMENTS to the standing task forces. Output ONLY lines in
+these forms — no other prose, headers, or commentary:
+
+  TF <id>: CONTINUE | <one line>
+  TF <id>: REINFORCE UNITS <ids> | <one line>
+  TF <id>: RETASK <VERB> <target> | <one line>
+  TF <id>: DISBAND | <one line>
+  FORM TF <new id>: UNITS <ids> | <VERB> <target> | <one line>
+  BUILD (x,y): <UNIT KIND> | <one line>
+
+Every standing TF gets exactly one line; a REINFORCE or DISBAND line IS that
+TF's one line. REINFORCE keeps the TF's objective and adds the listed
+UNASSIGNED units to it. To change a TF's objective, RETASK it (members kept).
+To rebuild membership from scratch, DISBAND (survivors return to UNASSIGNED)
+and FORM anew; FORM lines are additional lines creating new TFs. UNASSIGNED
+units enter play only through FORM or REINFORCE. A BUILD line is optional per
+city — no BUILD line means the city keeps its current build (changing
+discards accumulated work). VERB is one of:
+  CAPTURE <city (x,y)> · DEFEND <city (x,y)> · SCOUT <(x,y) or compass> ·
+  PATROL <(x,y) or compass> · STAGE <(x,y)>
+A warship grouped with a transport escorts it — there is no ESCORT order.
+
+CURRENT TASKINGS  (standing orders; your stated reason in quotes;
+  events since, as reported; members are in UNITS below)
+  TF-1  formed t38 · STAGE (5,2) — "awaiting second transport before striking east at the enemy cities"
+    since: holding along column 5 since t44; no contact; no losses
+  TF-2  formed t38 · DEFEND (2,0) — "keep the capital garrisoned"
+    since: garrisoned; no contact; no losses
+  TF-3  formed t38 · PATROL (7,2) — "screen the crossing lane"
+    since: on station; t52: an enemy transport slipped in along the south
+      coast and unloaded two armies at (3,4) and (5,4), next to city (4,3)
 
 MAP  legend: . land  ~ water  ? fog   O my city  E enemy city  N neutral city
-     a-p = your units, see UNITS (a unit inside a city shows as the city)
+     a-o = your units, see UNITS (a unit inside a city shows as the city)
      X Y Z = enemy units in sight NOW (see KNOWN ENEMY)
  r0  . i O j . c ~ ~ ~ ~ ? ? ? ?
- r1  . . b . N d ~ ~ ~ ~ ? E ? ?
- r2  . O . . g e ~ o ~ ~ . E . ?
- r3  . . . l O f ~ p ~ ~ . . . ?
+ r1  . . b . O d ~ ~ ~ ~ ? E ? ?
+ r2  . O . . g e ~ n ~ ~ . E . ?
+ r3  . . . . O f ~ o ~ ~ . . . ?
  r4  . . . X h Y ~ ~ ~ ~ ? ? ? ?
  r5  ~ ~ ~ ~ Z ~ ~ ~ ~ ~ ? ? ? ?
 
@@ -23,49 +55,21 @@ ENTIRE force; you have NOTHING else
   i  #11  army       (1,0)                        UNASSIGNED
   j  #12  army       (3,0)                        UNASSIGNED
   k  #13  army       (2,0) in city                UNASSIGNED
-  l  #14  army       (3,3)                        UNASSIGNED
-  m  #15  army       (4,3) in city                UNASSIGNED
-  n  #17  army       (4,3) in city, NEW t52       UNASSIGNED
-  o  #9   transport  (7,2) empty                  TF-3
-  p  #10  destroyer  (7,3)                        TF-3
+  l  #15  army       (4,3) in city                UNASSIGNED
+  m  #17  army       (4,3) in city, NEW t52       UNASSIGNED
+  n  #9   transport  (7,2) empty                  TF-3
+  o  #10  destroyer  (7,3)                        TF-3
 MY CITIES
   (2,0) building ARMY, 3 turns left
   (1,2) building TRANSPORT, 2 turns left
   (4,3) building ARMY, 5 turns left
-NEUTRAL CITIES  (4,1) on my continent
+  (4,1) building TRANSPORT, 29 turns left (captured t51 — #14 spent)
+NEUTRAL CITIES  none known
 KNOWN ENEMY
      city (11,1); city (11,2); destroyer at (8,3) seen at t49
   X  enemy army at (3,4) — LANDED t52 from a transport
   Y  enemy army at (5,4) — LANDED t52 from a transport
   Z  enemy transport offshore at (4,5), now empty
 
-CURRENT TASKINGS  (standing orders; your stated reason in quotes;
-  events since, as reported; members are in UNITS above)
-  TF-1  formed t38 · STAGE (5,2) — "awaiting second transport before striking east at the enemy cities"
-    since: holding along column 5 since t44; no contact; no losses
-  TF-2  formed t38 · DEFEND (2,0) — "keep the capital garrisoned"
-    since: garrisoned; no contact; no losses
-  TF-3  formed t38 · PATROL (7,2) — "screen the crossing lane"
-    since: on station; t52: an enemy transport slipped in along the south
-      coast and unloaded two armies at (3,4) and (5,4), next to city (4,3)
-
-TASK: amend your standing orders. Output ONLY lines in these forms — no other
-prose, headers, or commentary:
-
-  TF <id>: CONTINUE | <one line>
-  TF <id>: RETASK <VERB> <target> | <one line>
-  TF <id>: DISBAND | <one line>
-  FORM TF <new id>: UNITS <ids> | <VERB> <target> | <one line>
-  BUILD (x,y): <UNIT KIND> | <one line>
-
-Every standing TF gets exactly one line — a DISBAND line IS that TF's one
-line. FORM lines are additional lines creating new TFs; they do not count as
-any standing TF's line. To change a TF's membership, DISBAND it and FORM
-anew; DISBAND releases surviving members to UNASSIGNED. UNASSIGNED units
-only enter play through FORM. A BUILD line is optional per city — no BUILD
-line means the city keeps its current build (changing discards accumulated
-work). VERB is one of:
-  CAPTURE <city (x,y)> · DEFEND <city (x,y)> · SCOUT <(x,y) or compass> ·
-  PATROL <(x,y) or compass> · STAGE <(x,y)>
-A warship grouped with a transport escorts it — there is no ESCORT order.
-
+It is TURN 52. Issue your amendment orders now — ONLY the line
+forms defined in the ORDERS CONTRACT above.

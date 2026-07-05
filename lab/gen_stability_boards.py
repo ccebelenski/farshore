@@ -30,23 +30,31 @@ BASE_TERRAIN = [
     "~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ? ? ? ?",
 ]
 
-TASK_TEXT = """\
-TASK: amend your standing orders. Output ONLY lines in these forms — no other
-prose, headers, or commentary:
+# Contract v5: REINFORCE added (membership additions no longer require
+# disbanding a mid-mission TF). Deliberately ABSENT: any "CONTINUE is the
+# default" statement — that is doctrine maxim #1, a measured lever, not
+# contract mechanics.
+CONTRACT_TEXT = """\
+=== ORDERS CONTRACT ===
+
+Your orders are AMENDMENTS to the standing task forces. Output ONLY lines in
+these forms — no other prose, headers, or commentary:
 
   TF <id>: CONTINUE | <one line>
+  TF <id>: REINFORCE UNITS <ids> | <one line>
   TF <id>: RETASK <VERB> <target> | <one line>
   TF <id>: DISBAND | <one line>
   FORM TF <new id>: UNITS <ids> | <VERB> <target> | <one line>
   BUILD (x,y): <UNIT KIND> | <one line>
 
-Every standing TF gets exactly one line — a DISBAND line IS that TF's one
-line. FORM lines are additional lines creating new TFs; they do not count as
-any standing TF's line. To change a TF's membership, DISBAND it and FORM
-anew; DISBAND releases surviving members to UNASSIGNED. UNASSIGNED units
-only enter play through FORM. A BUILD line is optional per city — no BUILD
-line means the city keeps its current build (changing discards accumulated
-work). VERB is one of:
+Every standing TF gets exactly one line; a REINFORCE or DISBAND line IS that
+TF's one line. REINFORCE keeps the TF's objective and adds the listed
+UNASSIGNED units to it. To change a TF's objective, RETASK it (members kept).
+To rebuild membership from scratch, DISBAND (survivors return to UNASSIGNED)
+and FORM anew; FORM lines are additional lines creating new TFs. UNASSIGNED
+units enter play only through FORM or REINFORCE. A BUILD line is optional per
+city — no BUILD line means the city keeps its current build (changing
+discards accumulated work). VERB is one of:
   CAPTURE <city (x,y)> · DEFEND <city (x,y)> · SCOUT <(x,y) or compass> ·
   PATROL <(x,y) or compass> · STAGE <(x,y)>
 A warship grouped with a transport escorts it — there is no ESCORT order.
@@ -120,7 +128,13 @@ def render(e: Epoch) -> str:
             if cell not in {"O", "N", "E"}:
                 grid[en.y][en.x] = en.marker
 
-    lines = [f"TURN {e.turn}  (your last orders were issued as shown per TF)", ""]
+    # Cache-native layout: static first (contract), then the semi-stable
+    # ledger, then the volatile board state, with the turn cue LAST.
+    lines = [CONTRACT_TEXT]
+    lines += ["CURRENT TASKINGS  (standing orders; your stated reason in quotes;"]
+    lines += ["  events since, as reported; members are in UNITS below)"]
+    lines.append(e.taskings.rstrip())
+    lines.append("")
     hi = chr(ord("a") + len(e.units) - 1)
     lines += [
         "MAP  legend: . land  ~ water  ? fog   O my city  E enemy city  N neutral city",
@@ -146,10 +160,11 @@ def render(e: Epoch) -> str:
     for en in e.enemies:
         tag = f"  {en.marker}  " if en.x >= 0 else "     "
         lines.append(f"{tag}{en.desc}")
-    lines += ["", "CURRENT TASKINGS  (standing orders; your stated reason in quotes;"]
-    lines += ["  events since, as reported; members are in UNITS above)"]
-    lines.append(e.taskings.rstrip())
-    lines += ["", TASK_TEXT]
+    lines += [
+        "",
+        f"It is TURN {e.turn}. Issue your amendment orders now — ONLY the line",
+        "forms defined in the ORDERS CONTRACT above.",
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -213,19 +228,20 @@ EPOCHS = [
             U(11, "army", 1, 0, "UNASSIGNED"),
             U(12, "army", 3, 0, "UNASSIGNED"),
             U(13, "army", 2, 0, "UNASSIGNED", "in city"),
-            U(14, "army", 3, 3, "UNASSIGNED"),
             U(15, "army", 4, 3, "UNASSIGNED", "in city"),
             U(17, "army", 3, 4, "UNASSIGNED"),
             U(9, "transport", 7, 2, "TF-3", "empty"),
             U(16, "transport", 1, 2, "UNASSIGNED", "in city, empty, NEW t54"),
             U(10, "destroyer", 7, 3, "TF-3"),
         ],
+        terrain_overrides={(4, 1): "O"},
         cities=[
             "(2,0) building ARMY, 1 turn left",
             "(1,2) building TRANSPORT, 30 turns left (just delivered transport #16)",
             "(4,3) building ARMY, 3 turns left",
+            "(4,1) building TRANSPORT, 27 turns left (captured t51 — #14 spent)",
         ],
-        neutral="(4,1) on my continent",
+        neutral="none known",
         enemies=[
             Enemy("", "city (11,1); city (11,2)"),
             Enemy("", "destroyer at (8,3) seen at t49 (5 turns ago); army (11,1) seen 16 turns ago"),
@@ -252,7 +268,6 @@ EPOCHS = [
             U(11, "army", 1, 0, "UNASSIGNED"),
             U(12, "army", 3, 0, "UNASSIGNED"),
             U(13, "army", 1, 1, "UNASSIGNED"),
-            U(14, "army", 3, 3, "UNASSIGNED"),
             U(15, "army", 4, 3, "UNASSIGNED", "in city"),
             U(17, "army", 3, 4, "UNASSIGNED"),
             U(18, "army", 2, 0, "UNASSIGNED", "in city"),
@@ -261,12 +276,14 @@ EPOCHS = [
             U(16, "transport", 8, 2, "TF-5", "carrying #6 #7 #8"),
             U(10, "destroyer", 8, 3, "TF-5", "escorting"),
         ],
+        terrain_overrides={(4, 1): "O"},
         cities=[
             "(2,0) building ARMY, 2 turns left",
             "(1,2) building TRANSPORT, 26 turns left",
             "(4,3) building ARMY, 4 turns left",
+            "(4,1) building TRANSPORT, 23 turns left (captured t51)",
         ],
-        neutral="(4,1) on my continent",
+        neutral="none known",
         enemies=[
             Enemy("", "city (11,1); city (11,2); army (11,1) seen 20 turns ago"),
             Enemy("X", "enemy destroyer at (9,4), sighted t57, closing from the southeast", 9, 4),
@@ -286,18 +303,19 @@ EPOCHS = [
             U(11, "army", 1, 0, "UNASSIGNED"),
             U(12, "army", 3, 0, "UNASSIGNED"),
             U(13, "army", 2, 0, "UNASSIGNED", "in city"),
-            U(14, "army", 3, 3, "UNASSIGNED"),
             U(15, "army", 4, 3, "UNASSIGNED", "in city"),
             U(17, "army", 4, 3, "UNASSIGNED", "in city, NEW t52"),
             U(9, "transport", 7, 2, "TF-3", "empty"),
             U(10, "destroyer", 7, 3, "TF-3"),
         ],
+        terrain_overrides={(4, 1): "O"},
         cities=[
             "(2,0) building ARMY, 3 turns left",
             "(1,2) building TRANSPORT, 2 turns left",
             "(4,3) building ARMY, 5 turns left",
+            "(4,1) building TRANSPORT, 29 turns left (captured t51 — #14 spent)",
         ],
-        neutral="(4,1) on my continent",
+        neutral="none known",
         enemies=[
             Enemy("", "city (11,1); city (11,2); destroyer at (8,3) seen at t49"),
             Enemy("X", "enemy army at (3,4) — LANDED t52 from a transport", 3, 4),
@@ -319,7 +337,6 @@ EPOCHS = [
         units=[*HOME_TF12, *STAGED_TF1,
             U(11, "army", 1, 0, "UNASSIGNED"),
             U(12, "army", 3, 0, "UNASSIGNED"),
-            U(13, "army", 3, 2, "TF-4"),
             U(15, "army", 4, 3, "TF-4", "in city"),
             U(17, "army", 5, 4, "TF-4"),
             U(18, "army", 2, 0, "UNASSIGNED", "in city, NEW t55"),
@@ -327,12 +344,14 @@ EPOCHS = [
             U(16, "transport", 1, 2, "UNASSIGNED", "in city, empty, NEW t54"),
             U(10, "destroyer", 7, 3, "TF-3"),
         ],
+        terrain_overrides={(4, 1): "O"},
         cities=[
             "(2,0) building ARMY, 5 turns left",
             "(1,2) building TRANSPORT, 29 turns left (just delivered transport #16)",
             "(4,3) building ARMY, 2 turns left",
+            "(4,1) building TRANSPORT, 26 turns left (captured t51)",
         ],
-        neutral="(4,1) on my continent",
+        neutral="none known",
         enemies=[
             Enemy("", "city (11,1); city (11,2)"),
             Enemy("X", "enemy army at (3,3) — the survivor of the t52 landing", 3, 3),
@@ -348,14 +367,14 @@ EPOCHS = [
     since: on station; the enemy transport withdrew east at t54
   TF-4  formed t52 · DEFEND (4,3) — {WHY_TF4}
     since: t53: #17 destroyed the enemy army at (5,4);
-      t54: enemy army attacked — #14 lost; the attacker fell back to (3,3);
+      t54: enemy army attacked — #13 lost; the attacker fell back to (3,3);
       city (4,3) held throughout""",
     ),
     # ---- ARC C: beachhead -> first setback -----------------------------------
     Epoch(
         name="C1",
         turn=56,
-        terrain_overrides={(10, 1): "."},
+        terrain_overrides={(10, 1): ".", (4, 1): "O"},
         units=[*HOME_TF12,
             U(3, "army", 10, 1, "TF-5"),
             U(4, "army", 10, 2, "TF-5"),
@@ -366,7 +385,6 @@ EPOCHS = [
             U(11, "army", 1, 0, "UNASSIGNED"),
             U(12, "army", 3, 0, "UNASSIGNED"),
             U(13, "army", 1, 1, "UNASSIGNED"),
-            U(14, "army", 3, 3, "UNASSIGNED"),
             U(15, "army", 4, 3, "UNASSIGNED", "in city"),
             U(17, "army", 3, 4, "UNASSIGNED"),
             U(18, "army", 2, 0, "UNASSIGNED", "in city"),
@@ -378,8 +396,9 @@ EPOCHS = [
             "(2,0) building ARMY, 4 turns left",
             "(1,2) building TRANSPORT, 28 turns left",
             "(4,3) building ARMY, 1 turn left",
+            "(4,1) building TRANSPORT, 25 turns left (captured t51)",
         ],
-        neutral="(4,1) on my continent",
+        neutral="none known",
         enemies=[
             Enemy("", "city (11,2)"),
             Enemy("X", "enemy army garrisoning city (11,1), seen t56", 11, 1),
@@ -395,7 +414,7 @@ EPOCHS = [
     Epoch(
         name="C2",
         turn=58,
-        terrain_overrides={(10, 1): "."},
+        terrain_overrides={(10, 1): ".", (4, 1): "O"},
         units=[*HOME_TF12,
             U(4, "army", 10, 1, "TF-5"),
             U(5, "army", 10, 2, "TF-5"),
@@ -405,7 +424,6 @@ EPOCHS = [
             U(11, "army", 1, 0, "UNASSIGNED"),
             U(12, "army", 3, 0, "UNASSIGNED"),
             U(13, "army", 1, 1, "UNASSIGNED"),
-            U(14, "army", 3, 3, "UNASSIGNED"),
             U(15, "army", 4, 3, "UNASSIGNED", "in city"),
             U(17, "army", 3, 4, "UNASSIGNED"),
             U(18, "army", 2, 0, "UNASSIGNED", "in city"),
@@ -418,8 +436,9 @@ EPOCHS = [
             "(2,0) building ARMY, 2 turns left",
             "(1,2) building TRANSPORT, 26 turns left",
             "(4,3) building ARMY, 4 turns left",
+            "(4,1) building TRANSPORT, 23 turns left (captured t51)",
         ],
-        neutral="(4,1) on my continent",
+        neutral="none known",
         enemies=[
             Enemy("", "city (11,2)"),
             Enemy("X", "enemy army garrisoning city (11,1)", 11, 1),
