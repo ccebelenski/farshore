@@ -554,7 +554,15 @@ by the code, amended by the general. One source of truth; there is never a momen
   scenario + replacement transport — snapshot baseline demonstrably produces the
   unescorted-convoy repeat (LOSS-s1), so the metric is ESCORT ADOPTION RATE on the new
   convoy, plus token cost, runaway rate, and A1-churn (more past to re-litigate is a
-  plausible backfire).
+  plausible backfire). **Cache constraint (user): the briefing must be KV-cache
+  friendly — llama.cpp reuses the longest byte-identical prefix, so order = static
+  first, volatile last: primer → contract rules → recap (APPEND-ONLY by design — its
+  cache citizenship is half its value) → taskings → board state → turn header. Current
+  layout is cache-hostile (contract at the end, turn header near the top). Tension to
+  measure: small models anchor on the last instruction (the ROLE finding), so moving
+  the contract early needs a tiny static reminder at the very end — verify compliance
+  holds, and verify cache reuse via the server's prompt-token timings. Matters most at
+  the CPU floor, where full prefill is tens of seconds per epoch.**
 - **FORTIFIED assault-sizing probe** (user, 2026-07-05; for game-integration time, not
   the lab batteries): under FORTIFIED_CITIES the approach to a city is an artillery
   killing field — does the general intuit that force is needed, or walk armies into
