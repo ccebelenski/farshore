@@ -872,6 +872,15 @@ armies adjacent to city (4,3)" — already present — the miss is real).
 Delivery 19/21 with heavy retry traffic (18 firings) — doctrine text neither calmed
 nor worsened the churn attractors; retries rescued more than stability2's run.
 
+## RESULTS: earlygame probe (3/3, first attempt, textbook restraint)
+
+One city, one army, world in fog: **every run emitted exactly ONE order line** —
+`FORM TF 1: UNITS 1 | SCOUT EAST` (the predicted explore instinct) or a single
+neutral-city capture (both defensible openings). Zero template-filling, zero phantom
+units, zero gratuitous BUILD lines (the optional-BUILD default behaving). The
+contract's degenerate case passes completely: the model can issue almost nothing
+when almost nothing is right.
+
 **Order compiler (lab/compile_orders.py, user ask):** the second half of the compile
 step, prototyped — takes parsed orders + the SAME board text the model read (terrain
 from the ASCII grid, landmasses by flood fill, roster parsed from the prompt) and
