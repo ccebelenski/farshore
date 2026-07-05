@@ -717,6 +717,49 @@ miss worth one line in a future ledger ("the awaited transport has arrived").
 Separator drift (· for |, <(x,y)> brackets, quoted WHYs) — all within
 accept-and-normalize.
 
+## RESULTS: stability arcs (21 runs; 20 delivered, 8 retries, 1 triple-runaway)
+
+**The user's question — does the judgment hold up across turns? Answer: it holds
+when COMMITTED, wobbles when IDLE, reacts to shocks with a nearest-force bias.**
+
+- **Hold-when-committed: STRONG (6/6).** A3 mid-crossing 3/3 CONTINUE (nobody
+  recalled the fleet over the shadowing destroyer); C1 beachhead 3/3 pressed the
+  assault. Once a campaign is moving, the general keeps its nerve.
+- **Hold-when-idle: WEAK (1/3).** A1 (nothing changed, wait 4 more turns) drew a
+  premature one-transport launch and a full three-TF re-plan. Idle hands re-plan.
+  The anti-thrash default (CONTINUE unless events demand) may need to be *stated*
+  in the contract rather than hoped for.
+- **Trigger conversion: FRAGILE (0/3 clean at A2** — one triple-retry runaway, one
+  water-staging relapse, one liftless RETASK CAPTURE**)** vs lift3's 2/2. High seed
+  variance; the water-staging disease is reduced by primer_c, not cured.
+- **Shock response: 3/3 reacted, 0/3 proportionally.** All three B1 runs diverted the
+  STAGED STRIKE FORCE to defend (4,3) and left six reserve armies idle — including
+  two sitting IN the threatened city. Partially defensible (the staged armies are
+  geographically closest) but nobody backfilled the stage → the campaign thread
+  drops. B2 partially redeems: 2/3 handled defense + launch cleanly in one order set.
+- **One true incoherence:** C2-s2 ordered the beachhead TF — five armies ashore on
+  the enemy continent — to CAPTURE the home neutral across the ocean. The other two
+  C2 runs made a *defensible* retarget ((11,2), the ungarrisoned city, instead of
+  re-grinding (11,1)).
+
+**Two causes are OURS, with fixes:**
+1. **The canonical histories gaslight the model about (4,1).** A rational general
+   would have taken the home neutral 15 turns before these boards; its persistent
+   neutrality is an anomaly the model keeps (correctly!) trying to fix — neutral-
+   gravity appears in 9 of 18 delivered order sets and reaches absurdity in C2-s2.
+   Fix: canonical worlds capture (4,1) around t52; later boards show it as ours.
+   The "over-firing neutral drive" may be largely a scenario artifact.
+2. **The contract is missing REINFORCE.** B1's right answer (add reserves to the
+   defense/stage) requires disbanding a mid-mission TF just to change membership —
+   nobody ever does that, so reserves stay idle and standing TFs get diverted
+   instead. Contract v5: `TF <id>: REINFORCE UNITS <ids> | <one line>` (keeps
+   objective, adds members). Predicted to fix B1 proportionality and reduce
+   disband-churn generally.
+
+Delivery stats: retry loop proven (8 firings, incl. one 2-attempt save), but A2-s1
+ran away on ALL THREE attempts — same-prompt persistent runaway means some prompts
+are churn attractors, not lottery tickets; the multi-call receipts pile grows.
+
 **Order compiler (lab/compile_orders.py, user ask):** the second half of the compile
 step, prototyped — takes parsed orders + the SAME board text the model read (terrain
 from the ASCII grid, landmasses by flood fill, roster parsed from the prompt) and
