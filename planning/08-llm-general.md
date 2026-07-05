@@ -843,6 +843,35 @@ docks into the staged force with no disband dance.
   enlarging the decision space. If the doctrine arm (same layout) stays this bad,
   layout-vs-load gets its own A/B; the multi-call trigger evidence keeps mounting.
 
+## RESULTS: doctrine arm (19/21 delivered; graded mechanically by grade_amendments.py)
+
+**Maxim #1 works: A1 went 3/3 zero-churn holds** (baseline: premature launches and
+full re-plans). Commitment stayed perfect under doctrine (A3 3/3 held, C1/C2 pressed
+6/6, no bypass wobble, no doctrine-paralysis on committed ops). No verbatim parroting.
+
+**ROOT CAUSE FOUND for the frozen trigger — a contract interaction, not a judgment
+failure.** To launch legally in one epoch the model must dock the transport AND flip
+the verb, but one-line-per-TF forbids REINFORCE+RETASK together; the old escape
+(DISBAND+FORM) is now correctly discouraged by maxim #1. The maxims and the line rule
+interact to lock staged TFs in place. Evidence: B2-s2 BROKE the rule to do the right
+thing (RETASK CAPTURE (11,2) + REINFORCE #16, flagged as a 2-line violation); A2-s2
+docked the transport with WHY "load convoy for eastern strike" and left the verb at
+STAGE — **treating its reason as executable. Reasons are not orders** — worth a
+contract sentence: officers execute the VERB; a STAGE TF stays put whatever its WHY
+says. **Contract v6: REINFORCE and RETASK for the same TF are permitted together in
+one epoch** (they are one military act: "commit the new asset and go").
+
+**Maxim #2 half-works — reserves now get used (5/6 B-runs) but aimed at the wrong
+city:** garrison-feeds to the capital (2,0) while the landing threatens (4,3), whose
+own two idle armies again went untouched. Salience hypothesis: TF-2 is the only
+DEFEND-verbed TF, so defense impulses route into it regardless of geography. The
+spatial-threat read remains the genuine open deficit (not fixable by contract; maybe
+by ledger phrasing of WHERE the threat points, which is bookkeeper-legal: "two enemy
+armies adjacent to city (4,3)" — already present — the miss is real).
+
+Delivery 19/21 with heavy retry traffic (18 firings) — doctrine text neither calmed
+nor worsened the churn attractors; retries rescued more than stability2's run.
+
 **Order compiler (lab/compile_orders.py, user ask):** the second half of the compile
 step, prototyped — takes parsed orders + the SAME board text the model read (terrain
 from the ASCII grid, landmasses by flood fill, roster parsed from the prompt) and
