@@ -80,8 +80,9 @@ VISION / FOG
 STANDING DOCTRINE  (tested — lessons your service has already paid for)
   - A sound standing order beats a new plan. Amend only what events have
     made wrong; re-planning a working campaign is how campaigns die.
-  - Meet surprises with uncommitted reserves first. A committed task
-    force pulled off its mission costs you two missions.
+  - Meet surprises with uncommitted reserves first, at the point of
+    threat — not at the nearest garrison. A committed task force pulled
+    off its mission costs you two missions.
   - A transport in waters where an enemy warship may operate sails with
     a warship in its task force, or it waits.
   - Capture attempts consume armies, and attempts fail. Assault with

@@ -1,0 +1,39 @@
+# Contract v6 test — two levers on DISJOINT epochs for clean attribution:
+#   A2/B2 (trigger): REINFORCE+RETASK now composable + "reasons are not
+#     orders". Prediction: the frozen launch UNFREEZES (baseline 0/2 A2,
+#     1/2-illegal B2 under doctrine arm).
+#   B1 (shock): maxim 2 gains "at the point of threat, not the nearest
+#     garrison". Prediction: the defense finally aims at (4,3).
+# primer_d carries the doctrine section; boards regenerated with the v6
+# contract text.
+
+[battery]
+name = "trigger-v6"
+prompt_dir = "lab/prompts/stability"
+transcript_dir = "lab/transcripts/trigger-v6"
+seeds = [1, 2, 3]
+retry_on_length = 2
+
+[sampling]
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+min_p = 0.0
+presence_penalty = 1.5
+max_tokens = 12288
+enable_thinking = true
+
+[[conditions]]
+name = "A2"
+primer = "primer_d.txt"
+board = "board_A2.txt"
+
+[[conditions]]
+name = "B2"
+primer = "primer_d.txt"
+board = "board_B2.txt"
+
+[[conditions]]
+name = "B1"
+primer = "primer_d.txt"
+board = "board_B1.txt"

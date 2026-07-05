@@ -47,14 +47,17 @@ these forms — no other prose, headers, or commentary:
   FORM TF <new id>: UNITS <ids> | <VERB> <target> | <one line>
   BUILD (x,y): <UNIT KIND> | <one line>
 
-Every standing TF gets exactly one line; a REINFORCE or DISBAND line IS that
-TF's one line. REINFORCE keeps the TF's objective and adds the listed
-UNASSIGNED units to it. To change a TF's objective, RETASK it (members kept).
-To rebuild membership from scratch, DISBAND (survivors return to UNASSIGNED)
-and FORM anew; FORM lines are additional lines creating new TFs. UNASSIGNED
-units enter play only through FORM or REINFORCE. A BUILD line is optional per
-city — no BUILD line means the city keeps its current build (changing
-discards accumulated work). VERB is one of:
+Every standing TF gets exactly one line — with ONE exception: a TF may
+receive both a REINFORCE line and a RETASK line in the same orders (commit
+new assets and change its objective together). A DISBAND line is that TF's
+only line. REINFORCE keeps the TF's objective and adds the listed UNASSIGNED
+units to it. To change a TF's objective, RETASK it (members kept). To rebuild
+membership from scratch, DISBAND (survivors return to UNASSIGNED) and FORM
+anew; FORM lines are additional lines creating new TFs. UNASSIGNED units
+enter play only through FORM or REINFORCE. Officers execute the VERB, not
+your reasons: a TF ordered STAGE stays put no matter what its stated reason
+says. A BUILD line is optional per city — no BUILD line means the city keeps
+its current build (changing discards accumulated work). VERB is one of:
   CAPTURE <city (x,y)> · DEFEND <city (x,y)> · SCOUT <(x,y) or compass> ·
   PATROL <(x,y) or compass> · STAGE <(x,y)>
 A warship grouped with a transport escorts it — there is no ESCORT order.

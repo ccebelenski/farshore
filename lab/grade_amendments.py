@@ -156,7 +156,7 @@ class AmendmentGrader:
     def grade(self, run_id: str, answer: str) -> Grade:
         g = Grade(run_id=run_id)
         b = self._b
-        seen: dict[str, int] = {}
+        seen: dict[str, list[str]] = {}
         pool = {u for u, (_, _, _, t) in b.units.items() if t == "UNASSIGNED"}
         final_obj = dict(b.objectives)  # tf -> "VERB (x,y)"
         members = {tf: set(ms) for tf, ms in b.standing.items()}
@@ -166,15 +166,15 @@ class AmendmentGrader:
                 continue
             if m := DISBAND_RE.match(line):
                 tf = (m[1] or m[2]).upper()
-                seen[tf] = seen.get(tf, 0) + 1
+                seen.setdefault(tf, []).append("disband")
                 g.churn += 1
                 pool |= members.pop(tf, set())
                 final_obj.pop(tf, None)
             elif m := CONTINUE_RE.match(line):
-                seen[m[1].upper()] = seen.get(m[1].upper(), 0) + 1
+                seen.setdefault(m[1].upper(), []).append("continue")
             elif m := REINFORCE_RE.match(line):
                 tf = m[1].upper()
-                seen[tf] = seen.get(tf, 0) + 1
+                seen.setdefault(tf, []).append("reinforce")
                 self._check_reinforce(tf, b.resolve_ids(m[2]), pool, members, g)
             elif m := FORM_RE.match(line):
                 ids = b.resolve_ids(m[2])
@@ -190,16 +190,17 @@ class AmendmentGrader:
                     g.errors.append(f"BUILD ({m[1]},{m[2]}): not an owned city")
             elif m := RETASK_RE.match(line):
                 tf = m[1].upper()
-                seen[tf] = seen.get(tf, 0) + 1
+                seen.setdefault(tf, []).append("retask")
                 g.churn += 1
                 self._verb_target(m[2].upper(), m[3].strip(), f"TF {tf}", g)
                 final_obj[tf] = f"{m[2].upper()} {m[3].strip()}"
             else:
                 g.errors.append(f"stray: {line[:70]!r}")
         for tf in b.standing:
-            n = seen.get(tf, 0)
-            if n != 1:
-                g.errors.append(f"TF-{tf}: {n} lines (need exactly 1)")
+            ops = seen.get(tf, [])
+            # v6: REINFORCE + RETASK for the same TF is the one legal pair.
+            if len(ops) != 1 and sorted(ops) != ["reinforce", "retask"]:
+                g.errors.append(f"TF-{tf}: ops {ops or 'none'} (need 1, or REINFORCE+RETASK)")
         self._derive_metrics(final_obj, members, g)
         return g
 
