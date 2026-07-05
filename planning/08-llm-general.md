@@ -543,6 +543,18 @@ by the code, amended by the general. One source of truth; there is never a momen
   one command, not a qualification program.
 - **Rules-clarification rev** for unit-role misuse ("TRANSPORT — a hauler, not a
   warship") — fold into the next primer touch.
+- **"Previously on FARSHORE" recap experiment** (user, 2026-07-05): we control the
+  context, so the model can't learn from prior moves the way an exposed chain would
+  allow — test a recap section vs the snapshot-only briefing, MEASURED. Content tiers:
+  (1) engine-authored campaign event log (factual: losses w/ location + TF composition
+  at the time — composition is roster fact, cause-attribution would be analyst);
+  (2) the model's own prior amendment lines verbatim (model-authored → exempt);
+  (3) model-authored war diary replayed forward — HOLD as phase 2: unvalidatable free
+  text that compounds across epochs. Test 1+2 as the RECAP arm. Instrument: the LOSS
+  scenario + replacement transport — snapshot baseline demonstrably produces the
+  unescorted-convoy repeat (LOSS-s1), so the metric is ESCORT ADOPTION RATE on the new
+  convoy, plus token cost, runaway rate, and A1-churn (more past to re-litigate is a
+  plausible backfire).
 - **FORTIFIED assault-sizing probe** (user, 2026-07-05; for game-integration time, not
   the lab batteries): under FORTIFIED_CITIES the approach to a city is an artillery
   killing field — does the general intuit that force is needed, or walk armies into
