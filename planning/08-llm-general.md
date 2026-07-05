@@ -671,6 +671,18 @@ so lab batteries keep observing runaways as data). At ~1/3 runaway rate, 2 retri
 give ~96% epoch delivery; the validator's executor-fallback covers the tail. This is
 the shipping loop's shape: a runaway is a failed roll, not a failed epoch.
 
+**prodprofile demo: 3/3 epochs delivered, all attempts=1.** Honest asterisk: the
+retry path never fired — the explicit min_p=0.0 (vs the prior silent 0.05) re-rolled
+the sampling trajectories, and all three seeds happened to converge, including the
+one that ran away under CLAR. Confirms min_p is NOT inert (any future comparison
+against pre-min_p batteries must account for it) and leaves the retry loop
+code-reviewed but not yet exercised live. Output quality: 2/3 textbook launches (s3
+took BOTH transports); s2 went conservative — and revealingly kept "awaiting
+transport convoy" as its reason while transport #16 sat delivered, a WHY-anchoring
+miss worth one line in a future ledger ("the awaited transport has arrived").
+Separator drift (· for |, <(x,y)> brackets, quoted WHYs) — all within
+accept-and-normalize.
+
 **Order compiler (lab/compile_orders.py, user ask):** the second half of the compile
 step, prototyped — takes parsed orders + the SAME board text the model read (terrain
 from the ASCII grid, landmasses by flood fill, roster parsed from the prompt) and
