@@ -31,6 +31,7 @@ class Sampling:
     temperature: float
     top_p: float
     top_k: int
+    min_p: float
     presence_penalty: float
     max_tokens: int
     enable_thinking: bool
@@ -41,6 +42,9 @@ class Sampling:
             temperature=float(d["temperature"]),
             top_p=float(d["top_p"]),
             top_k=int(d["top_k"]),
+            # Model card says 0.0; llama-server silently defaults to 0.05,
+            # so send it explicitly.
+            min_p=float(d.get("min_p", 0.0)),
             presence_penalty=float(d["presence_penalty"]),
             max_tokens=int(d["max_tokens"]),
             enable_thinking=bool(d["enable_thinking"]),
@@ -204,6 +208,7 @@ class BatteryRunner:
             timeout=1800,
             extra_body={
                 "top_k": s.top_k,
+                "min_p": s.min_p,
                 "chat_template_kwargs": {"enable_thinking": spec.enable_thinking},
             },
         )
