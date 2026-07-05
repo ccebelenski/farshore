@@ -543,6 +543,30 @@ by the code, amended by the general. One source of truth; there is never a momen
   one command, not a qualification program.
 - **Rules-clarification rev** for unit-role misuse ("TRANSPORT — a hauler, not a
   warship") — fold into the next primer touch.
+- **STANDING DOCTRINE section** (user, 2026-07-05, after the stability arcs: "tested
+  strategies — guidance on how to play a strong game"). Principled line: DOCTRINE is
+  board-independent maxims the general applies with judgment; DICTATION names moves —
+  never cross into the latter (the veneer cliff). Every line must be EARNED by a
+  measured failure. Draft (~130 static tokens, cache-prefix resident):
+      STANDING DOCTRINE  (tested — lessons your service has already paid for)
+      - A sound standing order beats a new plan. Amend only what events have
+        made wrong; re-planning a working campaign is how campaigns die.
+      - Meet surprises with uncommitted reserves first. A committed task
+        force pulled off its mission costs you two missions.
+      - A transport in waters where an enemy warship may operate sails with
+        a warship in its task force, or it waits.
+      - Capture attempts consume armies, and attempts fail. Assault with
+        spares, never with exactly enough.
+      - A staged force exists to launch. When the condition you named
+        arrives, go — staging past your own trigger is production wasted.
+      - Cities are your only source of force. Match what each builds to the
+        campaign's next phase, not its last one.
+  SEQUENCING: instrument fixes first (contract v5 REINFORCE + repaired canonical
+  histories + cache-native layout = corrected baseline, arcs re-run as regression
+  gate), THEN doctrine as a single measured arm. Metrics: A1 churn, B1 reserve
+  usage, escort adoption. Grade for doctrine-PARROTING too (citing maxims where they
+  don't apply — visible in WHY lines). Long-game note: this section is the
+  fine-tuning target; prompt doctrine today = LoRA-baked doctrine later.
 - **"Previously on FARSHORE" recap experiment** (user, 2026-07-05): we control the
   context, so the model can't learn from prior moves the way an exposed chain would
   allow — test a recap section vs the snapshot-only briefing, MEASURED. Content tiers:
