@@ -67,6 +67,13 @@ The harness shares TYPES with the game, mocks the PRODUCERS; two integration han
   a corpus. Framing: the general as a learned amortization of doctrine-search (executor
   = teacher; AlphaZero spine on a prose layer). Use a LoRA adapter to keep base fluency
   for narration.
+- **Measured performance envelope** (user, 2026-07-05, Qwen3.5-4B Q8): multi-GPU rig
+  (unoptimized, layer-split) 68 t/s gen / ~5000 t/s prefill; DGX Spark GB10 38 t/s /
+  ~3000 t/s at a 100W ceiling — the GB10 is the likely shape of the future audience
+  machine, and at strategic cadence its ~4.5 min/epoch is livable. Prefill on
+  anything with a tensor unit refills our whole prompt in ~1s → the KV-cache layout
+  constraint bites specifically at the CPU floor (prefill in the low hundreds t/s),
+  which remains the design anchor.
 
 ## Deployment architecture (settled): ONE SEAM, TWO MODES
 
