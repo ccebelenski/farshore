@@ -70,10 +70,19 @@ The harness shares TYPES with the game, mocks the PRODUCERS; two integration han
 - **Measured performance envelope** (user, 2026-07-05, Qwen3.5-4B Q8): multi-GPU rig
   (unoptimized, layer-split) 68 t/s gen / ~5000 t/s prefill; DGX Spark GB10 38 t/s /
   ~3000 t/s at a 100W ceiling — the GB10 is the likely shape of the future audience
-  machine, and at strategic cadence its ~4.5 min/epoch is livable. Prefill on
-  anything with a tensor unit refills our whole prompt in ~1s → the KV-cache layout
-  constraint bites specifically at the CPU floor (prefill in the low hundreds t/s),
-  which remains the design anchor.
+  machine, and at strategic cadence its ~4.5 min/epoch is livable. **CPU floor
+  (i9 Ultra 285K, DDR5-6000 dual-channel, naive/no tuning = the player-realistic
+  number): 6.8 t/s gen, 55 t/s prefill.** A 10k-token thinking epoch ≈ 25 min (+64s
+  cold prefill; ~2x better at Q4, still a crawl). User gut check, adopted as the
+  TIER SPLIT: "not unusable for chat functions; as an AI general it would crawl."
+- **TIER SPLIT (working conclusion, 2026-07-05):** the CPU floor gets the NARRATOR
+  (short non-thinking outputs, 15-45s, the narration-first integration step); the
+  COMMAND GENERAL is an accelerated-tier feature, gated at setup by a MEASURED
+  throughput probe (time one short generation on the player's box), not by
+  GPU-detection assumptions. This is "hardware scales quality, not difficulty" with
+  numbers attached; the executor stays everyone's competence floor. Corollary: the
+  cache-native layout is mandatory even for the narrator tier — at 55 t/s prefill,
+  short outputs still pay the full prompt toll without it.
 
 ## Deployment architecture (settled): ONE SEAM, TWO MODES
 
