@@ -106,6 +106,11 @@ verify what model actually answers — accepted, because the design already abso
 - Posture: managed mode = the tested configuration; BYO = modding territory. Warn once
   on an unrecognized model id; don't police. Later, the eval-harness scenario battery
   doubles as a model-qualification check for serious BYO users.
+- **Supported model = exactly ONE, pinned by name+quant** (user, 2026-07-05, after the
+  temp/min_p sensitivity findings: model tuning demonstrably matters). We state the
+  supported model precisely; a player who swaps it owns the consequences. Sampling
+  params ship with the pin (temp 1.0 / top_p 0.95 / top_k 20 / min_p 0 / presence 1.5,
+  thinking on).
 - Never depend on reasoning format: thinking arrives as `reasoning_content`, inline
   `<think>` tags, or not at all depending on backend — parse only the final structured
   section.

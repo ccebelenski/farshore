@@ -1,0 +1,69 @@
+# Stability arcs — campaign judgment over consecutive epochs (user ask):
+# can the general look at a campaign in flight and decide "this still makes
+# sense" vs "course-correct", and does that behavior hold across an arc?
+# Canonical-history convention: every epoch's ledger assumes the textbook
+# response to the prior epoch, so all seeds see identical prompts.
+#
+# ARC A (buildup): A1 wait (expect CONTINUEs; churn count is the metric) ->
+#   A2 transport arrives (expect launch) -> A3 mid-crossing, enemy destroyer
+#   shadowing (expect hold-course + screen; recall/dissolve = fail).
+# ARC B (shock): B1 enemy lands 2 armies next to (4,3) DURING buildup
+#   (expect defense from the 6 idle armies WITHOUT gutting TF-1) ->
+#   B2 aftermath + the awaited transport arrives (finish defense AND handle
+#   the launch trigger).
+# ARC C (beachhead): C1 just landed (expect press) -> C2 first capture
+#   failed + enemy destroyer near empty transports (press again + naval
+#   reaction; abandoning the beachhead = fail).
+#
+# Production profile: retry_on_length 2, min_p 0 explicit.
+
+[battery]
+name = "stability"
+prompt_dir = "lab/prompts/stability"
+transcript_dir = "lab/transcripts/stability"
+seeds = [1, 2, 3]
+retry_on_length = 2
+
+[sampling]
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+min_p = 0.0
+presence_penalty = 1.5
+max_tokens = 12288
+enable_thinking = true
+
+[[conditions]]
+name = "A1"
+primer = "primer_c.txt"
+board = "board_A1.txt"
+
+[[conditions]]
+name = "A2"
+primer = "primer_c.txt"
+board = "board_A2.txt"
+
+[[conditions]]
+name = "A3"
+primer = "primer_c.txt"
+board = "board_A3.txt"
+
+[[conditions]]
+name = "B1"
+primer = "primer_c.txt"
+board = "board_B1.txt"
+
+[[conditions]]
+name = "B2"
+primer = "primer_c.txt"
+board = "board_B2.txt"
+
+[[conditions]]
+name = "C1"
+primer = "primer_c.txt"
+board = "board_C1.txt"
+
+[[conditions]]
+name = "C2"
+primer = "primer_c.txt"
+board = "board_C2.txt"
