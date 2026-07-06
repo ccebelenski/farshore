@@ -29,6 +29,7 @@ from typing import Protocol
 from empire.ai.general.briefing import BriefingRenderer
 from empire.ai.general.client import ChatAnswer
 from empire.ai.general.compiler import DoctrineCompiler, TaskForceView
+from empire.ai.general.ledger import TaskForceLedger
 from empire.ai.general.primer import PRIMER
 from empire.ai.general.registry import TaskForceRegistry
 from empire.ai.general.validator import DoctrineValidator, ValidationContext
@@ -90,6 +91,15 @@ class LlmGeneralController:
         self._last_failure: str | None = None
         self._failure_log: list[str] = []
         self._last_refusals: tuple[Refusal, ...] = ()
+        # Event-sourced briefing history; wired post-construction by the
+        # layer that owns the game's bus (see GameLauncher._wire_general).
+        self._ledger: TaskForceLedger | None = None
+
+    def attach_ledger(self, ledger: TaskForceLedger) -> None:
+        """Give the controller its event ledger. The caller owns the bus and
+        has already attached the ledger to it; the controller only consumes
+        reports at briefing time and books refusals back."""
+        self._ledger = ledger
 
     # ---- observability (for the TUI) -------------------------------------------
 
@@ -259,36 +269,51 @@ class LlmGeneralController:
                 f"{answer.attempts} attempts)"
             )
             return False
-        validation = self._validator.validate(answer.text, self._context(view, task_forces))
+        validation = self._validator.validate(
+            answer.text, self._context(view, task_forces, briefing.markers)
+        )
         if not validation.doctrine.amendments:
             self._last_refusals = validation.refusals
             self._fail(f"t{view.turn}: no amendment accepted ({len(validation.refusals)} refused)")
+            self._book_epoch()
             return False
         registry, apply_refusals = self._registry.apply(validation.doctrine, roster)
         self._registry = registry
         self._last_refusals = validation.refusals + apply_refusals
         self._apply_builds(validation.doctrine)
         self._last_failure = None
+        self._book_epoch()
         return True
 
+    def _book_epoch(self) -> None:
+        """Close the ledger's books for the epoch whose lines the briefing
+        just consumed, then replay this epoch's refusals so they appear in
+        the NEXT briefing's ledger. Only called when a briefing was actually
+        rendered and validated — a client failure keeps the books open."""
+        if self._ledger is None:
+            return
+        self._ledger.reset()
+        self._ledger.note_refusals(self._last_refusals)
+
     def _events(self) -> Mapping[TaskForceId, tuple[str, ...]]:
-        """Per-TF ledger lines for the briefing. Engine event sourcing is a
-        named later step (planning/08); until it lands the ledger is empty
-        and refusals are retained on `last_refusals`."""
-        return {}
+        """Per-TF ledger lines for the briefing, straight from the event
+        ledger when one is attached (unwired: empty, refusals still retained
+        on `last_refusals`)."""
+        if self._ledger is None:
+            return {}
+        return self._ledger.collect().by_task_force
 
     def _context(
-        self, view: WorldView, task_forces: Mapping[TaskForceId, TaskForce]
+        self,
+        view: WorldView,
+        task_forces: Mapping[TaskForceId, TaskForce],
+        markers: Mapping[str, UnitId],
     ) -> ValidationContext:
-        """Registry-side facts for the validator, with markers exactly as the
-        renderer assigns them: a, b, c... in unit-id order, first 26."""
+        """Registry-side facts for the validator. `markers` is the exact
+        assignment the general just read (`Briefing.markers`), never a
+        re-derivation."""
         real = view.real_map()
         roster = frozenset(u.id for u in view.own_units)
-        markers = {
-            chr(ord("a") + i): unit.id
-            for i, unit in enumerate(sorted(view.own_units, key=lambda u: int(u.id)))
-            if i < 26
-        }
         return ValidationContext(
             turn=view.turn,
             board_width=real.width,

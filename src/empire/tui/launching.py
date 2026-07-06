@@ -125,7 +125,7 @@ class GameLauncher:
                 p1_is_ai=False,
                 p2_is_ai=True,
             )
-        game.attach_controller(players[1].id, self.make_opponent(config.opponent))
+        self._seat_opponent(game, players[1], config.opponent)
         return LaunchedGame(game=game, human=players[0], opponent=config.opponent)
 
     def restore(self, path: Path, opponent: str) -> LaunchedGame:
@@ -137,8 +137,37 @@ class GameLauncher:
         )
         for p in game.players:
             if p is not human:
-                game.attach_controller(p.id, self.make_opponent(opponent))
+                self._seat_opponent(game, p, opponent)
         return LaunchedGame(game=game, human=human, opponent=opponent)
+
+    def _seat_opponent(self, game: Game, player: Player, kind: str) -> None:
+        """Attach the opponent controller — and, when the seat is the LLM
+        general, wire its event ledger onto the game's bus (the launcher is
+        the layer that owns both the game and the bus, so the ai layer never
+        constructs one — see empire.ai.general.ledger)."""
+        controller = self.make_opponent(kind)
+        game.attach_controller(player.id, controller)
+        from empire.ai.general.controller import LlmGeneralController
+
+        if not isinstance(controller, LlmGeneralController):
+            return
+        from empire.ai.general.ledger import TaskForceLedger
+
+        board = game.map
+        ledger = TaskForceLedger(
+            player_id=player.id,
+            registry=lambda: controller.registry,
+            own_unit_kind=lambda uid: (
+                u.kind.value
+                if (u := board.unit_by_id(uid)) is not None and u.owner is player
+                else None
+            ),
+            city_coord=lambda cid: (
+                c.coord if (c := board.city_by_id(cid)) is not None else None
+            ),
+        )
+        ledger.attach(game.event_bus)
+        controller.attach_ledger(ledger)
 
     @staticmethod
     def list_saves(directory: Path | None = None) -> list[Path]:

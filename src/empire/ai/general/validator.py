@@ -96,6 +96,9 @@ class ValidationResult:
 # freeform TF labels, '·' for '|', WHY keyword optional, ids with/without '#'.
 _TF_HEAD = r"TF[-\s#]*(?P<tf>[A-Za-z0-9][A-Za-z0-9-]*)\s*(?P<colon>:)?\s*"
 _WHY = r"\s*(?:\|(?P<why>.*))?$"
+# Loose "which TF did this line address" match for otherwise-unparseable
+# lines, so their refusal claims the TF's coverage slot.
+_TF_NAME_RE = re.compile(r"^(?:FORM\s+)?TF[-\s#]*([A-Za-z0-9][A-Za-z0-9-]*)", re.IGNORECASE)
 
 _FLIP_DISBAND_RE = re.compile(
     r"^DISBAND\s+TF[-\s#]*(?P<tf>[A-Za-z0-9][A-Za-z0-9-]*)" + _WHY, re.IGNORECASE
@@ -234,7 +237,16 @@ class _Session:
             self._head_notes(m)
             self._on_retask(index, line, m)
         else:
-            self._refuse(line, ["not an order line"])
+            # A malformed line that still names a standing TF (e.g. a verb
+            # with no target) counts as that TF's attempt: one loud refusal,
+            # not a second "no amendment" coverage refusal on top.
+            named = _TF_NAME_RE.match(line)
+            tf = named[1].upper() if named else None
+            self._refuse(
+                line,
+                ["not an order line"],
+                tf if tf in self._ctx.task_forces else None,
+            )
 
     # --- handlers ---------------------------------------------------------
 
