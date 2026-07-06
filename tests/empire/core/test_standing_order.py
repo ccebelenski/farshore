@@ -913,3 +913,189 @@ def test_heading_wakes_on_second_attempt_when_still_blocked(
     assert mover.coord == Coord(0, 0)
     assert mover.standing_order is None
     assert UnitId(2) in result.interrupted_unit_ids
+
+
+# --- wake on NEWS, not state: contact deltas (playtest 'orders wake too easily')
+
+
+def test_goto_with_seeded_contact_keeps_walking(
+    p1: Player, p2: Player, resolver: CombatResolver
+) -> None:
+    """An enemy the player could already see when issuing the go-to is OLD
+    news: seeded into the order's contacts, it never wakes the unit — the
+    order used to die instantly anywhere near a known enemy."""
+    m = _land_map(8, 3)
+    mover = Army(UnitId(1), p1, Coord(0, 0))
+    enemy = Army(UnitId(2), p2, Coord(2, 2))  # within scan (2) the whole way
+    m.place_unit(mover, Coord(0, 0))
+    m.place_unit(enemy, Coord(2, 2))
+    mover.standing_order = PatrolPath.new(
+        (Coord(1, 0), Coord(2, 0), Coord(3, 0)),
+        contacts=frozenset({UnitId(2)}),
+    )
+
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(1, 0)
+    assert isinstance(mover.standing_order, PatrolPath)  # old news: no wake
+
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(2, 0)
+    assert isinstance(mover.standing_order, PatrolPath)  # still walking
+
+
+def test_goto_wakes_on_new_contact_mid_route(
+    p1: Player, p2: Player, resolver: CombatResolver
+) -> None:
+    """A genuinely NEW contact — an id not carried on the order — still
+    wakes the unit the step it appears."""
+    m = _land_map(10, 3)
+    mover = Army(UnitId(1), p1, Coord(0, 0))
+    known = Army(UnitId(2), p2, Coord(2, 2))
+    m.place_unit(mover, Coord(0, 0))
+    m.place_unit(known, Coord(2, 2))
+    mover.standing_order = PatrolPath.new(
+        (Coord(1, 0), Coord(2, 0), Coord(3, 0), Coord(4, 0)),
+        contacts=frozenset({UnitId(2)}),
+    )
+
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(1, 0)
+    assert isinstance(mover.standing_order, PatrolPath)
+
+    # A second enemy appears; in scan of the NEXT step's cell (2,0).
+    m.place_unit(Army(UnitId(3), p2, Coord(4, 1)), Coord(4, 1))
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(2, 0)  # stepped, then the news woke it
+    assert mover.standing_order is None
+    assert UnitId(1) in result.interrupted_unit_ids
+    assert UnitId(1) in result.moved_unit_ids
+
+
+def test_heading_with_seeded_contact_keeps_walking(
+    p1: Player, p2: Player, resolver: CombatResolver
+) -> None:
+    """Same delta rule for a heading: the carried set rolls forward each
+    step, so a known shadowing enemy never interrupts."""
+    m = _land_map(8, 3)
+    mover = Army(UnitId(1), p1, Coord(0, 0))
+    enemy = Army(UnitId(2), p2, Coord(2, 2))
+    m.place_unit(mover, Coord(0, 0))
+    m.place_unit(enemy, Coord(2, 2))
+    mover.standing_order = Heading(
+        direction=Direction.E, contacts=frozenset({UnitId(2)})
+    )
+
+    for expected_x in (1, 2):
+        apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+        assert mover.coord == Coord(expected_x, 0)
+        assert isinstance(mover.standing_order, Heading)
+
+
+def test_explore_ignores_seeded_contact_wakes_on_new_one(
+    p1: Player, p2: Player, resolver: CombatResolver
+) -> None:
+    """Explore near a KNOWN enemy keeps exploring; a new contact wakes it."""
+    from empire.core.standing_order import Explore
+
+    m = _land_map(6, 2)
+    scout = Army(UnitId(1), p1, Coord(0, 0))
+    known = Army(UnitId(2), p2, Coord(1, 1))  # in scan from the start
+    m.place_unit(scout, Coord(0, 0))
+    m.place_unit(known, Coord(1, 1))
+    scout.standing_order = Explore(contacts=frozenset({UnitId(2)}))
+    _see(p1, [Coord(x, y) for x in range(3) for y in range(2)])  # col 3+ unseen
+
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert scout.coord == Coord(1, 0)  # kept exploring despite the known enemy
+    assert isinstance(scout.standing_order, Explore)
+
+    # A NEW enemy appears within scan of the next step's cell.
+    m.place_unit(Army(UnitId(3), p2, Coord(3, 1)), Coord(3, 1))
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert scout.standing_order is None  # news: woke
+    assert UnitId(1) in result.interrupted_unit_ids
+
+
+def test_sentry_still_wakes_on_any_enemy_in_scan(p1: Player, p2: Player) -> None:
+    """The news rule is for MOVING orders only: a sentried unit's surprise is
+    ANY enemy in scan (spec: surprises auto-WAKE), exactly as before."""
+    m = _land_map(10, 1)
+    own = Army(UnitId(1), p1, Coord(0, 0))
+    enemy = Army(UnitId(2), p2, Coord(2, 0))
+    m.place_unit(own, Coord(0, 0))
+    m.place_unit(enemy, Coord(2, 0))
+    own.standing_order = Sentry()
+
+    assert wake_sentried_units(p1, m) == (UnitId(1),)
+    assert own.standing_order is None
+
+
+# --- terrain news re-paths a go-to instead of waking it ------------------------
+
+
+def test_goto_repaths_around_revealed_terrain_and_arrives(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """A one-shot go-to whose next cell turns out to be water (a route built
+    over fog that lifted) re-paths to the same destination over known terrain
+    and completes, instead of waking on the spot."""
+    m = _mixed_map(["LLWLL", "LLLLL"])
+    _see(p1, [Coord(x, y) for x in range(5) for y in range(2)])
+    mover = Army(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(mover, Coord(0, 0))
+    # A blind straight-line route through the water at (2,0).
+    mover.standing_order = PatrolPath.new(
+        (Coord(1, 0), Coord(2, 0), Coord(3, 0), Coord(4, 0))
+    )
+
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(1, 0)  # legal first leg
+
+    # Next step (2,0) is water: re-path around via row 1, no wake.
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(2, 1)  # detoured
+    assert isinstance(mover.standing_order, PatrolPath)
+
+    for _ in range(2):
+        apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(4, 0)  # arrived at the ORIGINAL destination
+    assert mover.standing_order is None  # exhausted normally
+
+
+def test_goto_wakes_when_destination_unreachable(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """No route at all to the go-to's destination (revealed water wall):
+    the re-path finds nothing and the unit wakes."""
+    m = _mixed_map(["LLWLL"])
+    _see(p1, [Coord(x, 0) for x in range(5)])
+    mover = Army(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(mover, Coord(0, 0))
+    mover.standing_order = PatrolPath.new(
+        (Coord(1, 0), Coord(2, 0), Coord(3, 0), Coord(4, 0))
+    )
+
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(1, 0)
+
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(1, 0)  # nowhere to go
+    assert mover.standing_order is None  # woke: destination unreachable
+    assert UnitId(1) in result.interrupted_unit_ids
+
+
+def test_heading_still_wakes_on_revealed_terrain(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """Fixed geometry keeps today's behavior: a heading into water wakes —
+    only a go-to (a destination, not a direction) re-plans."""
+    m = _mixed_map(["LLW"])
+    _see(p1, [Coord(x, 0) for x in range(3)])
+    mover = Army(UnitId(1), p1, Coord(1, 0))
+    m.place_unit(mover, Coord(1, 0))
+    mover.standing_order = Heading(direction=Direction.E)
+
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(1, 0)
+    assert mover.standing_order is None
+    assert UnitId(1) in result.interrupted_unit_ids

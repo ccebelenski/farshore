@@ -28,6 +28,7 @@ from empire.core.standing_order import (
     PatrolPath,
     ReturnToBase,
     Sentry,
+    with_contacts,
 )
 from empire.core.tile import TerrainKind
 from empire.core.unit import UNIT_REGISTRY, Unit, UnitKind
@@ -211,13 +212,13 @@ def run_production_tick(
             if player.is_ai:
                 new_unit.orbit_direction = Direction.E
         real_map.place_unit(new_unit, city.coord)
-        apply_default_order(new_unit, city)
+        apply_default_order(new_unit, city, real_map)
         city.production.consume()
         produced.append(new_unit)
     return produced
 
 
-def apply_default_order(unit: Unit, city: City) -> None:
+def apply_default_order(unit: Unit, city: City, real_map: Map) -> None:
     """Translate a city's *explicit* default order for `unit`'s kind into a
     standing order.
 
@@ -226,11 +227,15 @@ def apply_default_order(unit: Unit, city: City) -> None:
       awaits orders (it enters the player's order cycle / the AI commands it).
       Crucially this is NOT auto-SENTRY — produced units must be offered.
     - `SENTRY` → the unit holds in the city.
-    - `MOVE_TO(target)` → a `PatrolPath` along a greedy 8-directional line
-      toward the target. Core can't depend on the pathfinding layer, so this
-      is a straight march that interrupts on obstacles (coast/enemy/block)
-      rather than a BFS route — adequate for a default; the player's `g`
-      go-to offers true routing. The unit stops on arrival.
+    - `MOVE_TO(target)` → a `PatrolPath` to the target, flood-routed over
+      the owner's KNOWN passable terrain for the unit's kind (the same
+      local BFS the engine's re-pathing uses — core still can't depend on
+      the pathfinding layer), so rallies route around coasts instead of
+      marching a `_greedy_line` straight into them. When no known route
+      exists (target beyond the fog), fall back to the greedy straight
+      line: the unit marches blind and the standing-order step's own
+      re-pathing corrects the route as terrain gets revealed. The unit
+      stops on arrival. Deterministic either way.
     - `ATTACK_NEAREST_ENEMY` → recorded on the city but left for the
       controller/AI layers to act on; no standing order is set here.
     """
@@ -240,9 +245,13 @@ def apply_default_order(unit: Unit, city: City) -> None:
     if order.kind is OrderKind.SENTRY:
         unit.standing_order = Sentry()
     elif order.kind is OrderKind.MOVE_TO and order.target is not None:
-        cells = _greedy_line(city.coord, order.target)
+        cells = _flood_path_to(unit, unit.owner, real_map, order.target)
+        if not cells:
+            cells = _greedy_line(city.coord, order.target)
         if cells:
-            unit.standing_order = PatrolPath.new(cells)
+            unit.standing_order = PatrolPath.new(
+                cells, contacts=enemy_ids_in_scan(unit, real_map)
+            )
 
 
 def _greedy_line(start: Coord, target: Coord) -> tuple[Coord, ...]:
@@ -1087,8 +1096,9 @@ class StandingOrderResult:
 def enemy_in_scan_range(unit: Unit, real_map: Map) -> bool:
     """True if any enemy unit sits within `unit`'s Chebyshev scan disc.
 
-    Used as the wake trigger for sentried units and as an interruption
-    trigger for autonomous Heading/PatrolPath moves.
+    The wake trigger for parked units (Sentry/Loading): ANY contact is a
+    surprise to a unit holding position. Moving orders use the news-only
+    `enemy_ids_in_scan` delta instead.
     """
     radius = type(unit).scan_range
     for other in real_map.board_units():
@@ -1097,6 +1107,23 @@ def enemy_in_scan_range(unit: Unit, real_map: Map) -> bool:
         if unit.coord.chebyshev_to(other.coord) <= radius:
             return True
     return False
+
+
+def enemy_ids_in_scan(unit: Unit, real_map: Map) -> frozenset[UnitId]:
+    """The ids of every enemy unit within `unit`'s Chebyshev scan disc.
+
+    The currency of the wake-on-news rule for movement orders (heading /
+    go-to / patrol / explore): the order carries the set from when it was
+    issued or last stepped, and only an id NOT in that set — a genuinely
+    new contact — wakes the unit. Public: the TUI seeds each order's
+    initial set with this at issue time."""
+    radius = type(unit).scan_range
+    return frozenset(
+        other.id
+        for other in real_map.board_units()
+        if other.owner is not unit.owner
+        and unit.coord.chebyshev_to(other.coord) <= radius
+    )
 
 
 
@@ -1370,6 +1397,35 @@ def _explore_flood(
     return dist, parent
 
 
+def _flood_path_to(
+    unit: Unit,
+    player: Player,
+    real_map: Map,
+    dest: Coord,
+    *,
+    avoid_occupied: bool = False,
+) -> tuple[Coord, ...] | None:
+    """Shortest known-terrain route from `unit` to `dest` — the cells AFTER
+    the start — via `_explore_flood`, or None when no route is known.
+
+    The one re-pathing primitive for standing orders, shared by the
+    friendly-jam retry, the terrain-news re-path (fog lifted onto water),
+    and MOVE_TO rally defaults. Deterministic (BFS in Direction-enum
+    order); fog-honest (plans only over terrain `player` knows)."""
+    dist, parent = _explore_flood(
+        unit, player, real_map, avoid_occupied=avoid_occupied
+    )
+    if dest not in dist:
+        return None
+    cells: list[Coord] = []
+    cur = dest
+    while cur != unit.coord:
+        cells.append(cur)
+        cur = parent[cur]
+    cells.reverse()
+    return tuple(cells)
+
+
 def _pick_explore_target(
     unit: Unit,
     player: Player,
@@ -1456,6 +1512,11 @@ def _run_explore(
     if budget is None:
         budget = unit.moves_this_turn()
     stepped = False
+    # Wake-on-news: the enemy ids already in scan when the order was issued
+    # or last stepped. Only a NEW id wakes the explorer — a known enemy
+    # nearby doesn't cancel the mission the player just gave.
+    order = unit.standing_order
+    carried = order.contacts if isinstance(order, Explore) else frozenset()
 
     def wake() -> tuple[bool, bool]:
         unit.standing_order = None
@@ -1537,12 +1598,15 @@ def _run_explore(
                 return wake()  # blocked (stale intel): stop
             stepped = True
             budget -= 1
-            # Post-step wake triggers: contact or discovery is exactly the
-            # news the explorer was sent out for.
-            if enemy_in_scan_range(unit, real_map) or unseen_city_in_scan(
-                unit, real_map
-            ):
+            # Post-step wake triggers: a NEW contact or a discovery is
+            # exactly the news the explorer was sent out for; carry the
+            # current in-scan set forward otherwise.
+            contacts = enemy_ids_in_scan(unit, real_map)
+            if (contacts - carried) or unseen_city_in_scan(unit, real_map):
                 return wake()
+            if contacts != carried:
+                carried = contacts
+                unit.standing_order = Explore(contacts=carried)
             if (
                 unit.kind is UnitKind.FIGHTER
                 and unit.range
@@ -1573,11 +1637,15 @@ def apply_standing_orders(
     - `Sentry()`: nothing this step. Wake check happens separately (see
       `wake_sentried_units`).
     - `Heading(d)`: step one cell in `d`. Cleared on interruption
-      (out-of-bounds, illegal terrain, friendly-occupied target, or enemy
-      visible in scan range *after* the step). Otherwise the heading
-      persists.
+      (out-of-bounds, illegal terrain, friendly-occupied target after the
+      retry pass, or a NEW enemy contact in scan *after* the step — an id
+      not already in the order's carried `contacts` set). Otherwise the
+      heading persists, carrying the current in-scan set forward.
     - `PatrolPath`: step into the next cell of the path; replace the
-      order with `after_step()`. Same interruption rules.
+      order with `after_step()`. Same interruption rules — except that a
+      one-shot go-to whose next cell is impassable (terrain news) or
+      still friendly-jammed re-paths to its destination and wakes only
+      when no route remains.
 
     Returns the IDs of units that moved successfully, units whose orders
     were interrupted, and units that were sentried this turn.
@@ -1592,11 +1660,16 @@ def apply_standing_orders(
     # retry after everyone else has moved (see the second pass below).
     deferred: list[Unit] = []
 
-    def _step_move_order(unit: Unit, retry: bool = False) -> None:
+    def _step_move_order(
+        unit: Unit, retry: bool = False, repathed: bool = False
+    ) -> None:
         """One step of a Heading/PatrolPath order, with the standard guards.
         On a friendly-blocked cell: first pass defers (the blocker may move);
         the retry pass re-paths a go-to around the jam, and wakes only when
-        no route remains."""
+        no route remains. A one-shot go-to whose next cell turns out to be
+        impassable (terrain news: fog lifted onto water/an obstacle) also
+        re-paths rather than waking; `repathed` bounds that to one fresh
+        route per turn."""
         order = unit.standing_order
         if isinstance(order, Heading):
             target = unit.coord.step(order.direction)
@@ -1613,6 +1686,20 @@ def apply_standing_orders(
             return  # order changed/cleared between passes
 
         if not is_legal_step(unit, target, real_map, rules):
+            # Terrain news invalidated the route (the path was planned over
+            # fog that lifted onto water/an obstacle). A one-shot go-to's
+            # GOAL still stands: re-path to the same destination over what
+            # is now known and keep walking; wake only when no route
+            # remains. A heading or a loop patrol has fixed geometry —
+            # those wake as before.
+            if isinstance(order, PatrolPath) and not order.loop and not repathed:
+                cells = _flood_path_to(unit, player, real_map, order.remaining[-1])
+                if cells:
+                    unit.standing_order = PatrolPath.new(
+                        cells, contacts=order.contacts
+                    )
+                    _step_move_order(unit, retry=retry, repathed=True)
+                    return
             unit.standing_order = None
             interrupted.append(unit.id)
             return
@@ -1649,19 +1736,16 @@ def apply_standing_orders(
             # fresh route around the jam; a heading or a loop patrol has no
             # alternative geometry — wake on the second attempt.
             if isinstance(order, PatrolPath) and not order.loop:
-                dest = order.remaining[-1]
-                dist, parent = _explore_flood(
-                    unit, player, real_map, avoid_occupied=True
+                cells = _flood_path_to(
+                    unit, player, real_map, order.remaining[-1],
+                    avoid_occupied=True,
                 )
-                if dest in dist:
-                    cells: list[Coord] = []
-                    cur = dest
-                    while cur != unit.coord:
-                        cells.append(cur)
-                        cur = parent[cur]
-                    cells.reverse()
-                    unit.standing_order = PatrolPath.new(tuple(cells))
-                    _step_move_order(unit, retry=True)  # re-path is unblocked
+                if cells:
+                    unit.standing_order = PatrolPath.new(
+                        cells, contacts=order.contacts
+                    )
+                    # Re-path is unblocked by construction.
+                    _step_move_order(unit, retry=True, repathed=repathed)
                     return
             unit.standing_order = None
             interrupted.append(unit.id)
@@ -1685,19 +1769,26 @@ def apply_standing_orders(
             return
 
         # Step succeeded. Post-step wake triggers — autonomous movement stops
-        # on news the player must react to: an enemy in scan, or discovering
-        # a city. (Entering a hostile artillery ring is handled BEFORE the
-        # step — the order halts at the edge — so there's no post-step wake.)
-        if (
-            enemy_in_scan_range(unit, real_map)
-            or unseen_city_in_scan(unit, real_map)
-        ):
+        # on NEWS the player must react to: a NEW enemy contact (an id not
+        # in the set the order has carried since issue/last step — a known
+        # enemy the player could already see never cancels their order), or
+        # discovering a city. (Entering a hostile artillery ring is handled
+        # BEFORE the step — the order halts at the edge — so there's no
+        # post-step wake.)
+        contacts = enemy_ids_in_scan(unit, real_map)
+        if (contacts - order.contacts) or unseen_city_in_scan(unit, real_map):
             unit.standing_order = None
             interrupted.append(unit.id)
             moved.append(unit.id)
             return
 
-        unit.standing_order = next_order_on_success
+        # Persist the order with the CURRENT in-scan set: an enemy still in
+        # scan next step is old news; one that left and returns is news again.
+        unit.standing_order = (
+            with_contacts(next_order_on_success, contacts)
+            if next_order_on_success is not None
+            else None
+        )
         if unit.standing_order is None:
             # PatrolPath naturally exhausted (one-shot finished).
             interrupted.append(unit.id)

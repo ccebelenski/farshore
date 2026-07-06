@@ -142,7 +142,10 @@ Rules common to all standing orders:
 
 - Standing orders **never auto-attack**: an ordered unit wakes one step short of an enemy rather than blundering into combat.
 - Autonomous movement halts at the **edge** of a discovered hostile artillery ring (§4.7); stepping into one is always a deliberate move.
-- A surprise — an enemy appearing in scan, or discovering a city — **wakes** a unit. A surprise never puts a unit to sleep.
+- A surprise **wakes** a unit; a surprise never puts a unit to sleep. What counts as a surprise depends on the order:
+  - **Sentry / Loading** (holding position): *any* enemy inside scan range wakes the unit.
+  - **Heading / go-to / patrol / explore** (moving): only **news** wakes the unit — a **new** enemy contact (one that was *not* already inside scan range when the order was issued or after its previous step), or discovering a city the player has never seen. An enemy the player could already see when giving the order never cancels it; a contact that leaves scan and later returns is news again.
+- A **go-to** whose planned route turns out to be blocked — newly-revealed terrain (fog lifting onto water or an obstacle) or a parked friendly unit — **re-plans** a route to the same destination over known terrain and keeps going; it wakes only when no route remains. Headings and looping patrols have fixed geometry and wake instead. A city's MOVE_TO rally default uses the same known-terrain routing, so fresh production marches around coasts rather than into them.
 - Fighters on autonomous orders wake at bingo fuel (just enough to get home).
 
 ---
