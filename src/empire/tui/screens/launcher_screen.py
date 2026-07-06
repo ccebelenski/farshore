@@ -71,6 +71,7 @@ class _Row:
 _MAIN_ROWS: tuple[_Row, ...] = (
     _Row("new", "NEW GAME"),
     _Row("load", "LOAD GAME"),
+    _Row("settings", "SETTINGS"),
     _Row("quit", "QUIT"),
 )
 
@@ -308,6 +309,10 @@ class LauncherScreen(Screen[None]):
             self._go(_Page.SETUP)
         elif row.key == "load":
             self._go(_Page.LOAD)
+        elif row.key == "settings":
+            from empire.tui.screens.settings_screen import SettingsScreen
+
+            self.app.push_screen(SettingsScreen())
         elif row.key == "quit":
             self.app.exit()
         elif row.key == "back":

@@ -13,6 +13,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Chris Cebelenski" }]
 dependencies = [
     "textual>=0.80",
+    "pyyaml>=6",
 ]
 
 [dependency-groups]
