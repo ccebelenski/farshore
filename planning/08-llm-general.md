@@ -881,6 +881,35 @@ units, zero gratuitous BUILD lines (the optional-BUILD default behaving). The
 contract's degenerate case passes completely: the model can issue almost nothing
 when almost nothing is right.
 
+## RESULTS: trigger-v6 (7/9 delivered, 12 retries)
+
+**Trigger prediction: PARTIAL.** The v6 pair was used exactly as designed once —
+B2-s3: `REINFORCE UNITS #16 #11 #12` + `RETASK CAPTURE (11,1)`, legal, feasible,
+launched. Mechanism proven. But reliability didn't follow: one half-conversion each
+way (dock-no-flip, flip-no-dock), and A2 stayed a churn attractor (2/3 undelivered;
+that board has now eaten 7 of 9 attempts across batteries — candidates: retire/split
+it, and it heads the multi-call evidence file).
+
+**The user's complexity worry: VINDICATED IN DIRECTION.** B2-s2 merged the pair into
+ONE line on its own (`REINFORCE UNITS #16 | RETASK STAGE (7,2)`) — the RETASK rode
+in the WHY slot, invisible to the parser: silent drift, worse than a loud error. The
+model *wants* single-line composition — which is exactly the user's proposed simpler
+form. **Contract v7 (adopt): drop the two-line exception; RETASK gains an optional
+add — `TF 1: RETASK CAPTURE (11,1) ADDING #16 #11` — one line, one rule.**
+
+**Maxim-2 aim refinement: WEAK.** 1/3 aimed at the right city — but by diverting the
+staged strike force, not by using reserves (right city, wrong force); the others
+repeated garrison-feeding and a tile-CAPTURE diversion. **Spatial threat salience is
+now confirmed robust across three contract/doctrine generations — parked as the
+standing model-side deficit.** Next lever class if pursued: not wording — scenario
+variation (threat adjacency, garrison emptiness) to map when salience does/doesn't
+fire; or accept and let the executor's own threat response backstop it (the
+competence floor exists precisely for this).
+
+**Lab phase closes here** (per the post-v6 recommendation): contract v7 freezes as
+the schema draft; next work = build-order steps 1-2 (shared TYPES + FakeGeneral
+seam), lab retained for regression.
+
 **Order compiler (lab/compile_orders.py, user ask):** the second half of the compile
 step, prototyped — takes parsed orders + the SAME board text the model read (terrain
 from the ASCII grid, landmasses by flood fill, roster parsed from the prompt) and
