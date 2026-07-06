@@ -101,8 +101,10 @@ class Staging:
 class LiftScenario:
     """The canonical LIFT trigger board as a real `Game` (board_A2's shape).
 
-    14x6: home continent x0-5 with three owned cities, a sea gap x6-9, a
-    partially-explored enemy continent x10-13 with two known enemy cities.
+    14x6: home continent x1-5 with three owned cities (column x0 is the
+    western coastal water that makes the port a real harbor), a sea gap
+    x6-9, a partially-explored enemy continent x10-13 with two known enemy
+    cities.
     TF-1 (six armies) STAGEs at the coast awaiting lift; TF-2 (two armies)
     DEFENDs the capital; TF-3 (transport + destroyer) PATROLs the gap. The
     awaited second transport (#16) was just delivered and sits UNASSIGNED.
@@ -134,7 +136,10 @@ class LiftScenario:
         for x in range(width):
             for y in range(height):
                 c = Coord(x, y)
-                home_land = x <= 5 and y <= 4
+                # x0 stays water: the port city (1,2) fronts a real western
+                # shore (it builds transports; a landlocked "port" would leave
+                # the compiled invasion no water to float its lift on).
+                home_land = 1 <= x <= 5 and y <= 4
                 enemy_land = x >= 10 and y <= 4
                 terrain = TerrainKind.LAND if home_land or enemy_land else TerrainKind.WATER
                 tiles[c] = Tile(coord=c, terrain=terrain)
@@ -391,13 +396,13 @@ class EpochPipeline:
     def run(
         self, staging: Staging, source: CannedGeneral | LiveGeneral
     ) -> EpochReport:
-        task_forces = {tf.tf_id: tf for tf in staging.registry.forces}
+        task_forces = staging.registry.as_mapping()
         briefing = BriefingRenderer().render(
             staging.view, task_forces, staging.events, staging.turn
         )
         answer = source.answer(self._primer + "\n" + briefing.text)
         validation = DoctrineValidator().validate(
-            answer.text, self._context(staging, task_forces)
+            answer.text, self._context(staging, task_forces, briefing)
         )
         roster = frozenset(u.id for u in staging.view.own_units)
         registry, refusals = staging.registry.apply(validation.doctrine, roster)
@@ -413,25 +418,23 @@ class EpochPipeline:
 
     @staticmethod
     def _context(
-        staging: Staging, task_forces: Mapping[TaskForceId, TaskForce]
+        staging: Staging,
+        task_forces: Mapping[TaskForceId, TaskForce],
+        briefing: Briefing,
     ) -> ValidationContext:
         view = staging.view
         real = view.real_map()
         members = {tf_id: tf.members for tf_id, tf in task_forces.items()}
         roster = frozenset(u.id for u in view.own_units)
-        # Markers exactly as the renderer assigns them: a, b, c... in id order.
-        markers = {
-            chr(ord("a") + i): unit.id
-            for i, unit in enumerate(sorted(view.own_units, key=lambda u: int(u.id)))
-            if i < 26
-        }
         return ValidationContext(
             turn=staging.turn,
             board_width=real.width,
             board_height=real.height,
             task_forces=members,
             unassigned=staging.registry.unassigned(roster),
-            markers=markers,
+            # Markers exactly as the renderer assigned them — the briefing
+            # carries its own map key.
+            markers=briefing.markers,
             owned_cities=frozenset(c.coord for c in view.own_cities),
         )
 

@@ -10,7 +10,8 @@ execute the VERB, not the reason (see planning/08-llm-general.md).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import Enum
 
 from empire.core.coord import Coord
@@ -161,7 +162,13 @@ class Refusal:
 @dataclass(frozen=True, slots=True)
 class Briefing:
     """The rendered strategic picture handed to the general: full prompt
-    text (cache-native section order) plus the turn it describes."""
+    text (cache-native section order) plus the turn it describes.
+
+    `markers` is the renderer's own map-marker assignment (letter -> unit id,
+    UNITS-table order) so `ValidationContext` builders consume the exact
+    mapping the general read instead of re-deriving the assignment rule.
+    Overflow units (past the marker alphabet) carry no entry."""
 
     turn: int
     text: str
+    markers: Mapping[str, UnitId] = field(default_factory=dict)
