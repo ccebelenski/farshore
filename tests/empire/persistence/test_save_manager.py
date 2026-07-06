@@ -337,11 +337,14 @@ def test_round_trip_preserves_standing_orders(tmp_path: Path) -> None:
     units = list(game.map.all_units())
     army = next(u for u in units if isinstance(u, Army))
     battleship = next(u for u in units if isinstance(u, Battleship))
-    army.standing_order = Heading(direction=Direction.NE)
+    army.standing_order = Heading(
+        direction=Direction.NE, contacts=frozenset({UnitId(55)})
+    )
     battleship.standing_order = PatrolPath(
         remaining=(Coord(2, 0), Coord(2, 1)),
         original=(Coord(2, 0), Coord(2, 1)),
         loop=True,
+        contacts=frozenset({UnitId(7), UnitId(8)}),
     )
     # Force a third unit onto Sentry to cover that variant. Build one on
     # the fly via SaveManager round-trip — easier to just decorate.
@@ -350,7 +353,7 @@ def test_round_trip_preserves_standing_orders(tmp_path: Path) -> None:
     army2.standing_order = Sentry()
     army3 = Army(UnitId(98), army.owner, Coord(0, 1))
     game.map.place_unit(army3, Coord(0, 1))
-    army3.standing_order = Explore()
+    army3.standing_order = Explore(contacts=frozenset({UnitId(55)}))
     army4 = Army(UnitId(97), army.owner, Coord(1, 1))
     game.map.place_unit(army4, Coord(1, 1))
     army4.standing_order = ReturnToBase()
@@ -363,13 +366,65 @@ def test_round_trip_preserves_standing_orders(tmp_path: Path) -> None:
     army_order = loaded_units[int(army.id)].standing_order
     assert isinstance(army_order, Heading)
     assert army_order.direction is Direction.NE
+    assert army_order.contacts == frozenset({UnitId(55)})
     bs_order = loaded_units[int(battleship.id)].standing_order
     assert isinstance(bs_order, PatrolPath)
     assert bs_order.remaining == (Coord(2, 0), Coord(2, 1))
     assert bs_order.loop is True
+    assert bs_order.contacts == frozenset({UnitId(7), UnitId(8)})
     assert isinstance(loaded_units[99].standing_order, Sentry)
-    assert isinstance(loaded_units[98].standing_order, Explore)
+    explore_order = loaded_units[98].standing_order
+    assert isinstance(explore_order, Explore)
+    assert explore_order.contacts == frozenset({UnitId(55)})
     assert isinstance(loaded_units[97].standing_order, ReturnToBase)
+
+
+def test_load_without_contacts_field_defaults_to_empty() -> None:
+    """A save from before the wake-on-news rule has no `contacts` on its
+    standing orders: it loads tolerantly (no schema bump) with an empty set —
+    i.e. any enemy in scan is news, the pre-rule behavior."""
+    from empire.core.coord import Direction
+    from empire.core.standing_order import Explore, Heading, PatrolPath
+
+    game = _build_tiny_game()
+    units = list(game.map.all_units())
+    army = next(u for u in units if isinstance(u, Army))
+    battleship = next(u for u in units if isinstance(u, Battleship))
+    army.standing_order = Heading(
+        direction=Direction.NE, contacts=frozenset({UnitId(55)})
+    )
+    battleship.standing_order = PatrolPath.new(
+        (Coord(2, 0), Coord(2, 1)), contacts=frozenset({UnitId(7)})
+    )
+    army2 = Army(UnitId(98), army.owner, Coord(0, 1))
+    game.map.place_unit(army2, Coord(0, 1))
+    army2.standing_order = Explore(contacts=frozenset({UnitId(55)}))
+
+    payload = Serializer().to_dict(game)
+
+    def _strip_contacts(obj: object) -> None:  # simulate the legacy payload
+        if isinstance(obj, dict):
+            if obj.get("kind") in {"heading", "patrol", "explore"}:
+                obj.pop("contacts", None)
+            for v in obj.values():
+                _strip_contacts(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                _strip_contacts(v)
+
+    _strip_contacts(payload)
+    loaded = Serializer().from_dict(payload)
+
+    loaded_units = {int(u.id): u for u in loaded.map.all_units()}
+    heading = loaded_units[int(army.id)].standing_order
+    assert isinstance(heading, Heading)
+    assert heading.contacts == frozenset()
+    patrol = loaded_units[int(battleship.id)].standing_order
+    assert isinstance(patrol, PatrolPath)
+    assert patrol.contacts == frozenset()
+    explore = loaded_units[98].standing_order
+    assert isinstance(explore, Explore)
+    assert explore.contacts == frozenset()
 
 
 def test_round_trip_preserves_move_to_default_order(tmp_path: Path) -> None:

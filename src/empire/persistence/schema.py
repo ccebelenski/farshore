@@ -361,18 +361,26 @@ class Serializer:
         if order is None:
             return None
         if isinstance(order, Heading):
-            return {"kind": "heading", "direction": order.direction.name}
+            return {
+                "kind": "heading",
+                "direction": order.direction.name,
+                "contacts": sorted(int(u) for u in order.contacts),
+            }
         if isinstance(order, PatrolPath):
             return {
                 "kind": "patrol",
                 "remaining": [[c.x, c.y] for c in order.remaining],
                 "original": [[c.x, c.y] for c in order.original],
                 "loop": order.loop,
+                "contacts": sorted(int(u) for u in order.contacts),
             }
         if isinstance(order, Loading):
             return {"kind": "loading"}
         if isinstance(order, Explore):
-            return {"kind": "explore"}
+            return {
+                "kind": "explore",
+                "contacts": sorted(int(u) for u in order.contacts),
+            }
         if isinstance(order, ReturnToBase):
             return {"kind": "rtb"}
         # Sentry — the only remaining variant.
@@ -384,19 +392,25 @@ class Serializer:
         if d is None:
             return None
         kind = d["kind"]
+        # Tolerant read: saves from before the wake-on-news rule carry no
+        # "contacts" — default to empty (= any enemy in scan is news).
+        contacts = frozenset(UnitId(int(i)) for i in d.get("contacts", ()))
         if kind == "heading":
-            return Heading(direction=Direction[str(d["direction"])])
+            return Heading(
+                direction=Direction[str(d["direction"])], contacts=contacts
+            )
         if kind == "patrol":
             return PatrolPath(
                 remaining=tuple(Coord(int(c[0]), int(c[1])) for c in d["remaining"]),
                 original=tuple(Coord(int(c[0]), int(c[1])) for c in d["original"]),
                 # "reverse_on_end" is the legacy name for the loop flag.
                 loop=bool(d.get("loop", d.get("reverse_on_end", False))),
+                contacts=contacts,
             )
         if kind == "loading":
             return Loading()
         if kind == "explore":
-            return Explore()
+            return Explore(contacts=contacts)
         if kind == "rtb":
             return ReturnToBase()
         if kind == "sentry":

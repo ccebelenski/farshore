@@ -21,20 +21,35 @@ Three variants — all frozen value types:
 The variants are a union via `StandingOrder = Heading | PatrolPath |
 Sentry`. We use isinstance dispatch in the engine rather than a tagged
 enum so each variant carries its own payload type cleanly.
+
+Movement orders (`Heading`, `PatrolPath`, `Explore`) wake on NEWS, not on
+state: each carries `contacts`, the ids of enemy units already inside the
+unit's scan disc when the order was issued or last stepped. After every
+step the engine wakes the unit only when a NEW id appears in scan (a
+genuinely fresh contact) and otherwise carries the current in-scan set
+forward on the replaced order — so a known enemy the player could already
+see never cancels the order they just gave. Sentry/Loading keep the
+stricter any-enemy-in-scan wake: a parked unit's surprise is any contact.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import TypeVar
 
 from empire.core.coord import Coord, Direction
+from empire.core.identity import UnitId
 
 
 @dataclass(frozen=True, slots=True)
 class Heading:
-    """Walk one cell per turn in `direction` until interrupted."""
+    """Walk one cell per turn in `direction` until interrupted.
+
+    `contacts` — enemy ids in scan at issue/last step; see the module
+    docstring's wake-on-news rule."""
 
     direction: Direction
+    contacts: frozenset[UnitId] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,11 +65,15 @@ class PatrolPath:
     is adjacent to its first (the TUI builds A->B->A as one cycle) — the
     re-armed pass then starts with a legal step, never a step into the
     unit's own cell.
+
+    `contacts` — enemy ids in scan at issue/last step; see the module
+    docstring's wake-on-news rule.
     """
 
     remaining: tuple[Coord, ...]
     original: tuple[Coord, ...]
     loop: bool = False
+    contacts: frozenset[UnitId] = frozenset()
 
     @classmethod
     def new(
@@ -62,9 +81,10 @@ class PatrolPath:
         cells: tuple[Coord, ...],
         *,
         loop: bool = False,
+        contacts: frozenset[UnitId] = frozenset(),
     ) -> PatrolPath:
         """Construct a fresh patrol from a single path."""
-        return cls(remaining=cells, original=cells, loop=loop)
+        return cls(remaining=cells, original=cells, loop=loop, contacts=contacts)
 
     def next_cell(self) -> Coord | None:
         """The cell the unit would walk into next, or None if exhausted."""
@@ -75,31 +95,31 @@ class PatrolPath:
 
         Returns None when the order should clear (one-shot path exhausted).
         For `loop`, re-arms the same cycle once the current pass empties.
+        `contacts` carries over unchanged — the engine refreshes it in the
+        same post-step pass that checks for new contacts.
         """
         tail = self.remaining[1:]
         if tail:
-            return PatrolPath(
-                remaining=tail, original=self.original, loop=self.loop
-            )
+            return replace(self, remaining=tail)
         if not self.loop:
             return None
-        return PatrolPath(
-            remaining=self.original, original=self.original, loop=True
-        )
+        return replace(self, remaining=self.original)
 
 
 @dataclass(frozen=True, slots=True)
 class Explore:
     """Autonomously reveal unexplored tiles until woken.
 
-    Carries no payload: the behavior is recomputed each turn (the frontier
-    recedes as tiles get revealed), fog-honestly over KNOWN terrain. Each
-    turn the unit heads for the nearest reachable frontier cell — a known,
-    passable cell adjacent to unexplored — with shore frontier taking
-    priority. Wakes on enemy-in-scan, city discovery, an artillery ring,
-    manually ('w'), or when no reachable frontier remains. Explorers
-    coordinate minimally: each claims its target for the turn so two never
-    chase the same cell."""
+    The route is recomputed each turn (the frontier recedes as tiles get
+    revealed), fog-honestly over KNOWN terrain. Each turn the unit heads
+    for the nearest reachable frontier cell — a known, passable cell
+    adjacent to unexplored — with shore frontier taking priority. Wakes on
+    a NEW enemy contact (see `contacts` and the module docstring), city
+    discovery, an artillery ring, manually ('w'), or when no reachable
+    frontier remains. Explorers coordinate minimally: each claims its
+    target for the turn so two never chase the same cell."""
+
+    contacts: frozenset[UnitId] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,3 +152,19 @@ class Loading:
 
 
 StandingOrder = Heading | PatrolPath | Sentry | Loading | Explore | ReturnToBase
+
+# The movement orders that carry a `contacts` set (wake-on-news).
+ContactOrder = Heading | PatrolPath | Explore
+
+_ContactOrderT = TypeVar("_ContactOrderT", Heading, PatrolPath, Explore)
+
+
+def with_contacts(
+    order: _ContactOrderT, contacts: frozenset[UnitId]
+) -> _ContactOrderT:
+    """The same order carrying `contacts` as its known-enemy set.
+
+    The one seam the engine uses to roll the in-scan set forward onto the
+    persisted (replaced-per-step) order, shared by all three movement
+    variants."""
+    return replace(order, contacts=contacts)

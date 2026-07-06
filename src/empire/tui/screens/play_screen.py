@@ -32,6 +32,7 @@ from empire.core.engine import (
     MoveOutcome,
     StepOutcome,
     can_bombard,
+    enemy_ids_in_scan,
     execute_bombardment,
     execute_unit_path,
     execute_unload,
@@ -745,7 +746,11 @@ class PlayScreen(Screen[None]):
             self._hint = "aboard a carrier — unload it first"
             self._refresh_view()
             return
-        unit.standing_order = Explore()
+        # Seed the wake-on-news set: enemies already in scan at issue time
+        # are old news and never cancel the order; a new contact wakes it.
+        unit.standing_order = Explore(
+            contacts=enemy_ids_in_scan(unit, self._game.map)
+        )
         # Immediate first move (same expectation as go-to/heading) with the
         # unit's REMAINING budget — critically, this carries a fresh army off
         # its own city before the §5.4 turn-end disband can claim it.
@@ -982,7 +987,11 @@ class PlayScreen(Screen[None]):
         else:
             tail = tuple(path[1:]) if stepped else tuple(path)
             if tail:
-                self._pending_orders[unit.id] = PatrolPath.new(tail)
+                # Seed wake-on-news: enemies in scan as the order is set
+                # (post first step) are old news; only a new contact wakes.
+                self._pending_orders[unit.id] = PatrolPath.new(
+                    tail, contacts=enemy_ids_in_scan(unit, self._game.map)
+                )
             self._hint = (
                 f"go-to set: {len(tail)} cells queued"
                 + (" (stepped)" if stepped else "")
@@ -1026,7 +1035,12 @@ class PlayScreen(Screen[None]):
         else:
             remaining = cycle[1:] if stepped else cycle
             self._pending_orders[unit.id] = PatrolPath(
-                remaining=remaining, original=cycle, loop=True
+                remaining=remaining,
+                original=cycle,
+                loop=True,
+                # Old-news seed: a known enemy near the route never wakes
+                # the patrol; a new contact does.
+                contacts=enemy_ids_in_scan(unit, self._game.map),
             )
             self._hint = (
                 f"patrol set: ({start.x},{start.y})<->({self._cursor.x},{self._cursor.y})"
@@ -1545,7 +1559,10 @@ class PlayScreen(Screen[None]):
             return
         self._handled.add(unit_id)
         if alive:
-            self._pending_orders[unit.id] = Heading(direction=d)
+            # Old-news seed (post first step): only a NEW contact wakes it.
+            self._pending_orders[unit.id] = Heading(
+                direction=d, contacts=enemy_ids_in_scan(unit, self._game.map)
+            )
             self._hint = f"heading set: {d.name}" + (" (stepped)" if stepped else "")
         else:
             self._hint = f"unit lost stepping {d.name}"
