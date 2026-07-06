@@ -1,0 +1,3 @@
+TF-1: REINFORCE UNITS 16 | "load convoy for eastern strike"
+TF-2: REINFORCE UNITS 17 | "strengthen capital garrison"
+TF-3: PATROL (8,3) | "engage destroyer threat"

@@ -1,0 +1,3 @@
+TF-1: RETASK CAPTURE (5,4) | Neutralize enemy beachhead
+TF-2: REINFORCE UNITS i j | Consolidate garrison at capital
+TF-3: RETASK PATROL (6,5) | Intercept empty transport Z

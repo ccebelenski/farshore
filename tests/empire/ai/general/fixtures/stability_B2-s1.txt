@@ -1,0 +1,7 @@
+TF-1: RETASK STAGE (5,2) | Transport #16 is at (1,2), not yet usable for this cross; officers will marshal the transport across the sea lane once they meet
+TF-2: CONTINUE | Capital held secure by garrison a, b, and new army n now assigned via TF-4
+TF-3: PATROL (7,2) | Screen the retreat zone and enemy transport withdrawal; destroyer q to ensure no surprise attacks on transport #9
+TF-4: RETASK STAGE (3,2) | Reinforce line at k's position to block enemy army x at (3,3); units l and m hold perimeter
+
+FORM TF-5: UNITS i,j,o,q,p,n | CAPTURE (11,1) · Capture enemy cities via sea crossing; officers march armies to transport o at coastal point
+BUILD (4,3): ARMY | City building cycle continues; switch production from Army to Fighters for long-term offense once city is secure

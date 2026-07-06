@@ -1,0 +1,3 @@
+TF 1: RETASK CAPTURE (11,1) | Strike enemy cities for victory
+TF 2: CONTINUE DEFEND (2,0) | Maintain capital security
+TF 3: CONTINUE PATROL (7,2) | Screen the eastern crossing lane

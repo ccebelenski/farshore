@@ -1,0 +1,3 @@
+TF 2: CONTINUE | "maintain capital garrison security"
+TF 5: CONTINUE | "advance to capture enemy city 11,1 with escort"
+FORM TF 6: UNITS i j k l n p | CAPTURE (4,1) | "secure neutral production"

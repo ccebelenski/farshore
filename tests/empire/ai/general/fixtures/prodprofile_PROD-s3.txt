@@ -1,0 +1,4 @@
+TF 2: CONTINUE | maintain garrison at (2,0)
+TF 1: DISBAND | release army forces for eastern offensive
+TF 3: DISBAND | consolidate transports and destroyer into new force
+FORM TF 5: UNITS c d e f g h n o p | CAPTURE <(11,1)> | "Advance to capture enemy cities (11,1) and (11,2)"

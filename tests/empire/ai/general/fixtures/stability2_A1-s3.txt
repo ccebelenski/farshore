@@ -1,0 +1,4 @@
+TF-1: DISBAND | Consolidating offensive assets into transport-capable force
+TF-3: DISBAND | Integrating transport and destroyer into main assault
+TF-2: CONTINUE | Maintain capital defense until reinforcement arrives
+FORM TF ATK-01: UNITS <c-h, n, o> | CAPTURE (11,2) | Launch full frontal river crossing to capture west flank

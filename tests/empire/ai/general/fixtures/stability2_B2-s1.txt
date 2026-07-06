@@ -1,0 +1,4 @@
+TF-1: REINFORCE UNITS #16 | ready transport at city (1,2) for eastward deployment
+TF-2: REINFORCE UNITS #18 | strengthen garrison at capital (2,0)
+TF-3: RETASK PATROL (6,5) | intercept enemy transport moving toward eastern flank
+TF-4: CONTINUE | maintain city (4,3) defense post until new army completes
