@@ -37,6 +37,10 @@ to the plain smart opponent for that turn.
    that seat is commanded by the model; disabled or unreachable, it is the
    identical classic opponent.
 
+4. **Play under the STANDARD ruleset for now.** The general's rules primer
+   teaches STANDARD; under FORTIFIED_CITIES it would order assaults without
+   knowing cities shoot back. A FORTIFIED-aware primer is planned.
+
 ## What to expect
 
 - **Epoch pauses.** The general thinks every 8 turns. On a modern GPU that is
