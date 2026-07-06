@@ -910,6 +910,32 @@ competence floor exists precisely for this).
 the schema draft; next work = build-order steps 1-2 (shared TYPES + FakeGeneral
 seam), lab retained for regression.
 
+## WRINKLE LEDGER (consolidation punch list — iron, don't A/B; user call 2026-07-05)
+
+1. **One canonical parser/validator** replacing the three overlapping lab grammars
+   (grade_doctrine, compile_orders, grade_amendments) — becomes the real compile-step
+   validator in engine code, carrying the full accept-and-normalize catalog: markers →
+   ids, `·`/`|` separators, `<(x,y)>` brackets, bare verb = RETASK, freeform TF
+   labels, optional keywords, case.
+2. **Silent drift detection:** reasons containing order-like text (verb + target in a
+   WHY slot) are flagged/rejected — "reasons are not orders" enforced mechanically,
+   not just stated. (B2-s2 is the fixture.)
+3. **Cannot-comply channel:** infeasible orders (liftless cross-water CAPTURE,
+   unreachable REINFORCE, land units STAGEd on water) reject WITH a reported reason
+   that appears in the next epoch's ledger. Never silently reinterpreted.
+4. **Delivery pipeline as code:** token cap → seed-shifted retries → reject →
+   executor-only epoch. (~1/3 runaway is an accepted operating cost at the
+   accelerated tier.)
+5. **Briefing spec FROZEN** (deploy shape, no further layout experiments): unified
+   board w/ marker cross-index, WHY persisted at FORM/RETASK, pure event ledger,
+   arrived-precondition event lines, cache-native ordering + end-reminder, contract
+   v7 text.
+6. **Test corpus:** the lab's ~60 real transcripts become validator unit fixtures —
+   every observed drift replayed forever.
+Parked with labels: spatial threat salience (model limit; executor backstop), churn
+attractors (multi-call evidence file), "previously on" recap, FORTIFIED assault
+probe, early-game BUILD-decision variants.
+
 **Order compiler (lab/compile_orders.py, user ask):** the second half of the compile
 step, prototyped — takes parsed orders + the SAME board text the model read (terrain
 from the ASCII grid, landmasses by flood fill, roster parsed from the prompt) and
