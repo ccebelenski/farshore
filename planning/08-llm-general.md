@@ -565,6 +565,17 @@ driven by the new AppConfig (client seam = live_epoch's, hardened), the
 CAPTURE→INVADE compiler upgrade so an overseas fist actually sails, engine event
 sourcing for ledger lines, and the narrator tier. Then the SHOULD gate decides.
 
+## ENGINE FACT-GAPS (found by the ledger workstream — small engine events to add)
+
+1. **`CityAssaultFailedEvent`**: failed captures never reach the bus (the dead
+   attacker is an anonymous `UnitRemovedEvent`), so the ledger cannot write
+   "capture attempted twice, failed twice" — the GRIND scenario's key line. Highest
+   value.
+2. `UnitRemovedEvent` lacks a cause field — "lost #5 at (11,1)" is writable, "in
+   combat" would be fabrication for fuel losses.
+3. `CityCapturedEvent.previous_owner_id` is always None at the publish site — enemy
+   captures of our cities can't be fog-safely reported.
+
 ## PARKED (with trigger conditions)
 
 - **Multi-call decomposition** (user, 2026-07-04): the epoch need not be one prompt —
