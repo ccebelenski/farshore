@@ -18,6 +18,7 @@ from empire.contracts.doctrine import (
     ContinueOrder,
     DisbandOrder,
     FormOrder,
+    Objective,
     ReinforceOrder,
     RetaskOrder,
     Verb,
@@ -535,3 +536,27 @@ class TestDirectRules:
         assert result.doctrine.amendments == ()
         assert len(result.refusals) == 4  # one per standing TF
         assert all("no amendment" in r.reason for r in result.refusals)
+
+
+def test_bracketed_adding_from_live_handshake_parses() -> None:
+    """Regression: handshake (b) seed 2 copied the contract's optionality
+    brackets literally — `[ADDING #16]` must parse as a clean launch pair."""
+    ctx = _ctx(
+        54,
+        {"1": {3, 4, 5, 6, 7, 8}, "2": {1, 2}, "3": {9, 10}},
+        {11, 12, 13, 15, 16, 17},
+        _markers("a1 b2 c3 d4 e5 f6 g7 h8 i11 j12 k13 l15 m17 n9 o16 p10"),
+        {(2, 0), (1, 2), (4, 3), (4, 1)},
+    )
+    result = DoctrineValidator().validate(
+        "TF-1: RETASK CAPTURE (11,1) [ADDING #16] | launch eastern offensive\n"
+        "TF-2: CONTINUE | maintain capital defense\n"
+        "TF-3: CONTINUE | maintain screen\n",
+        ctx,
+    )
+    assert result.refusals == ()
+    assert result.doctrine is not None
+    retask = result.doctrine.amendments[0]
+    assert isinstance(retask, RetaskOrder)
+    assert retask.objective == Objective(Verb.CAPTURE, Coord(11, 1))
+    assert retask.adding == (UnitId(16),)

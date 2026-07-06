@@ -121,8 +121,11 @@ _LEGACY_FORM_RE = re.compile(
     re.IGNORECASE,
 )
 _RETASK_RE = re.compile(
-    "^" + _TF_HEAD + r"(?:(?P<kw>RETASK)\s+)?(?P<verb>[A-Za-z]+)\s+(?P<target>[^|]+?)"
-    r"(?:\s+ADDING\s+(?P<adding>[^|]+?))?" + _WHY,
+    # `[ADDING ...]` tolerates literal square brackets: the contract once
+    # showed ADDING in optionality brackets and a live model copied them
+    # verbatim (handshake (b), seed 2) — lenient-trivia rule applies.
+    "^" + _TF_HEAD + r"(?:(?P<kw>RETASK)\s+)?(?P<verb>[A-Za-z]+)\s+(?P<target>[^|[]+?)"
+    r"(?:\s*\[?\s*ADDING\s+(?P<adding>[^|\]]+?)\s*\]?\s*)?" + _WHY,
     re.IGNORECASE,
 )
 
@@ -342,7 +345,7 @@ class _Session:
         ids: list[UnitId] = []
         issues: list[str] = []
         for raw_tok in re.split(r"[\s,]+", blob.strip()):
-            tok = raw_tok.strip("#<>()\"'")
+            tok = raw_tok.strip("#<>()[]\"'")
             if not tok:
                 continue
             for uid in self._unit_token(tok, issues):

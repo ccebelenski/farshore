@@ -201,7 +201,11 @@ def test_turn_cue_is_last(briefing_text: str) -> None:
 
 
 def test_contract_text_is_v7(briefing_text: str) -> None:
-    assert "TF <id>: RETASK <VERB> <target> [ADDING <ids>] | <one line>" in briefing_text
+    # ADDING is shown as its own example line: bracket optionality notation
+    # got copied literally by a live model (handshake (b), seed 2).
+    assert "TF <id>: RETASK <VERB> <target> | <one line>" in briefing_text
+    assert "TF <id>: RETASK <VERB> <target> ADDING <ids> | <one line>" in briefing_text
+    assert "[ADDING" not in briefing_text
     # The v5/v6 two-line REINFORCE+RETASK exception is gone.
     assert "ONE exception" not in briefing_text
     assert "Every standing TF gets exactly one line." in briefing_text

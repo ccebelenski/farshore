@@ -238,7 +238,7 @@ forbidden_modules = [
 # serializer round-trip — a read-only use of the save format, not a layering
 # inversion. Confined to this single edge.
 ignore_imports = [
-    "empire.ai.search.playout -> empire.persistence.schema_v1",
+    "empire.ai.search.playout -> empire.persistence.schema",
 ]
 
 [[tool.importlinter.contracts]]

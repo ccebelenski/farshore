@@ -37,7 +37,8 @@ these forms — no other prose, headers, or commentary:
 
   TF <id>: CONTINUE | <one line>
   TF <id>: REINFORCE UNITS <ids> | <one line>
-  TF <id>: RETASK <VERB> <target> [ADDING <ids>] | <one line>
+  TF <id>: RETASK <VERB> <target> | <one line>
+  TF <id>: RETASK <VERB> <target> ADDING <ids> | <one line>
   TF <id>: DISBAND | <one line>
   FORM TF <new id>: UNITS <ids> | <VERB> <target> | <one line>
   BUILD (x,y): <UNIT KIND> | <one line>
