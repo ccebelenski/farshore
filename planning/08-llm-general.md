@@ -565,6 +565,26 @@ driven by the new AppConfig (client seam = live_epoch's, hardened), the
 CAPTURE→INVADE compiler upgrade so an overseas fist actually sails, engine event
 sourcing for ledger lines, and the narrator tier. Then the SHOULD gate decides.
 
+## THE GENERAL IS IN THE GAME (2026-07-06, night shift)
+
+Build-order integration COMPLETE except the narrator tier. Merged same night:
+CAPTURE→INVADE compilation (the overseas fist sails; fog-honest reachability, zero
+executor changes), the event-sourced `TaskForceLedger`, and `LlmGeneralController` —
+PortfolioAI wrapped at epoch cadence, stdlib-urllib ChatClient (typed errors,
+timeout, retry ladder), primer as engine code, factory behind the YAML config flag
+(disabled = byte-identical PortfolioAI, asserted). 777 tests, 8 import contracts.
+
+**Live capstone smoke (in-game controller, real model, staged LIFT):** the model
+issued the launch pair in its own words; registry docked #16; INVADE moved all seven
+TF-1 units toward embarkation — and the model's malformed TF-3 line (verb, no
+target) was REFUSED while the campaign proceeded, `failure: None`. Happy path,
+cannot-comply channel, and fail-safe posture in one epoch.
+
+Small follow-ups queued: wire `TaskForceLedger` into the controller's briefing
+events (currently empty) and consume `Briefing.markers` in its ValidationContext;
+polish the double-refusal on a malformed line + coverage miss for the same TF; the
+narrator tier; then the SHOULD gate: playtest with it ON and decide if it's fun.
+
 ## ENGINE FACT-GAPS (found by the ledger workstream — small engine events to add)
 
 1. **`CityAssaultFailedEvent`**: failed captures never reach the bus (the dead
