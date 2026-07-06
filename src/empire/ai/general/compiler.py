@@ -61,10 +61,12 @@ _ROLE_OF_VERB: dict[Verb, Role] = {
 }
 
 
-class _TaskForceView(WorldView):
-    """A live view scoped to one task force: identical world, but
+class TaskForceView(WorldView):
+    """A live view scoped to a set of units: identical world, but
     `own_units` reports only the members — the follower plans with the
-    task force's hands and nobody else's."""
+    task force's hands and nobody else's. Public because the controller
+    reuses the same scoping to hand the EXECUTOR the complement (every
+    unit outside all task forces)."""
 
     def __init__(self, base: WorldView, members: frozenset[UnitId]) -> None:
         super().__init__(
@@ -107,7 +109,7 @@ class DoctrineCompiler:
         moves: list[UnitMove] = []
         unloads: list[UnloadOrder] = []
         for scope in self.compile(registry):
-            scoped = _TaskForceView(view, scope.members)
+            scoped = TaskForceView(view, scope.members)
             turn_plan = PlanFollower(scope.plan).plan_turn(scoped)
             moves.extend(m for m in turn_plan.moves if m.unit_id in scope.members)
             unloads.extend(u for u in turn_plan.unloads if u.cargo_id in scope.members)
