@@ -547,6 +547,24 @@ by the code, amended by the general. One source of truth; there is never a momen
   the ledger) vs re-plan thrash (dissolving a healthy invasion because it re-read the
   map cold). These are the two failure axes of the next battery.
 
+## HANDSHAKE (b) PASSED (2026-07-06): real briefings ≥ hand-built boards
+
+`lab/live_epoch.py`, 3 seeds sequential vs the pinned server, full production path
+(staged real Game → BriefingRenderer → model → DoctrineValidator → TaskForceRegistry
+→ DoctrineCompiler): **3/3 delivered, zero retries, zero refusals — and 2/3 issued
+the exact v7 launch pair** (`TF 1: RETASK CAPTURE (11,1) ADDING #16`) with the third
+doing the valid conservative dock (REINFORCE #16). That launch rate EXCEEDS the lab's
+hand-built A2 board (0-1/3 with heavy runaways) — consistent with A2-the-board being
+a churn attractor rather than A2-the-situation being hard. Both build-order
+handshakes are now done: (a) doctrine steers the executor, (b) real briefings elicit
+equal-or-better orders than mocks. First contact also caught and fixed the
+bracket-notation contract bug (optionality brackets read as literal syntax).
+
+Remaining for in-game integration (the LAST steps): an `LlmGeneral` controller
+driven by the new AppConfig (client seam = live_epoch's, hardened), the
+CAPTURE→INVADE compiler upgrade so an overseas fist actually sails, engine event
+sourcing for ledger lines, and the narrator tier. Then the SHOULD gate decides.
+
 ## PARKED (with trigger conditions)
 
 - **Multi-call decomposition** (user, 2026-07-04): the epoch need not be one prompt —
