@@ -1,0 +1,2 @@
+TF 2: REINFORCE UNITS n #18 | Increase capital defense depth
+TF 5: CONTINUE | Escort mitigates threat while crossing to (11,1)

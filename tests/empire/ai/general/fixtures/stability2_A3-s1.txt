@@ -1,0 +1,2 @@
+TF 2: CONTINUE | Capital garrisoned
+TF 5: REINFORCE UNITS 11 12 13 | Reinforce crossing fleet

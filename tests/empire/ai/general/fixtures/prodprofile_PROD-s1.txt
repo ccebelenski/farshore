@@ -1,0 +1,4 @@
+TF 1: DISBAND | Transfer remaining armies to new cross-land offensive.
+TF 2: RETASK DEFEND (2,0) · Maintain capital security until enemy cities are neutralized.
+TF 3: DISBAND | Merge transport and destroyer with main task force for escort duty.
+FORM TF 5: UNITS c,d,e,f,g,h,n,p | CAPTURE (11,1) · Cross water lanes to enemy front.

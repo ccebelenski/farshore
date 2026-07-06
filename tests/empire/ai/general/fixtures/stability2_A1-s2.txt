@@ -1,0 +1,3 @@
+TF 1: REINFORCE UNITS i,j | Consolidate eastern forces for cross-channel push
+TF 2: CONTINUE | Maintain capital garrison against potential counter-attack
+TF 3: STAGE (9,2) | Position transport closer to enemy coastal cities
