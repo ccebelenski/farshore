@@ -79,11 +79,15 @@ class GameLauncher:
     def make_opponent(self, kind: str) -> AIController:
         # "portfolio" is the smart opponent (PortfolioAI). Legacy save strings
         # ("search"/"strategic") map to it too, so old games still load against a
-        # real AI rather than silently dropping to the horde.
+        # real AI rather than silently dropping to the horde. When the LLM
+        # general is enabled in the app config, the smart seat gets the general
+        # wrapped around that same PortfolioAI; disabled/absent config yields
+        # plain PortfolioAI (build_general's total default).
         if kind in ("portfolio", "search", "strategic"):
-            from empire.ai.search.portfolio import PortfolioAI
+            from empire.ai.general import build_general
+            from empire.config import ConfigStore
 
-            return PortfolioAI()
+            return build_general(ConfigStore().load())
         from empire.ai.baseline import BaselineAI
 
         return BaselineAI()
