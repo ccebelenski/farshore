@@ -26,12 +26,21 @@ MECHANISM CHOICE (and the roads not taken):
 - REJECTED — scoping constraints in `CandidateGenerator`: the generator
   proposes plans, it does not bind units — wrong layer for membership.
 
-Verb compilation (minimal viable — the first handshake steers land forces):
-CAPTURE -> ASSAULT, DEFEND -> DEFEND, STAGE -> DEFEND at the marshaling
-coordinate (the defend movement rule IS "advance, then hold beside the
-target, never on it"). SCOUT/PATROL compile to the surplus-scout posture
-(members range to the fog frontier); compass-direction bias and the
-amphibious CAPTURE->INVADE upgrade are later steps, not this seam.
+Verb compilation: CAPTURE -> ASSAULT when every land member can walk to the
+target, CAPTURE -> INVADE when any cannot (or the force is all-lift/afloat) —
+the follower's naval machinery then stages, ferries, and lands the fist.
+The landmass question is asked fog-honestly, on the same fog-masked army
+grid the follower routes with (seen terrain is authoritative, unseen cells
+optimistically walkable), never on real-map truth the player hasn't earned.
+INVADE is chosen whenever ANY land member lacks a walking route because the
+executor treats it as a superset of ASSAULT: land-reachable members storm
+overland exactly as they would under ASSAULT (`_STORM_ROLES`), and only the
+cut-off remainder rides the transports — so a mid-operation force with a
+landed first wave keeps both its beachhead assault and its follow-on waves.
+DEFEND -> DEFEND, STAGE -> DEFEND at the marshaling coordinate (the defend
+movement rule IS "advance, then hold beside the target, never on it").
+SCOUT/PATROL compile to the surplus-scout posture (members range to the fog
+frontier); compass-direction bias is a later step, not this seam.
 
 The compiled result covers TASKED MOVEMENT only: production belongs to
 `BuildDirective`s and the unassigned pool stays the executor's business —
@@ -52,10 +61,12 @@ from empire.contracts.turn_plan import TurnPlan, UnitMove, UnloadOrder
 from empire.contracts.world_view import WorldView
 from empire.core.coord import Coord
 from empire.core.identity import UnitId
-from empire.core.unit import Unit
+from empire.core.unit import Unit, UnitKind
+from empire.pathfinding.cost import ARMY as ARMY_COST_PROFILE
+from empire.pathfinding.distance_field import DistanceField, PassabilityGrid
 
 _ROLE_OF_VERB: dict[Verb, Role] = {
-    Verb.CAPTURE: Role.ASSAULT,
+    Verb.CAPTURE: Role.ASSAULT,  # upgraded to INVADE when the target is overseas
     Verb.DEFEND: Role.DEFEND,
     Verb.STAGE: Role.DEFEND,  # marshal: close on the coordinate and hold beside it
 }
@@ -92,10 +103,16 @@ class TaskForceScope:
 class DoctrineCompiler:
     """Compiles a `TaskForceRegistry` into per-task-force executor scopes."""
 
-    def compile(self, registry: TaskForceRegistry) -> tuple[TaskForceScope, ...]:
-        """One scope per standing task force, in formation order."""
+    def compile(
+        self, registry: TaskForceRegistry, view: WorldView
+    ) -> tuple[TaskForceScope, ...]:
+        """One scope per standing task force, in formation order. The view is
+        read (fog-honestly) only to settle CAPTURE's land-vs-amphibious shape;
+        no scope ever sees another force's units through it."""
         return tuple(
-            TaskForceScope(tf_id=tf.tf_id, members=tf.members, plan=self._plan_for(tf))
+            TaskForceScope(
+                tf_id=tf.tf_id, members=tf.members, plan=self._plan_for(tf, view)
+            )
             for tf in registry.forces
         )
 
@@ -106,7 +123,7 @@ class DoctrineCompiler:
         disjoint, so the merge cannot conflict."""
         moves: list[UnitMove] = []
         unloads: list[UnloadOrder] = []
-        for scope in self.compile(registry):
+        for scope in self.compile(registry, view):
             scoped = _TaskForceView(view, scope.members)
             turn_plan = PlanFollower(scope.plan).plan_turn(scoped)
             moves.extend(m for m in turn_plan.moves if m.unit_id in scope.members)
@@ -115,7 +132,7 @@ class DoctrineCompiler:
 
     # ---- verb -> plan ----------------------------------------------------------
 
-    def _plan_for(self, tf: TaskForce) -> Plan:
+    def _plan_for(self, tf: TaskForce, view: WorldView) -> Plan:
         """Render one task force's objective as a `Plan` the follower executes.
 
         Surplus is RESERVE for targeted verbs — a member the objective cannot
@@ -125,7 +142,10 @@ class DoctrineCompiler:
         verb = tf.objective.verb
         target = tf.objective.target
         if verb in _ROLE_OF_VERB and isinstance(target, Coord):
-            objective = PlanObjective(target, _ROLE_OF_VERB[verb], len(tf.members))
+            role = _ROLE_OF_VERB[verb]
+            if verb is Verb.CAPTURE:
+                role = self._capture_role(tf, target, view)
+            objective = PlanObjective(target, role, len(tf.members))
             return Plan(objectives=(objective,), surplus=SurplusPolicy.RESERVE)
         # SCOUT/PATROL (either target form) range the fog frontier via the
         # surplus policy; a coordinate verb with a compass target is validator
@@ -133,3 +153,32 @@ class DoctrineCompiler:
         if verb in (Verb.SCOUT, Verb.PATROL):
             return Plan(objectives=(), surplus=SurplusPolicy.SCOUT)
         return Plan(objectives=(), surplus=SurplusPolicy.RESERVE)
+
+    def _capture_role(self, tf: TaskForce, target: Coord, view: WorldView) -> Role:
+        """ASSAULT or INVADE for a CAPTURE tasking (module docstring, "Verb
+        compilation").
+
+        Fog-honest landmass test: the target's land reach is flooded over the
+        same fog-masked army grid the follower routes with — seen terrain
+        (current or remembered) decides, unseen cells stay optimistically
+        walkable — so the compiler never reads map truth the player lacks.
+        ASSAULT only when EVERY ashore member can walk to the target; any
+        cut-off member (or an all-lift/afloat force) makes it INVADE so the
+        naval machinery moves the fist. A force with neither ground troops
+        nor lift has nothing to land — plain ASSAULT lets it hold on task."""
+        members = [u for u in view.own_units if u.id in tf.members]
+        ashore = [
+            u for u in members if u.kind is UnitKind.ARMY and u.carried_by is None
+        ]
+        if ashore:
+            grid = PassabilityGrid(
+                view.real_map(), ARMY_COST_PROFILE, view.own_player.view
+            )
+            reach = DistanceField(target, grid)
+            if all(reach.steps_to(u.coord) is not None for u in ashore):
+                return Role.ASSAULT
+            return Role.INVADE
+        lifted = any(
+            u.kind is UnitKind.TRANSPORT or u.carried_by is not None for u in members
+        )
+        return Role.INVADE if lifted else Role.ASSAULT

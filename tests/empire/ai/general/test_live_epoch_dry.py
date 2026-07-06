@@ -33,8 +33,12 @@ def live_epoch() -> ModuleType:
 
 
 @pytest.fixture(scope="module")
-def report(live_epoch: ModuleType):
-    staging = live_epoch.LiftScenario().build()
+def staging(live_epoch: ModuleType):
+    return live_epoch.LiftScenario().build()
+
+
+@pytest.fixture(scope="module")
+def report(live_epoch: ModuleType, staging):
     pipeline = live_epoch.EpochPipeline(live_epoch.PRIMER_PATH.read_text())
     return pipeline.run(staging, live_epoch.CannedGeneral())
 
@@ -68,6 +72,28 @@ def test_launch_pair_applies_to_the_registry(report) -> None:
     tf3 = report.registry.get("3")
     assert tf2 is not None and tf2.objective.verb is Verb.DEFEND
     assert tf3 is not None and tf3.members == frozenset({UnitId(9), UnitId(10)})
+
+
+def test_briefing_carries_the_renderer_marker_key(report) -> None:
+    """The `Briefing` contract exposes the renderer's own marker assignment;
+    the validation context consumes it instead of re-deriving the rule."""
+    markers = report.briefing.markers
+    assert len(markers) == 11  # 8 armies + 2 transports + 1 destroyer
+    assert markers["a"] == UnitId(1)
+    assert markers["k"] == UnitId(16)  # highest id takes the last marker
+
+
+def test_launch_pair_moves_the_fist(report, staging, live_epoch: ModuleType) -> None:
+    """The point of the CAPTURE->INVADE upgrade: the overseas capture no
+    longer compiles to a frozen land assault. The just-committed lift floats
+    out of dry-dock and every strike army closes on the embarkation port."""
+    port = live_epoch.LiftScenario.PORT
+    units = {int(u.id): u for u in staging.view.own_units}
+    steps = {int(m.unit_id): Coord(*m.path[-1]) for m in report.plan.moves}
+    assert 16 in steps  # the transport left dry-dock for open water
+    for uid in (3, 4, 5, 6, 7, 8):  # TF-1's whole staged fist is under way
+        assert uid in steps
+        assert steps[uid].chebyshev_to(port) < units[uid].coord.chebyshev_to(port)
 
 
 def test_compiled_plan_stays_inside_task_force_lines(report) -> None:

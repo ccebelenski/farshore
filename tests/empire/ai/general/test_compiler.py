@@ -7,6 +7,7 @@ from __future__ import annotations
 from empire.ai.general.compiler import DoctrineCompiler
 from empire.ai.general.fake import FakeGeneral
 from empire.ai.general.registry import TaskForceRegistry
+from empire.ai.search.plan import Role
 from empire.contracts.doctrine import (
     Briefing,
     ContinueOrder,
@@ -24,10 +25,11 @@ from empire.core.map import Map, ViewMap
 from empire.core.player import Player
 from empire.core.ruleset import STANDARD
 from empire.core.tile import TerrainKind, Tile
-from empire.core.unit import Army, Unit
+from empire.core.unit import Army, Destroyer, Transport, Unit
 
 CAPTURE_TARGET = Coord(11, 2)
 STAGE_TARGET = Coord(0, 5)
+OVERSEAS_TARGET = Coord(11, 2)
 
 
 def _flat_game(width: int = 12, height: int = 6) -> tuple[Game, Player, Player]:
@@ -113,6 +115,94 @@ def _tasked_registry(view: WorldView) -> TaskForceRegistry:
     registry, refusals = TaskForceRegistry().apply(doctrine, roster)
     assert refusals == ()
     return registry
+
+
+def _sea_gap_board() -> tuple[Game, WorldView, dict[int, Unit]]:
+    """A visible strait splits the board: home continent x0-4, water x5-9,
+    enemy continent x10-13 holding the target city. The task force is armies
+    #1/#2 at the home coast, transport #11 afloat beside it, destroyer #12
+    escorting — a CAPTURE across the water, impossible on foot."""
+    p1 = Player(id=PlayerId(1), name="P1", is_ai=True, view=ViewMap(), color="red")
+    p2 = Player(id=PlayerId(2), name="P2", is_ai=True, view=ViewMap(), color="blue")
+    width, height = 14, 6
+    tiles: dict[Coord, Tile] = {}
+    for x in range(width):
+        for y in range(height):
+            c = Coord(x, y)
+            terrain = TerrainKind.LAND if x <= 4 or x >= 10 else TerrainKind.WATER
+            tiles[c] = Tile(coord=c, terrain=terrain)
+    game = Game(
+        rules=STANDARD,
+        real_map=Map(width=width, height=height, tiles=tiles),
+        players=[p1, p2],
+        seed=1,
+    )
+    _see_all(game, p1)
+    _add_city(game, p2, OVERSEAS_TARGET, 1)
+    transport = Transport(UnitId(11), p1, Coord(5, 2))
+    game.map.place_unit(transport, Coord(5, 2))
+    escort = Destroyer(UnitId(12), p1, Coord(5, 3))
+    game.map.place_unit(escort, Coord(5, 3))
+    units: dict[int, Unit] = {
+        1: _add_army(game, p1, Coord(3, 2), 1),
+        2: _add_army(game, p1, Coord(4, 2), 2),
+        11: transport,
+        12: escort,
+    }
+    return game, _view(game, p1), units
+
+
+def _overseas_registry(view: WorldView) -> TaskForceRegistry:
+    registry, refusals = TaskForceRegistry().apply(
+        Doctrine(
+            turn=1,
+            amendments=(
+                FormOrder(
+                    tf_id="1",
+                    unit_ids=(UnitId(1), UnitId(2), UnitId(11), UnitId(12)),
+                    objective=Objective(Verb.CAPTURE, OVERSEAS_TARGET),
+                    why="storm across the strait",
+                ),
+            ),
+        ),
+        frozenset(u.id for u in view.own_units),
+    )
+    assert refusals == ()
+    return registry
+
+
+def test_overseas_capture_compiles_to_invade_and_moves_the_fist() -> None:
+    """CAPTURE across water upgrades to the amphibious plan shape, and the
+    executor's naval machinery actually moves the task force: every army
+    closes on the embarkation transport (the adjacent one steps aboard)."""
+    _, view, units = _sea_gap_board()
+    registry = _overseas_registry(view)
+    compiler = DoctrineCompiler()
+
+    scopes = compiler.compile(registry, view)
+    assert [o.role for o in scopes[0].plan.objectives] == [Role.INVADE]
+
+    plan = compiler.plan_moves(registry, view)
+    assert plan.moves  # the fist moves — no frozen shoreline stalemate
+    steps = {int(m.unit_id): Coord(*m.path[-1]) for m in plan.moves}
+    lift_at = units[11].coord
+    for uid in (1, 2):
+        before = units[uid].coord.chebyshev_to(lift_at)
+        assert steps[uid].chebyshev_to(lift_at) < before
+    assert steps[2] == lift_at  # already alongside: steps straight aboard
+    # Scoping holds: nothing outside the task force is ever moved.
+    tf1 = registry.get("1")
+    assert tf1 is not None
+    assert all(m.unit_id in tf1.members for m in plan.moves)
+
+
+def test_same_landmass_capture_still_compiles_to_assault() -> None:
+    """The upgrade never touches a walkable CAPTURE: on the flat board the
+    strike force's plan keeps the plain land-assault shape."""
+    _, view, _ = _staged_board()
+    registry = _tasked_registry(view)
+    scopes = {s.tf_id: s for s in DoctrineCompiler().compile(registry, view)}
+    assert [o.role for o in scopes["1"].plan.objectives] == [Role.ASSAULT]
 
 
 def test_doctrine_steers_each_task_force_toward_its_own_objective() -> None:

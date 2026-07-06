@@ -127,7 +127,12 @@ class BriefingRenderer:
             f"It is TURN {turn}. Issue your amendment orders now — ONLY the line",
             "forms defined in the ORDERS CONTRACT above.",
         ]
-        return Briefing(turn=turn, text="\n".join(lines) + "\n")
+        markers = {
+            row.marker: row.unit.id
+            for row in roster
+            if row.marker != _OVERFLOW_MARKER  # shared glyph, not addressable
+        }
+        return Briefing(turn=turn, text="\n".join(lines) + "\n", markers=markers)
 
     # ---- CURRENT TASKINGS ---------------------------------------------------
 

@@ -16,7 +16,7 @@ the proposed record, keeping the registry map-agnostic.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 
 from empire.contracts.doctrine import (
@@ -93,6 +93,11 @@ class TaskForceRegistry:
             if tf.tf_id == tf_id:
                 return tf
         return None
+
+    def as_mapping(self) -> Mapping[TaskForceId, TaskForce]:
+        """The forces as a `{tf_id: record}` view, in formation order — the
+        shape `BriefingRenderer.render` takes."""
+        return {tf.tf_id: tf for tf in self.forces}
 
     def assigned(self) -> frozenset[UnitId]:
         """Every unit currently a member of any task force."""
