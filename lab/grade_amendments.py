@@ -229,12 +229,17 @@ class AmendmentGrader:
             kind, x, y, _ = b.units[u]
             if kind == "army":
                 mass = b.landmass.get((x, y))
-                if tf_ashore and mass not in tf_ashore:
-                    g.errors.append(
-                        f"TF {tf}: army {u} cannot reach the TF (other landmass)"
-                    )
-                elif not tf_ashore and tf_units:
-                    g.errors.append(f"TF {tf}: army {u} cannot join a force at sea")
+                # A land army reinforcing a force across water is FEASIBLE, not
+                # an error: production accepts every reinforcement (registry uses
+                # _always_feasible) and the naval planner lifts the newcomers on
+                # its return-and-reload waves (see empire.ai.search.naval —
+                # "stragglers ride the next recycled wave"). The general states
+                # the WHY ("reinforce the invasion"); the executor owns the HOW
+                # (the lift). So this is a NOTE, never a refusal.
+                if (tf_ashore and mass not in tf_ashore) or (
+                    not tf_ashore and tf_units
+                ):
+                    g.notes.append(f"TF {tf}: army {u} reinforces across water (lifted)")
 
     def _verb_target(self, verb: str, target: str, ctx: str, g: Grade) -> None:
         if verb not in VERBS:
