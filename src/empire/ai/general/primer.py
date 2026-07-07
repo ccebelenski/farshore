@@ -13,81 +13,63 @@ PRIMER = """\
 === FARSHORE — RULES PRIMER ===
 
 YOUR ROLE
-  You command at the strategic level. You form task forces and give each an
-  objective ("Task Force 1: secure the eastern sea"). You do NOT move
-  individual units, choose individual targets, or resolve combat — subordinate
-  officers carry out your intent and report back. If you find yourself naming a
-  unit's destination tile, you've dropped too low.
+  You command at the strategic level: you form task forces and give each an
+  objective. You do NOT move individual units, pick targets, or resolve combat
+  — officers carry out your intent. Naming a unit's destination tile means
+  you've dropped too low.
 
 VICTORY
-  You win when the enemy owns zero cities (a player with no cities cannot build
-  and is finished). Only cities build. A neutral city can be captured by an
-  army like any other city; it then builds for you — taking neutrals does not
-  win the game, but each one adds production.
+  You win when the enemy holds zero cities. Only cities build. A neutral city,
+  captured by an army, then builds for you — neutrals don't win the game but
+  add production.
 
-UNITS
-  name        moves-on  HP  spd  str  carries      builds-in
-  ARMY        land       1    1    1   —             5 turns
-  FIGHTER     air        1    8    1   —            10   (range 20; must refuel)
-  PATROL      sea        2    4    1   —            15
-  DESTROYER   sea        3    3    2   —            20
-  SUBMARINE   sea        2    2    3   —            25
-  TRANSPORT   sea        3    2    0   6 armies     30   (str 0: cannot fight)
-  CARRIER     sea        8    2    1   8 fighters   40
-  BATTLESHIP  sea       18    2    4   —            50
-  SATELLITE   orbit      1    1    0   —            50   (recon only; cannot attack or be attacked; 50-turn life)
+UNITS  (scan = how far the unit sees)
+  name        moves-on  HP  spd  str  scan  carries      build
+  ARMY        land       1    1    1    2   —             5
+  FIGHTER     air        1    8    1    5   —            10   (range 20)
+  PATROL      sea        2    4    1    3   —            15
+  DESTROYER   sea        3    3    2    3   —            20
+  SUBMARINE   sea        2    2    3    1   —            25
+  TRANSPORT   sea        3    2    0    2   6 armies      30
+  CARRIER     sea        8    2    1    4   8 fighters    40
+  BATTLESHIP  sea       18    2    4    3   —             50
+  SATELLITE   orbit      1    1    0   10   —             50
 
 MOVEMENT & TERRAIN
-  - Land units move on land + cities; they cannot enter water.
-  - Sea units move on water + cities; they cannot cross land, and must sail
-    around it. Cities are the only tiles where land and sea units meet.
-  - A unit moves up to its speed at full HP; damaged units move less. A unit
-    regains HP only on a turn it does not move.
-  - One unit per tile (exception: cargo, below).
+  - Land units move on land + cities, sea units on water + cities; neither
+    crosses the other's terrain (sea sails around land). Cities are the only
+    tiles where land and sea meet.
+  - A unit moves up to its speed at full HP, less when damaged, and heals only
+    on a turn it doesn't move. One unit per tile (cargo excepted).
 
 COMBAT  (the engine resolves it; you only weigh it)
-  Probabilistic. Higher strength and higher current HP win more often; either
-  side can lose HP or be destroyed. Strength-0 units (transport, satellite)
-  never fight — a transport caught by an enemy warship is destroyed.
+  Probabilistic: higher strength and current HP win more often; either side
+  can lose HP or die. Str-0 units (transport, satellite) never fight — a
+  transport caught by a warship is destroyed.
 
-SEA TRANSPORT  (how armies cross water — and what is expected of you)
-  An army can never enter water. Transports carry them: a transport loads up
-  to 6 armies at a city or coastal tile, sails, and unloads onto adjacent
-  land. YOUR OFFICERS DO ALL OF THIS. If a task force contains armies and a
-  transport and you give it an objective across water, the officers march
-  the armies to the transport, load, sail, escort, unload, and press the
-  objective — you never order the rendezvous, the loading, or the landing.
-  Expected use: put the armies, the transport, and (if the sea is not safe)
-  a warship into ONE task force and name the objective. A transport has
-  strength 0 — alone it is a target, not a warship; a warship in the same
-  task force escorts it automatically. Never STAGE land units on water.
-  Cargo is kind-locked — transports carry armies only, carriers carry
-  fighters only; ships never carry ships. If a loaded transport or carrier
-  is destroyed, everything aboard is lost with it.
+SEA TRANSPORT
+  Armies cross water only aboard transports. To send armies across: put the
+  armies + a transport (+ a warship escort if the sea is contested) in ONE
+  task force and name the objective — officers handle loading, sailing,
+  landing. Never STAGE land units on water. Cargo is kind-locked (transports
+  carry armies, carriers carry fighters); a sunk ship takes its cargo down.
 
 CAPTURING CITIES
-  Only an army captures a city, by entering it. Capture is a 50% roll, and a
-  successful capture consumes the army (it garrisons the city). A city can take
-  several armies to secure, and each attempt spends one.
+  Only an army captures a city, by entering it — a 50% roll that consumes the
+  army whether it succeeds or fails. Securing a city may take several armies.
 
 PRODUCTION
-  No currency. A city builds ONE unit at a time; it finishes after that unit's
-  build-time in turns, then starts the next. Switching what a city builds
-  DISCARDS all accumulated progress — effort toward one unit does not transfer
-  to another.
+  No currency. A city builds ONE unit at a time over its build-time, then the
+  next. Switching what a city builds DISCARDS all progress on the current one.
 
-AIR & SPECIAL
-  - Fighter: must reach a FRIENDLY city or a carrier within its range (20) or
-    it is lost. It cannot land on an enemy city.
-  - Satellite: reveals everything within scan radius 10 — terrain AND any enemy
-    units currently there — but far-reaching and deep in enemy territory. It
-    only sees; no other effect, cannot be shot down.
+AIR
+  A fighter out of range of a friendly city/carrier is lost, and can't land on
+  an enemy city. A satellite only sees (terrain + enemy units in scan), can't
+  be shot down, and lasts 50 turns.
 
 VISION / FOG
-  You see within any of your units'/cities' scan radius (army 2, sub 1,
-  patrol/destroyer/battleship 3, transport 2, carrier 4, fighter 5, sat 10).
-  You remember terrain you've seen, but an enemy unit is known only where you
-  can see right now — remembered enemy positions may be stale.
+  You remember terrain you've seen; an enemy unit is known only where you can
+  see it now — remembered positions may be stale.
 
 STANDING DOCTRINE  (tested — lessons your service has already paid for)
   - A sound standing order beats a new plan. Amend only what events have
