@@ -213,6 +213,12 @@ def test_contract_text_is_v7(briefing_text: str) -> None:
     assert "Officers execute the" in briefing_text
     assert "VERB, not your reasons" in briefing_text
     assert "A BUILD line is optional per city" in briefing_text
+    # Plan-first: the PLAN requirement and its line form are in the contract.
+    assert "PLAN: <plan>" in briefing_text
+    assert (
+        "Begin with a PLAN line — in 1-2 sentences, your plan to win (the enemy holds\n"
+        "zero cities) and the one condition that will end it. Then your orders."
+    ) in briefing_text
 
 
 # --- (a) markers: map and table agree --------------------------------------------
@@ -352,6 +358,39 @@ def test_fleet_dispatches_reproduces_the_unassigned_loss_visibility() -> None:
     ).text
     assert "FLEET DISPATCHES" in text
     assert "t19: lost #16 at (4,2)" in text
+
+
+# --- COMMANDER'S PLAN: the general's replayed standing plan ------------------------
+
+
+def test_commanders_plan_block_omitted_when_no_prior_plan(briefing_text: str) -> None:
+    # The fixture supplies no prior plan (4-arg render): the block is absent.
+    assert "COMMANDER'S PLAN" not in briefing_text
+
+
+def test_commanders_plan_block_renders_turn_stamped_with_reeval_directive() -> None:
+    game = _build_game()
+    view = WorldView(game.map, game.players[0], TURN, STANDARD)
+    plan = "Mass east and take (6,0); end this plan once that city is mine."
+    text = BriefingRenderer().render(
+        view, _registry(), _events(), TURN, (), plan, 12
+    ).text
+    assert f"COMMANDER'S PLAN (as of t12): {plan}" in text
+    assert (
+        "Evaluate your plan against the current situation and your previous\n"
+        "plan, if any. Revise it if it is not meeting your victory goal — the\n"
+        "enemy holds zero cities."
+    ) in text
+
+
+def test_commanders_plan_block_sits_between_taskings_and_board() -> None:
+    game = _build_game()
+    view = WorldView(game.map, game.players[0], TURN, STANDARD)
+    text = BriefingRenderer().render(
+        view, _registry(), _events(), TURN, (), "hold the line", 8
+    ).text
+    assert text.index("CURRENT TASKINGS") < text.index("COMMANDER'S PLAN")
+    assert text.index("COMMANDER'S PLAN") < text.index("MAP  legend:")
 
 
 # --- (e) cargo aboard transports ---------------------------------------------------

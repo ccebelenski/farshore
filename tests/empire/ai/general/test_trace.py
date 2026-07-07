@@ -54,3 +54,5 @@ def test_controller_traces_success_and_failure_epochs(tmp_path: Path) -> None:
     assert records[0]["failure"] is not None and "ORDERS CONTRACT" in records[0]["briefing"]
     assert records[1]["failure"] is None
     assert records[1]["amendments"] and records[1]["registry"]
+    # The commander's plan is surfaced as its own JSONL field on every record.
+    assert "plan" in records[0] and "plan" in records[1]

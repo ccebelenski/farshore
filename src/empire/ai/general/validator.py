@@ -85,6 +85,7 @@ class ValidationResult:
     refusals: tuple[Refusal, ...]
     warnings: tuple[Refusal, ...]
     notes: tuple[str, ...]
+    plan: str = ""
 
     @property
     def clean(self) -> bool:
@@ -99,6 +100,10 @@ _WHY = r"\s*(?:\|(?P<why>.*))?$"
 # Loose "which TF did this line address" match for otherwise-unparseable
 # lines, so their refusal claims the TF's coverage slot.
 _TF_NAME_RE = re.compile(r"^(?:FORM\s+)?TF[-\s#]*([A-Za-z0-9][A-Za-z0-9-]*)", re.IGNORECASE)
+# The commander's PLAN line (plan-first output) and the order-line starts that
+# terminate it: a PLAN may run over several lines until the first real order.
+_PLAN_RE = re.compile(r"^PLAN\s*:\s*(?P<plan>.*)$", re.IGNORECASE)
+_ORDER_START_RE = re.compile(r"^(?:FORM\b|BUILD\b|DISBAND\b|TF\b|TF[-\s#])", re.IGNORECASE)
 
 _FLIP_DISBAND_RE = re.compile(
     r"^DISBAND\s+TF[-\s#]*(?P<tf>[A-Za-z0-9][A-Za-z0-9-]*)" + _WHY, re.IGNORECASE
@@ -188,14 +193,27 @@ class _Session:
         self._refusals: list[Refusal] = []
         self._warnings: list[Refusal] = []
         self._notes: list[str] = []
+        self._plan_parts: list[str] = []
 
     # --- public entry ---------------------------------------------------
 
     def run(self, text: str) -> ValidationResult:
+        in_plan = False
         for index, raw in enumerate(text.splitlines()):
             line = raw.strip().strip("*").strip()
             if not line:
                 continue
+            # Plan-first: a leading PLAN line (and any continuation up to the
+            # first order line) is the commander's plan, captured but never
+            # dispatched — it is prose, not an amendment, and must not refuse.
+            if m := _PLAN_RE.match(line):
+                in_plan = True
+                self._plan_parts.append(m["plan"].strip())
+                continue
+            if in_plan and not _ORDER_START_RE.match(line):
+                self._plan_parts.append(line)
+                continue
+            in_plan = False
             if "·" in line:
                 self._note("read '·' as '|'")
                 line = line.replace("·", "|")
@@ -206,6 +224,7 @@ class _Session:
             refusals=tuple(self._refusals),
             warnings=tuple(self._warnings),
             notes=tuple(self._notes),
+            plan=" ".join(part for part in self._plan_parts if part),
         )
 
     # --- line dispatch ----------------------------------------------------
