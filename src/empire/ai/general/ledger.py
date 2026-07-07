@@ -2,9 +2,10 @@
 
 The briefing's "since:" lines are a pure EVENT ledger (planning/08 "TASKING
 CONTINUITY"): the ENGINE IS THE BOOKKEEPER, NOT THE ANALYST. Every line
-states what happened — "lost #5, #7 at (11,1)", "transport #16 delivered at
-(1,2)" — and NEVER a judgment: no "stalled", no "threatened", no "no
-progress". Judging is what the general is FOR. Causes are stated only when
+states what happened — "t86: lost #5, #7 at (11,1)", "t86: transport #16
+produced at (1,2)" — and NEVER a judgment: no "stalled", no "threatened",
+no "no progress". Judging is what the general is FOR. Every line carries the
+turn it happened on, and lines render in turn order. Causes are stated only when
 an event actually carries them (`CityFiredEvent` knows it destroyed the
 target; a bare `UnitRemovedEvent` does not say why the unit died, so the
 line says "lost", not "lost in combat").
@@ -64,6 +65,12 @@ CityCoord = Callable[[CityId], Coord | None]
 """City-id to coordinate. City positions are static, so this leaks no
 fog-gated truth."""
 
+NowTurn = Callable[[], int]
+"""The current game turn on demand. Every event is turn-stamped at RECORD
+time (not collect time) so the ledger renders in temporal order — the caller
+closes over the game it owns (layering: the ai layer never touches the
+engine's turn counter directly, exactly like the other oracles here)."""
+
 _Section = TaskForceId | None
 """Where a line is booked: a task-force id, or `None` for the general
 (UNASSIGNED) section."""
@@ -115,25 +122,28 @@ class TaskForceLedger:
         registry: RegistryProvider,
         own_unit_kind: OwnUnitKind,
         city_coord: CityCoord,
+        now_turn: NowTurn,
     ) -> None:
         self._player_id = player_id
         self._registry = registry
         self._own_unit_kind = own_unit_kind
         self._city_coord = city_coord
+        self._now_turn = now_turn
 
         # Persistent across epochs: unit ids known to be ours (kind label
         # remembered while the unit was alive), so a later loss of an
         # UNASSIGNED unit is still attributable after it left the map.
         self._known_own: dict[UnitId, str] = {}
 
-        # Per-epoch books (cleared by `reset`).
-        self._losses: list[tuple[_Section, UnitId, Coord, str | None]] = []
-        self._hits: list[tuple[_Section, UnitId, Coord]] = []
-        self._disbands: list[tuple[_Section, UnitId, Coord]] = []
-        self._arrivals: list[tuple[_Section, UnitId, Coord]] = []
-        self._captures: list[tuple[_Section, Coord]] = []
-        self._deliveries: list[tuple[str, UnitId, Coord]] = []
-        self._refusals: list[tuple[_Section, Refusal]] = []
+        # Per-epoch books (cleared by `reset`). Each row leads with the turn
+        # it was booked on, for temporal ordering at render time.
+        self._losses: list[tuple[int, _Section, UnitId, Coord, str | None]] = []
+        self._hits: list[tuple[int, _Section, UnitId, Coord]] = []
+        self._disbands: list[tuple[int, _Section, UnitId, Coord]] = []
+        self._arrivals: list[tuple[int, _Section, UnitId, Coord]] = []
+        self._captures: list[tuple[int, _Section, Coord]] = []
+        self._deliveries: list[tuple[int, str, UnitId, Coord]] = []
+        self._refusals: list[tuple[int, _Section, Refusal]] = []
         # Units whose destruction was already booked with its cause from
         # `CityFiredEvent`; the engine's follow-up `UnitRemovedEvent` for
         # the same unit is bookkeeping-duplicate, not a second fact.
@@ -160,7 +170,7 @@ class TaskForceLedger:
         if kind is None:
             return
         self._known_own[event.unit_id] = kind
-        self._deliveries.append((kind, event.unit_id, event.at))
+        self._deliveries.append((self._now_turn(), kind, event.unit_id, event.at))
 
     def record_unit_moved(self, event: UnitMovedEvent) -> None:
         """Moves are visible in the board snapshot and are not booked — with
@@ -175,7 +185,7 @@ class TaskForceLedger:
             and isinstance(force.objective.target, Coord)
             and event.to == force.objective.target
         ):
-            self._arrivals.append((force.tf_id, event.unit_id, event.to))
+            self._arrivals.append((self._now_turn(), force.tf_id, event.unit_id, event.to))
 
     def record_unit_removed(self, event: UnitRemovedEvent) -> None:
         """A loss. The event does not say WHY the unit died (combat, failed
@@ -185,7 +195,9 @@ class TaskForceLedger:
             return  # already booked with its cause via CityFiredEvent
         ours, section = self._claim(event.unit_id)
         if ours:
-            self._losses.append((section, event.unit_id, event.last_coord, None))
+            self._losses.append(
+                (self._now_turn(), section, event.unit_id, event.last_coord, None)
+            )
         self._known_own.pop(event.unit_id, None)
 
     def record_unit_disbanded(self, event: UnitDisbandedEvent) -> None:
@@ -193,7 +205,9 @@ class TaskForceLedger:
         distinguish, so neither does the line)."""
         ours, section = self._claim(event.unit_id)
         if ours:
-            self._disbands.append((section, event.unit_id, event.last_coord))
+            self._disbands.append(
+                (self._now_turn(), section, event.unit_id, event.last_coord)
+            )
         self._known_own.pop(event.unit_id, None)
 
     def record_city_fired(self, event: CityFiredEvent) -> None:
@@ -211,10 +225,12 @@ class TaskForceLedger:
             self._cause_booked.add(event.target_id)
             self._known_own.pop(event.target_id, None)
             self._losses.append(
-                (section, event.target_id, event.target_coord, "city artillery")
+                (self._now_turn(), section, event.target_id, event.target_coord, "city artillery")
             )
         elif event.hit:
-            self._hits.append((section, event.target_id, event.target_coord))
+            self._hits.append(
+                (self._now_turn(), section, event.target_id, event.target_coord)
+            )
 
     def record_city_captured(self, event: CityCapturedEvent) -> None:
         """Our capture succeeding, booked under every force whose objective
@@ -226,13 +242,14 @@ class TaskForceLedger:
         coord = self._city_coord(event.city_id)
         if coord is None:
             return
+        turn = self._now_turn()
         targeting = [
             tf.tf_id for tf in self._registry().forces if tf.objective.target == coord
         ]
         if targeting:
-            self._captures.extend((tf_id, coord) for tf_id in targeting)
+            self._captures.extend((turn, tf_id, coord) for tf_id in targeting)
         else:
-            self._captures.append((None, coord))
+            self._captures.append((turn, None, coord))
 
     # ---- refusal replay ------------------------------------------------------------
 
@@ -240,12 +257,13 @@ class TaskForceLedger:
         """Replay the cannot-comply channel: each refused order appears in
         the next briefing under the force it addressed (if that force
         stands), else in the general section."""
+        turn = self._now_turn()
         for refusal in refusals:
             match = _TF_IN_ORDER_TEXT.match(refusal.order_text)
             section: _Section = None
             if match is not None and self._registry().get(match.group(1)) is not None:
                 section = match.group(1)
-            self._refusals.append((section, refusal))
+            self._refusals.append((turn, section, refusal))
 
     # ---- reading + epoch turnover -----------------------------------------------------
 
@@ -294,64 +312,69 @@ class TaskForceLedger:
 
     def _booked_sections(self) -> list[_Section]:
         return (
-            [s for s, _, _, _ in self._losses]
-            + [s for s, _, _ in self._hits]
-            + [s for s, _, _ in self._disbands]
-            + [s for s, _, _ in self._arrivals]
-            + [s for s, _ in self._captures]
-            + [s for s, _ in self._refusals]
+            [s for _, s, _, _, _ in self._losses]
+            + [s for _, s, _, _ in self._hits]
+            + [s for _, s, _, _ in self._disbands]
+            + [s for _, s, _, _ in self._arrivals]
+            + [s for _, s, _ in self._captures]
+            + [s for _, s, _ in self._refusals]
         )
 
     def _lines_for(self, section: _Section) -> tuple[str, ...]:
-        """One section's lines, deterministic: deliveries (general only),
-        losses grouped by cell and cause, hits, disbands, arrivals grouped
-        by cell, captures, refusals."""
-        lines: list[str] = []
+        """One section's lines, each prefixed with its turn and rendered in
+        turn order. Within a turn the order is deterministic: deliveries
+        (general only), losses grouped by cell and cause, hits, disbands,
+        arrivals grouped by cell, captures, refusals. The stable sort by turn
+        preserves that within-turn order (planning/08 "TASKING CONTINUITY")."""
+        entries: list[tuple[int, str]] = []
         if section is None:
-            lines += [
-                f"{kind} {_uid(unit_id)} delivered at {_at(at)}"
-                for kind, unit_id, at in self._deliveries
+            entries += [
+                (turn, f"{kind} {_uid(unit_id)} produced at {_at(at)}")
+                for turn, kind, unit_id, at in self._deliveries
             ]
 
-        loss_groups: dict[tuple[Coord, str | None], list[UnitId]] = {}
-        for sec, unit_id, at, cause in self._losses:
+        # Losses group per turn+cell+cause: same-turn deaths at one cell read
+        # as one line; deaths across turns stay separate (each carries a turn).
+        loss_groups: dict[tuple[int, Coord, str | None], list[UnitId]] = {}
+        for turn, sec, unit_id, at, cause in self._losses:
             if sec == section:
-                loss_groups.setdefault((at, cause), []).append(unit_id)
-        for (at, cause), unit_ids in loss_groups.items():
+                loss_groups.setdefault((turn, at, cause), []).append(unit_id)
+        for (turn, at, cause), unit_ids in loss_groups.items():
             ids = ", ".join(_uid(u) for u in unit_ids)
             suffix = f" to {cause}" if cause is not None else ""
-            lines.append(f"lost {ids}{suffix} at {_at(at)}")
+            entries.append((turn, f"lost {ids}{suffix} at {_at(at)}"))
 
-        lines += [
-            f"{_uid(unit_id)} hit by city artillery at {_at(at)}"
-            for sec, unit_id, at in self._hits
+        entries += [
+            (turn, f"{_uid(unit_id)} hit by city artillery at {_at(at)}")
+            for turn, sec, unit_id, at in self._hits
             if sec == section
         ]
-        lines += [
-            f"{_uid(unit_id)} disbanded at {_at(at)}"
-            for sec, unit_id, at in self._disbands
+        entries += [
+            (turn, f"{_uid(unit_id)} disbanded at {_at(at)}")
+            for turn, sec, unit_id, at in self._disbands
             if sec == section
         ]
 
-        arrival_groups: dict[Coord, list[UnitId]] = {}
-        for sec, unit_id, at in self._arrivals:
+        arrival_groups: dict[tuple[int, Coord], list[UnitId]] = {}
+        for turn, sec, unit_id, at in self._arrivals:
             if sec == section:
-                bucket = arrival_groups.setdefault(at, [])
+                bucket = arrival_groups.setdefault((turn, at), [])
                 if unit_id not in bucket:
                     bucket.append(unit_id)
-        lines += [
-            f"{', '.join(_uid(u) for u in unit_ids)} arrived at {_at(at)}"
-            for at, unit_ids in arrival_groups.items()
+        entries += [
+            (turn, f"{', '.join(_uid(u) for u in unit_ids)} arrived at {_at(at)}")
+            for (turn, at), unit_ids in arrival_groups.items()
         ]
 
-        lines += [
-            f"captured {_at(at)} — now ours"
-            for sec, at in self._captures
+        entries += [
+            (turn, f"captured {_at(at)} — now ours")
+            for turn, sec, at in self._captures
             if sec == section
         ]
-        lines += [
-            f"order refused: {refusal.order_text} — {refusal.reason}"
-            for sec, refusal in self._refusals
+        entries += [
+            (turn, f"order refused: {refusal.order_text} — {refusal.reason}")
+            for turn, sec, refusal in self._refusals
             if sec == section
         ]
-        return tuple(lines)
+        entries.sort(key=lambda entry: entry[0])  # stable: within-turn order kept
+        return tuple(f"t{turn}: {line}" for turn, line in entries)

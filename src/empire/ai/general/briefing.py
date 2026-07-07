@@ -2,9 +2,10 @@
 
 Renders the strategic picture the general reads each epoch, in the frozen
 cache-native layout (planning/08-llm-general.md, wrinkle #5): the static
-ORDERS CONTRACT first, then the semi-stable CURRENT TASKINGS ledger, then
-the volatile board sections (MAP / UNITS / MY CITIES / NEUTRAL CITIES /
-KNOWN ENEMY), with the turn cue LAST. Fog-honest by construction: every
+ORDERS CONTRACT first, then the semi-stable CURRENT TASKINGS ledger and the
+FLEET DISPATCHES ledger (events outside every task force, omitted when
+empty), then the volatile board sections (MAP / UNITS / MY CITIES / NEUTRAL
+CITIES / KNOWN ENEMY), with the turn cue LAST. Fog-honest by construction: every
 tile and every enemy fact is drawn from the player's `WorldView` — current
 vision or remembered snapshots with their age — never from real map truth.
 The renderer is strictly read-only over game state.
@@ -109,6 +110,7 @@ class BriefingRenderer:
         task_forces: Mapping[TaskForceId, TaskForce],
         events: Mapping[TaskForceId, Sequence[str]],
         turn: int,
+        general_events: Sequence[str] = (),
     ) -> Briefing:
         roster = self._roster(view, task_forces)
         visible, stale = self._enemy_sightings(view, turn)
@@ -116,6 +118,9 @@ class BriefingRenderer:
         lines: list[str] = [ORDERS_CONTRACT_V7, ""]
         lines += self._taskings_lines(task_forces, events)
         lines.append("")
+        if general_events:
+            lines += self._fleet_dispatches_lines(general_events)
+            lines.append("")
         lines += self._map_lines(view, roster, visible)
         lines.append("")
         lines += self._units_lines(roster)
@@ -161,6 +166,24 @@ class BriefingRenderer:
             else:
                 lines.append(f"    since: {reported[0]}")
                 lines += [f"      {line}" for line in reported[1:]]
+        return lines
+
+    # ---- FLEET DISPATCHES ---------------------------------------------------
+
+    def _fleet_dispatches_lines(self, general_events: Sequence[str]) -> list[str]:
+        """The general/fleet ledger section: turn-stamped facts about forces
+        OUTSIDE every task force — production deliveries, losses of unassigned
+        units, untargeted captures, and refusals that named no standing force.
+        Rendered only when there is something to report; the caller omits the
+        block (and its trailing blank) entirely when `general_events` is empty
+        so the briefing carries no "none" noise. Placed right after CURRENT
+        TASKINGS and before the volatile board, in the semi-stable cache zone
+        (planning/08 wrinkle #5)."""
+        lines = [
+            "FLEET DISPATCHES  (events since your last briefing; forces outside",
+            "  every task force)",
+        ]
+        lines += [f"  {line}" for line in general_events]
         return lines
 
     @staticmethod

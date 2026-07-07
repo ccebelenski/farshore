@@ -29,7 +29,7 @@ from typing import Protocol
 from empire.ai.general.briefing import BriefingRenderer
 from empire.ai.general.client import ChatAnswer
 from empire.ai.general.compiler import DoctrineCompiler, TaskForceView
-from empire.ai.general.ledger import TaskForceLedger
+from empire.ai.general.ledger import LedgerReport, TaskForceLedger
 from empire.ai.general.primer import PRIMER
 from empire.ai.general.registry import TaskForceRegistry
 from empire.ai.general.trace import EpochTraceWriter
@@ -263,7 +263,14 @@ class LlmGeneralController:
         the registry is left exactly as it stood. Unexpected exceptions
         propagate to plan_turn's floor, which degrades identically."""
         task_forces = {tf.tf_id: tf for tf in self._registry.forces}
-        briefing = self._renderer.render(view, task_forces, self._events(), view.turn)
+        # Collect the ledger ONCE: the per-TF lines drive CURRENT TASKINGS and
+        # the general lines drive FLEET DISPATCHES (the events the briefing
+        # previously never showed — unassigned losses, deliveries, orphaned
+        # refusals). `collect` is read-only; `_book_epoch` resets afterwards.
+        report = self._collect_ledger()
+        briefing = self._renderer.render(
+            view, task_forces, report.by_task_force, view.turn, report.general
+        )
         record: dict[str, object] = {"turn": view.turn, "briefing": briefing.text}
         try:
             answer = self._client.complete(
@@ -329,13 +336,14 @@ class LlmGeneralController:
         self._ledger.reset()
         self._ledger.note_refusals(self._last_refusals)
 
-    def _events(self) -> Mapping[TaskForceId, tuple[str, ...]]:
-        """Per-TF ledger lines for the briefing, straight from the event
-        ledger when one is attached (unwired: empty, refusals still retained
-        on `last_refusals`)."""
+    def _collect_ledger(self) -> LedgerReport:
+        """This epoch's factual lines from the event ledger — both the per-TF
+        `by_task_force` (CURRENT TASKINGS) and the `general` section (FLEET
+        DISPATCHES). Empty when unwired (refusals still retained on
+        `last_refusals`). Collected once per epoch; `collect` is read-only."""
         if self._ledger is None:
-            return {}
-        return self._ledger.collect().by_task_force
+            return LedgerReport(by_task_force={}, general=())
+        return self._ledger.collect()
 
     def _context(
         self,
