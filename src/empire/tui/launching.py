@@ -169,6 +169,17 @@ class GameLauncher:
         ledger.attach(game.event_bus)
         controller.attach_ledger(ledger)
 
+        # The general's war diary: one JSONL per game, next to the config
+        # (post-game analysis + the fine-tuning corpus, planning/08).
+        from datetime import datetime
+
+        from empire.ai.general.trace import EpochTraceWriter
+        from empire.config import ConfigStore
+
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        trace_path = ConfigStore.default_path().parent / "traces" / f"general-{stamp}.jsonl"
+        controller.attach_trace(EpochTraceWriter(trace_path))
+
     @staticmethod
     def list_saves(directory: Path | None = None) -> list[Path]:
         """Save files in `directory` (default: cwd), newest first. A save is

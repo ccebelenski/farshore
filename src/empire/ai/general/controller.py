@@ -32,6 +32,7 @@ from empire.ai.general.compiler import DoctrineCompiler, TaskForceView
 from empire.ai.general.ledger import TaskForceLedger
 from empire.ai.general.primer import PRIMER
 from empire.ai.general.registry import TaskForceRegistry
+from empire.ai.general.trace import EpochTraceWriter
 from empire.ai.general.validator import DoctrineValidator, ValidationContext
 from empire.ai.search.follower import PlanFollower
 from empire.ai.search.portfolio import PortfolioAI
@@ -94,12 +95,19 @@ class LlmGeneralController:
         # Event-sourced briefing history; wired post-construction by the
         # layer that owns the game's bus (see GameLauncher._wire_general).
         self._ledger: TaskForceLedger | None = None
+        self._trace: EpochTraceWriter | None = None
 
     def attach_ledger(self, ledger: TaskForceLedger) -> None:
         """Give the controller its event ledger. The caller owns the bus and
         has already attached the ledger to it; the controller only consumes
         reports at briefing time and books refusals back."""
         self._ledger = ledger
+
+    def attach_trace(self, trace: EpochTraceWriter) -> None:
+        """Give the controller its war diary: every epoch attempt — success
+        or failure — is appended as one JSONL record for post-game analysis
+        and the fine-tuning corpus."""
+        self._trace = trace
 
     # ---- observability (for the TUI) -------------------------------------------
 
@@ -256,18 +264,27 @@ class LlmGeneralController:
         propagate to plan_turn's floor, which degrades identically."""
         task_forces = {tf.tf_id: tf for tf in self._registry.forces}
         briefing = self._renderer.render(view, task_forces, self._events(), view.turn)
+        record: dict[str, object] = {"turn": view.turn, "briefing": briefing.text}
         try:
             answer = self._client.complete(
                 PRIMER + "\n" + briefing.text, seed=self._seed + view.turn
             )
         except Exception as exc:  # one seam, one failure path
             self._fail(f"t{view.turn}: general unavailable: {exc}")
+            self._write_trace(record, failure=self._last_failure)
             return False
+        record |= {
+            "answer": answer.text,
+            "model": answer.model,
+            "finish": answer.finish_reason,
+            "attempts": answer.attempts,
+        }
         if not answer.delivered:
             self._fail(
                 f"t{view.turn}: answer not delivered (finish={answer.finish_reason}, "
                 f"{answer.attempts} attempts)"
             )
+            self._write_trace(record, failure=self._last_failure)
             return False
         validation = self._validator.validate(
             answer.text, self._context(view, task_forces, briefing.markers)
@@ -276,6 +293,7 @@ class LlmGeneralController:
             self._last_refusals = validation.refusals
             self._fail(f"t{view.turn}: no amendment accepted ({len(validation.refusals)} refused)")
             self._book_epoch()
+            self._write_trace(record, failure=self._last_failure)
             return False
         registry, apply_refusals = self._registry.apply(validation.doctrine, roster)
         self._registry = registry
@@ -283,7 +301,23 @@ class LlmGeneralController:
         self._apply_builds(validation.doctrine)
         self._last_failure = None
         self._book_epoch()
+        record["amendments"] = [repr(a) for a in validation.doctrine.amendments]
+        self._write_trace(record, failure=None)
         return True
+
+    def _write_trace(self, record: dict[str, object], failure: str | None) -> None:
+        if self._trace is None:
+            return
+        record["failure"] = failure
+        record["refusals"] = [
+            {"order": r.order_text, "reason": r.reason} for r in self._last_refusals
+        ]
+        record["registry"] = [
+            f"TF-{tf.tf_id}: {sorted(int(u) for u in tf.members)} "
+            f"{tf.objective.verb.value} {tf.objective.target} | {tf.why}"
+            for tf in self._registry.forces
+        ]
+        self._trace.write(record)
 
     def _book_epoch(self) -> None:
         """Close the ledger's books for the epoch whose lines the briefing
