@@ -1367,7 +1367,11 @@ def _is_shore(player: Player, real_map: Map, c: Coord) -> bool:
 
 
 def _explore_flood(
-    unit: Unit, player: Player, real_map: Map, avoid_occupied: bool = False
+    unit: Unit,
+    player: Player,
+    real_map: Map,
+    avoid_occupied: bool = False,
+    avoid_artillery: RuleSet | None = None,
 ) -> tuple[dict[Coord, int], dict[Coord, Coord]]:
     """BFS over the unit's known-passable cells from its position.
     Returns (distance, parent) maps. Deterministic: neighbors expand in
@@ -1376,7 +1380,12 @@ def _explore_flood(
     Units do NOT wall the graph: occupancy is transient (a fresh produce or
     a fellow explorer moves next turn), and treating it as terrain boxed
     explorers into their own cell and woke them with "nothing to explore".
-    Traffic is handled at EXECUTION time — sidestep or hold for a turn."""
+    Traffic is handled at EXECUTION time — sidestep or hold for a turn.
+
+    `avoid_artillery` (the ruleset) walls off cells inside a discovered
+    hostile gun ring the unit is currently outside of, so a scout ROUTES
+    AROUND known forts to reach safe frontier instead of planning a path
+    into the guns and stalling at the edge (spec §4.7)."""
     from collections import deque
 
     dist: dict[Coord, int] = {unit.coord: 0}
@@ -1391,6 +1400,10 @@ def _explore_flood(
                 continue
             if avoid_occupied and real_map.units_at(nb):
                 continue  # re-pathing around a jam: occupied cells are walls
+            if avoid_artillery is not None and step_would_enter_artillery_zone(
+                unit, nb, real_map, avoid_artillery
+            ):
+                continue  # never plan a scout route into a known gun ring
             dist[nb] = dist[cur] + 1
             parent[nb] = cur
             q.append(nb)
@@ -1528,7 +1541,12 @@ def _run_explore(
             and unit.range <= _fighter_at_bingo(unit, player, real_map, unit.coord) + 1
         ):
             return wake()  # bingo fuel: just enough to fly home
-        dist, parent = _explore_flood(unit, player, real_map)
+        # Plan around known gun rings: a scout skirts discovered forts to
+        # keep mapping safe frontier, rather than aiming at a frontier past
+        # the guns and stalling at the edge (the old wake-with-no-move bug).
+        dist, parent = _explore_flood(
+            unit, player, real_map, avoid_artillery=rules
+        )
         target, any_frontier = _pick_explore_target(
             unit, player, real_map, claims, dist
         )

@@ -1099,3 +1099,67 @@ def test_heading_still_wakes_on_revealed_terrain(
     assert mover.coord == Coord(1, 0)
     assert mover.standing_order is None
     assert UnitId(1) in result.interrupted_unit_ids
+
+
+def test_explore_flood_routes_around_a_known_gun_ring(
+    p1: Player, p2: Player, resolver: CombatResolver
+) -> None:
+    """`_explore_flood(avoid_artillery=rules)` walls off the gun ring of a
+    discovered hostile city the unit sits outside of, so a scout PLANS a
+    route around known forts instead of aiming through them (the playtest
+    'explore freezes at the artillery edge, loses the turn' bug)."""
+    from empire.core.engine import _explore_flood
+
+    del resolver
+    m = _land_map(7, 3)
+    _city_at(m, Coord(5, 1), p2, 1)  # hostile fort
+    p1.view.visible = {Coord(x, y) for x in range(7) for y in range(3)}
+    army = Army(UnitId(1), p1, Coord(0, 1))
+    m.place_unit(army, Coord(0, 1))
+    fortified = replace(
+        STANDARD, city_artillery_range=1, city_artillery_hit_prob=0.0,
+        city_artillery_pin_prob=0.0,
+    )
+    # range-1 ring around (5,1): x in {4,6}, y in {0,1,2} (the (5,*) column
+    # is the city cell + neighbours; an army can't route through the city).
+    ring = {Coord(4, y) for y in range(3)} | {Coord(6, y) for y in range(3)}
+
+    plain, _ = _explore_flood(army, p1, m)
+    guarded, _ = _explore_flood(army, p1, m, avoid_artillery=fortified)
+
+    assert ring & set(plain)          # unguarded flood walks into the guns
+    assert not (ring & set(guarded))  # guarded flood skirts every ring cell
+    assert Coord(1, 1) in guarded     # safe ground stays reachable
+
+
+def test_explore_skirts_gun_ring_and_keeps_exploring(
+    p1: Player, p2: Player, resolver: CombatResolver
+) -> None:
+    """End to end: a scout whose nearest frontier lies past a known fort no
+    longer wakes-with-no-move — it routes to a safe frontier, steps, holds
+    its Explore order, and never sits inside the ring."""
+    from empire.core.standing_order import Explore
+
+    # 8x4: a range-1 ring around (4,1) blocks the middle; row 3 is a safe lane.
+    m = _land_map(8, 4)
+    _city_at(m, Coord(4, 1), p2, 1)  # ring: x in {3,4,5}, y in {0,1,2}
+    army = Army(UnitId(1), p1, Coord(2, 1))
+    m.place_unit(army, Coord(2, 1))
+    army.standing_order = Explore()
+    fortified = replace(
+        STANDARD, city_artillery_range=1, city_artillery_hit_prob=0.0,
+        city_artillery_pin_prob=0.0,
+    )
+    # Everything seen except the far-east column 7 (frontier is column 6),
+    # reachable only by going around the ring via the row-3 lane.
+    p1.view.visible = {
+        Coord(x, y) for x in range(8) for y in range(4) if x != 7
+    }
+
+    result = apply_standing_orders(p1, m, fortified, resolver, random.Random(0))
+
+    assert isinstance(army.standing_order, Explore)  # did NOT freeze/wake
+    assert UnitId(1) in result.moved_unit_ids        # actually moved
+    assert army.coord != Coord(2, 1)                 # off its start
+    # never stepped into the gun ring (chebyshev > 1 from the fort)
+    assert army.coord.chebyshev_to(Coord(4, 1)) > 1
