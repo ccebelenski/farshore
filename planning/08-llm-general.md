@@ -637,6 +637,27 @@ narrator tier; then the SHOULD gate: playtest with it ON and decide if it's fun.
         arrives, go — staging past your own trigger is production wasted.
       - Cities are your only source of force. Match what each builds to the
         campaign's next phase, not its last one.
+      - You cannot take, defend, or avoid what you cannot see. Keep a force
+        scouting the fog — a general blind past his own walls is losing already.
+      - One force cannot hold your cities and conquer the enemy's at once.
+        As your strength grows, divide it: a garrison, a spearhead, an eye.
+      - Conquest is won by taking cities, not by keeping them. A general who
+        only defends has already chosen to lose slowly — press outward while you can.
+  DISPOSITION MAXIMS (#7-9, added 2026-07-06 from the FIRST WHOLE-GAME TRACE): the
+  general has the rules but no theory of victory, so its default temperament is
+  ultra-conservative TURTLE — trace of game 1 showed it never scouted (0 SCOUT in 80
+  turns, "world unexplored"), ran ONE task force the whole game, captured the one
+  visible enemy city and then hugged it while the human out-expanded 2.4x. #7 = recon
+  (fixes blindness), #8 = divide-force (fixes the single blob — the model maintains
+  given TFs but never spontaneously spawns siblings from a cold start), #9 = anti-
+  turtle posture (the direct antidote). Reframe: STANDING DOCTRINE is not a tactical
+  patch-list, it is where the general's CHARACTER / theory-of-victory is injected —
+  the primer teaches mechanics, the maxims teach disposition.
+  TEST NOTE: turtle is an EMERGENT whole-game failure, invisible to staged-epoch
+  batteries (they hand the model a mid-campaign board with TFs pre-drawn). The test is
+  another PLAYTEST + trace read; the deployment IS the experiment. Watch for
+  over-correction (reckless over-expansion, force-scattering, doctrine parroting) now
+  that 3 of 9 maxims push aggression.
   SEQUENCING: instrument fixes first (contract v5 REINFORCE + repaired canonical
   histories + cache-native layout = corrected baseline, arcs re-run as regression
   gate), THEN doctrine as a single measured arm. Metrics: A1 churn, B1 reserve

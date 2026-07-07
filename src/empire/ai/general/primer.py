@@ -103,4 +103,10 @@ STANDING DOCTRINE  (tested — lessons your service has already paid for)
     arrives, go — staging past your own trigger is production wasted.
   - Cities are your only source of force. Match what each builds to the
     campaign's next phase, not its last one.
+  - You cannot take, defend, or avoid what you cannot see. Keep a force
+    scouting the fog — a general blind past his own walls is losing already.
+  - One force cannot hold your cities and conquer the enemy's at once.
+    As your strength grows, divide it: a garrison, a spearhead, an eye.
+  - Conquest is won by taking cities, not by keeping them. A general who
+    only defends has already chosen to lose slowly — press outward while you can.
 """
