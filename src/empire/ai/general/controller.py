@@ -23,6 +23,7 @@ exactly `PortfolioAI`.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Protocol
 
@@ -268,8 +269,9 @@ class LlmGeneralController:
         # previously never showed — unassigned losses, deliveries, orphaned
         # refusals). `collect` is read-only; `_book_epoch` resets afterwards.
         report = self._collect_ledger()
+        live_events, general_events = self._route_ledger(report, task_forces)
         briefing = self._renderer.render(
-            view, task_forces, report.by_task_force, view.turn, report.general
+            view, task_forces, live_events, view.turn, general_events
         )
         record: dict[str, object] = {"turn": view.turn, "briefing": briefing.text}
         try:
@@ -344,6 +346,41 @@ class LlmGeneralController:
         if self._ledger is None:
             return LedgerReport(by_task_force={}, general=())
         return self._ledger.collect()
+
+    def _route_ledger(
+        self,
+        report: LedgerReport,
+        task_forces: Mapping[TaskForceId, TaskForce],
+    ) -> tuple[Mapping[TaskForceId, tuple[str, ...]], tuple[str, ...]]:
+        """Split the ledger's per-TF lines by whether the force still stands.
+
+        A force still in the registry keeps its lines in CURRENT TASKINGS
+        (the renderer's `since:` block, keyed by tf id). A force pruned out
+        between epochs — its last member lost, so `_taskings_lines` renders no
+        block for it — would otherwise drop its booked lines on the floor; they
+        fall through to FLEET DISPATCHES instead, each attributed
+        `TF-<id> (dissolved): <line>` so the turn stamp still reads naturally.
+        The general section and the orphaned lines are merged and stable-sorted
+        by embedded turn so the fleet ledger reads in temporal order."""
+        live: dict[TaskForceId, tuple[str, ...]] = {}
+        orphaned: list[str] = []
+        for tf_id, lines in report.by_task_force.items():
+            if tf_id in task_forces:
+                live[tf_id] = tuple(lines)
+            else:
+                orphaned += [f"TF-{tf_id} (dissolved): {line}" for line in lines]
+        if not orphaned:
+            return live, tuple(report.general)
+        merged = sorted((*report.general, *orphaned), key=self._embedded_turn)
+        return live, tuple(merged)
+
+    @staticmethod
+    def _embedded_turn(line: str) -> int:
+        """The turn a ledger line was stamped with (its leading `t<n>:`, after
+        any `TF-<id> (dissolved):` prefix). Zero if none — never on real lines,
+        which the ledger always turn-stamps; only a defensive floor."""
+        match = re.search(r"t(\d+):", line)
+        return int(match.group(1)) if match is not None else 0
 
     def _context(
         self,

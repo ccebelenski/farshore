@@ -386,6 +386,52 @@ def test_unassigned_loss_surfaces_in_next_epochs_fleet_dispatches() -> None:
     assert "t3: lost #16 at (3,3)" in client.prompts[1]
 
 
+def test_dissolved_task_force_loss_surfaces_in_fleet_dispatches() -> None:
+    """The playtest bug: a single-unit scout TF whose only member is lost. The
+    loss is booked to that TF at death time (the unit still belonged to it),
+    then the empty TF is pruned out of the registry on the next turn. Because
+    CURRENT TASKINGS renders a `since:` block only for LIVE forces, the
+    dissolved TF's booked line reaches no section and the unit leaves the board
+    with NO report anywhere. The fix routes such orphaned per-TF lines into
+    FLEET DISPATCHES, attributed `TF-<id> (dissolved): <line>`."""
+    game, p1 = _staged_board()
+    scout_form = "FORM TF 7: UNITS #3 | SCOUT (10,2) | scout the eastern approach"
+    client = _RecordingClient([scout_form, CONTINUE_ANSWER])
+    controller = LlmGeneralController(client=client, cadence=4)
+
+    own_kinds = {3: "army"}
+    clock = [1]
+    ledger = TaskForceLedger(
+        player_id=p1.id,
+        registry=lambda: controller.registry,
+        own_unit_kind=lambda uid: own_kinds.get(int(uid)),
+        city_coord=lambda cid: None,
+        now_turn=lambda: clock[0],
+    )
+    controller.attach_ledger(ledger)
+
+    # Epoch 1 (t1): forms TF-7 around the lone scout #3.
+    controller.plan_turn(_view(game, p1, 1))
+    assert controller.registry.get("7") is not None
+
+    # Between epochs the scout is killed at t3 (booked to TF-7 while it still
+    # belonged), then removed from the board so the next prune dissolves TF-7.
+    clock[0] = 3
+    del own_kinds[3]  # sunk: the live-map oracle no longer answers for #3
+    ledger.record_unit_removed(UnitRemovedEvent(unit_id=UnitId(3), last_coord=Coord(9, 2)))
+    unit = game.map.unit_by_id(UnitId(3))
+    assert unit is not None
+    game.map.remove_unit(unit)
+
+    # Epoch 2 (t5): TF-7 is gone from the registry; its loss must still be
+    # reported — folded into FLEET DISPATCHES, attributed to the dissolved TF.
+    controller.plan_turn(_view(game, p1, 5))
+    briefing = client.prompts[1]
+    assert controller.registry.get("7") is None
+    assert "FLEET DISPATCHES" in briefing
+    assert "TF-7 (dissolved): t3: lost #3 at (9,2)" in briefing
+
+
 # ---- the factory (build_general) -----------------------------------------------------------
 
 
