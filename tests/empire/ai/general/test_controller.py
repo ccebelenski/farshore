@@ -38,6 +38,9 @@ FORM_ANSWER = (
     "BUILD (0,3): FIGHTER | air cover for the push"
 )
 CONTINUE_ANSWER = "TF 1: CONTINUE | keep pressing east"
+# Plan-first: a PLAN line ahead of the same orders (the commander's plan).
+PLAN = "Strike east and take (11,2); this plan ends when the enemy city falls."
+PLAN_FORM_ANSWER = f"PLAN: {PLAN}\n{FORM_ANSWER}"
 
 
 # ---- staged board (the compiler test's shape) --------------------------------------
@@ -430,6 +433,59 @@ def test_dissolved_task_force_loss_surfaces_in_fleet_dispatches() -> None:
     assert controller.registry.get("7") is None
     assert "FLEET DISPATCHES" in briefing
     assert "TF-7 (dissolved): t3: lost #3 at (9,2)" in briefing
+
+
+# ---- COMMANDER'S PLAN: the plan persists and replays across epochs ----------------------
+
+
+def test_plan_from_epoch_one_replays_in_epoch_two_briefing() -> None:
+    """The commander's PLAN line is captured in epoch 1 and replayed, turn-
+    stamped, in the next briefing's COMMANDER'S PLAN block — the first briefing
+    (no prior plan) omits it."""
+    game, p1 = _staged_board()
+    client = _RecordingClient([PLAN_FORM_ANSWER, CONTINUE_ANSWER])
+    controller = LlmGeneralController(client=client, cadence=4)
+
+    controller.plan_turn(_view(game, p1, 1))  # epoch 1
+    assert "COMMANDER'S PLAN" not in client.prompts[0]
+
+    controller.plan_turn(_view(game, p1, 5))  # epoch 2
+    assert f"COMMANDER'S PLAN (as of t1): {PLAN}" in client.prompts[1]
+    assert "Evaluate your plan against the current situation" in client.prompts[1]
+
+
+def test_plan_survives_a_failed_epoch() -> None:
+    """A failed (undelivered) epoch keeps the previously stored plan; it still
+    replays in the next successful epoch's briefing."""
+    game, p1 = _staged_board()
+
+    class _PlanThenFailThenContinue:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+            self.calls = 0
+
+        def complete(self, prompt: str, *, seed: int) -> ChatAnswer:
+            del seed
+            self.prompts.append(prompt)
+            self.calls += 1
+            if self.calls == 1:
+                return ChatAnswer(
+                    text=PLAN_FORM_ANSWER, finish_reason="stop", attempts=1, model="stub"
+                )
+            if self.calls == 2:  # undelivered: the epoch fails
+                return ChatAnswer(
+                    text="half an ans", finish_reason="length", attempts=1, model="stub"
+                )
+            return ChatAnswer(
+                text=CONTINUE_ANSWER, finish_reason="stop", attempts=1, model="stub"
+            )
+
+    client = _PlanThenFailThenContinue()
+    controller = LlmGeneralController(client=client, cadence=4)
+    controller.plan_turn(_view(game, p1, 1))  # epoch 1: stores the plan
+    controller.plan_turn(_view(game, p1, 5))  # epoch 2: fails, plan retained
+    controller.plan_turn(_view(game, p1, 9))  # epoch 3: plan still replayed
+    assert f"COMMANDER'S PLAN (as of t1): {PLAN}" in client.prompts[2]
 
 
 # ---- the factory (build_general) -----------------------------------------------------------

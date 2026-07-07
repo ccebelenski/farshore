@@ -93,6 +93,11 @@ class LlmGeneralController:
         self._last_failure: str | None = None
         self._failure_log: list[str] = []
         self._last_refusals: tuple[Refusal, ...] = ()
+        # The commander's standing plan: the last delivered+validated epoch's
+        # PLAN line, replayed turn-stamped in the next briefing. A failed epoch
+        # keeps it (don't clear it); "" until the first epoch supplies one.
+        self._last_plan: str = ""
+        self._last_plan_turn: int = 0
         # Event-sourced briefing history; wired post-construction by the
         # layer that owns the game's bus (see GameLauncher._wire_general).
         self._ledger: TaskForceLedger | None = None
@@ -271,7 +276,13 @@ class LlmGeneralController:
         report = self._collect_ledger()
         live_events, general_events = self._route_ledger(report, task_forces)
         briefing = self._renderer.render(
-            view, task_forces, live_events, view.turn, general_events
+            view,
+            task_forces,
+            live_events,
+            view.turn,
+            general_events,
+            self._last_plan,
+            self._last_plan_turn or None,
         )
         record: dict[str, object] = {"turn": view.turn, "briefing": briefing.text}
         try:
@@ -308,6 +319,8 @@ class LlmGeneralController:
         self._registry = registry
         self._last_refusals = validation.refusals + apply_refusals
         self._apply_builds(validation.doctrine)
+        self._last_plan = validation.plan
+        self._last_plan_turn = view.turn
         self._last_failure = None
         self._book_epoch()
         record["amendments"] = [repr(a) for a in validation.doctrine.amendments]
@@ -318,6 +331,7 @@ class LlmGeneralController:
         if self._trace is None:
             return
         record["failure"] = failure
+        record["plan"] = self._last_plan
         record["refusals"] = [
             {"order": r.order_text, "reason": r.reason} for r in self._last_refusals
         ]

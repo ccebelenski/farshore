@@ -538,6 +538,42 @@ class TestDirectRules:
         assert all("no amendment" in r.reason for r in result.refusals)
 
 
+class TestCommandersPlan:
+    def _one(self, text: str) -> ValidationResult:
+        return DoctrineValidator().validate(text, CTX_B2)
+
+    def _b2(self) -> str:
+        return "TF 1: CONTINUE\nTF 2: CONTINUE\nTF 3: CONTINUE\nTF 4: CONTINUE"
+
+    def test_plan_line_is_skipped_and_extracted_orders_still_parse(self) -> None:
+        result = self._one(
+            "PLAN: Take (11,1), then sweep east; end this plan when the enemy "
+            "capital falls.\n" + self._b2()
+        )
+        assert result.clean
+        assert result.plan == (
+            "Take (11,1), then sweep east; end this plan when the enemy capital falls."
+        )
+        # The four standing TFs are all covered — the PLAN line neither refused
+        # as a stray nor consumed an order line.
+        assert len(result.doctrine.amendments) == 4
+
+    def test_no_plan_line_yields_empty_plan(self) -> None:
+        result = self._one(self._b2())
+        assert result.clean
+        assert result.plan == ""
+
+    def test_plan_spanning_two_lines_joins_until_first_order(self) -> None:
+        result = self._one(
+            "PLAN: Concentrate on the eastern city.\n"
+            "The plan ends when that city is mine.\n" + self._b2()
+        )
+        assert result.plan == (
+            "Concentrate on the eastern city. The plan ends when that city is mine."
+        )
+        assert len(result.doctrine.amendments) == 4
+
+
 def test_bracketed_adding_from_live_handshake_parses() -> None:
     """Regression: handshake (b) seed 2 copied the contract's optionality
     brackets literally — `[ADDING #16]` must parse as a clean launch pair."""

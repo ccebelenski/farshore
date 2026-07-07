@@ -33,9 +33,14 @@ from empire.core.unit import UNIT_REGISTRY, Unit
 ORDERS_CONTRACT_V7 = """\
 === ORDERS CONTRACT ===
 
-Your orders are AMENDMENTS to the standing task forces. Output ONLY lines in
-these forms — no other prose, headers, or commentary:
+Your orders are AMENDMENTS to the standing task forces.
 
+Begin with a PLAN line — in 1-2 sentences, your plan to win (the enemy holds
+zero cities) and the one condition that will end it. Then your orders.
+
+Output ONLY lines in these forms — no other prose, headers, or commentary:
+
+  PLAN: <plan>
   TF <id>: CONTINUE | <one line>
   TF <id>: REINFORCE UNITS <ids> | <one line>
   TF <id>: RETASK <VERB> <target> | <one line>
@@ -111,6 +116,8 @@ class BriefingRenderer:
         events: Mapping[TaskForceId, Sequence[str]],
         turn: int,
         general_events: Sequence[str] = (),
+        prior_plan: str = "",
+        prior_plan_turn: int | None = None,
     ) -> Briefing:
         roster = self._roster(view, task_forces)
         visible, stale = self._enemy_sightings(view, turn)
@@ -118,6 +125,9 @@ class BriefingRenderer:
         lines: list[str] = [ORDERS_CONTRACT_V7, ""]
         lines += self._taskings_lines(task_forces, events)
         lines.append("")
+        if prior_plan:
+            lines += self._commanders_plan_lines(prior_plan, prior_plan_turn)
+            lines.append("")
         if general_events:
             lines += self._fleet_dispatches_lines(general_events)
             lines.append("")
@@ -167,6 +177,22 @@ class BriefingRenderer:
                 lines.append(f"    since: {reported[0]}")
                 lines += [f"      {line}" for line in reported[1:]]
         return lines
+
+    # ---- COMMANDER'S PLAN ---------------------------------------------------
+
+    def _commanders_plan_lines(self, prior_plan: str, prior_plan_turn: int | None) -> list[str]:
+        """The general's own standing plan, replayed turn-stamped so each epoch
+        argues the plan against the win condition (planning/08 TASKING
+        CONTINUITY). Placed right after CURRENT TASKINGS, in the semi-stable
+        cache zone before the volatile board; the caller omits the block on the
+        first epoch, when no prior plan exists."""
+        stamp = f"t{prior_plan_turn}" if prior_plan_turn is not None else "an earlier turn"
+        return [
+            f"COMMANDER'S PLAN (as of {stamp}): {prior_plan}",
+            "Evaluate your plan against the current situation and your previous",
+            "plan, if any. Revise it if it is not meeting your victory goal — the",
+            "enemy holds zero cities.",
+        ]
 
     # ---- FLEET DISPATCHES ---------------------------------------------------
 
