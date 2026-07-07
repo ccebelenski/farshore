@@ -165,6 +165,7 @@ class GameLauncher:
             city_coord=lambda cid: (
                 c.coord if (c := board.city_by_id(cid)) is not None else None
             ),
+            now_turn=lambda: game.turn,
         )
         ledger.attach(game.event_bus)
         controller.attach_ledger(ledger)

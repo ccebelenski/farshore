@@ -11,6 +11,7 @@ from empire.ai.general.client import ChatAnswer
 from empire.ai.general.compiler import DoctrineCompiler, TaskForceView
 from empire.ai.general.controller import LlmGeneralController
 from empire.ai.general.factory import build_general
+from empire.ai.general.ledger import TaskForceLedger
 from empire.ai.search.portfolio import PortfolioAI
 from empire.config import AppConfig, LlmConnection
 from empire.contracts.surprise import BlockedBy, PathBlocked
@@ -18,6 +19,7 @@ from empire.contracts.turn_plan import ProductionOrder, TurnPlan, UnitMove
 from empire.contracts.world_view import WorldView
 from empire.core.city import City
 from empire.core.coord import Coord
+from empire.core.events import UnitPlacedEvent, UnitRemovedEvent
 from empire.core.game import Game
 from empire.core.identity import CityId, PlayerId, UnitId
 from empire.core.map import Map, ViewMap
@@ -322,6 +324,66 @@ def test_dead_members_are_pruned_before_planning() -> None:
     tf = controller.registry.get("1")
     assert tf is not None
     assert tf.members == frozenset({UnitId(2)})
+
+
+# ---- FLEET DISPATCHES: the ledger's general section reaches the briefing --------------------
+
+
+class _RecordingClient:
+    """Records the exact prompt each epoch, returns answers in order."""
+
+    def __init__(self, answers: list[str]) -> None:
+        self._answers = answers
+        self.prompts: list[str] = []
+        self.calls = 0
+
+    def complete(self, prompt: str, *, seed: int) -> ChatAnswer:
+        del seed
+        self.prompts.append(prompt)
+        text = self._answers[min(self.calls, len(self._answers) - 1)]
+        self.calls += 1
+        return ChatAnswer(text=text, finish_reason="stop", attempts=1, model="stub")
+
+
+def test_unassigned_loss_surfaces_in_next_epochs_fleet_dispatches() -> None:
+    """The playtest bug end-to-end: a transport that drifted UNASSIGNED and
+    was sunk is booked in the ledger's general section; the NEXT epoch's
+    briefing shows it as a turn-stamped `lost` line under FLEET DISPATCHES —
+    the section the controller previously never rendered (every briefing said
+    'since: (nothing reported)' and the general was blind to the loss)."""
+    game, p1 = _staged_board()
+    client = _RecordingClient([FORM_ANSWER, CONTINUE_ANSWER])
+    controller = LlmGeneralController(client=client, cadence=4)
+
+    own_kinds = {16: "transport"}
+    clock = [1]
+    ledger = TaskForceLedger(
+        player_id=p1.id,
+        registry=lambda: controller.registry,
+        own_unit_kind=lambda uid: own_kinds.get(int(uid)),
+        city_coord=lambda cid: None,
+        now_turn=lambda: clock[0],
+    )
+    controller.attach_ledger(ledger)
+
+    # Epoch 1 (t1): nothing booked yet, so no FLEET DISPATCHES block.
+    controller.plan_turn(_view(game, p1, 1))
+    assert "FLEET DISPATCHES" not in client.prompts[0]
+
+    # Between epochs the general builds a transport that drifts UNASSIGNED and
+    # the human sinks it — booked into the ledger's general section at t3.
+    clock[0] = 3
+    ledger.record_unit_placed(UnitPlacedEvent(unit_id=UnitId(16), at=Coord(0, 3)))
+    del own_kinds[16]  # sunk: the live-map oracle no longer answers for #16
+    ledger.record_unit_removed(
+        UnitRemovedEvent(unit_id=UnitId(16), last_coord=Coord(3, 3))
+    )
+
+    # Epoch 2 (t5): the loss reaches the general under FLEET DISPATCHES.
+    controller.plan_turn(_view(game, p1, 5))
+    assert "FLEET DISPATCHES" in client.prompts[1]
+    assert "t3: transport #16 produced at (0,3)" in client.prompts[1]
+    assert "t3: lost #16 at (3,3)" in client.prompts[1]
 
 
 # ---- the factory (build_general) -----------------------------------------------------------

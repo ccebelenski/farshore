@@ -316,6 +316,44 @@ def test_event_ledger_lines_replayed_under_since(briefing_text: str) -> None:
     assert "      t19: enemy destroyer sighted at (5,3)" in briefing_text
 
 
+# --- FLEET DISPATCHES: the general/fleet section --------------------------------------
+
+
+def test_fleet_dispatches_omitted_when_no_general_events(briefing_text: str) -> None:
+    # The fixture passes no general events (4-arg render): the block, and any
+    # "none" filler, must be entirely absent.
+    assert "FLEET DISPATCHES" not in briefing_text
+
+
+def test_fleet_dispatches_renders_turn_stamped_lines_after_taskings() -> None:
+    game = _build_game()
+    view = WorldView(game.map, game.players[0], TURN, STANDARD)
+    general = [
+        "t18: transport #16 produced at (1,2)",
+        "t19: lost #16 at (4,2)",
+    ]
+    text = BriefingRenderer().render(view, _registry(), _events(), TURN, general).text
+    assert "FLEET DISPATCHES  (events since your last briefing; forces outside" in text
+    assert "  t18: transport #16 produced at (1,2)" in text
+    assert "  t19: lost #16 at (4,2)" in text
+    # Placed after CURRENT TASKINGS and before the MAP (cache-native zone).
+    assert text.index("CURRENT TASKINGS") < text.index("FLEET DISPATCHES")
+    assert text.index("FLEET DISPATCHES") < text.index("MAP  legend:")
+
+
+def test_fleet_dispatches_reproduces_the_unassigned_loss_visibility() -> None:
+    """The playtest bug's fix at the render seam: an unassigned unit's loss,
+    booked in the general section, now reaches the general — it used to fall
+    into `report.general`, which the briefing never rendered."""
+    game = _build_game()
+    view = WorldView(game.map, game.players[0], TURN, STANDARD)
+    text = BriefingRenderer().render(
+        view, {}, {}, TURN, ["t19: lost #16 at (4,2)"]
+    ).text
+    assert "FLEET DISPATCHES" in text
+    assert "t19: lost #16 at (4,2)" in text
+
+
 # --- (e) cargo aboard transports ---------------------------------------------------
 
 

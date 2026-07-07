@@ -60,20 +60,28 @@ def _tf(
     )
 
 
+_TURN = 50  # the default booking turn for the single-turn canaries
+
+
 def _ledger(
     registry: TaskForceRegistry,
     own_kinds: dict[int, str] | None = None,
     cities: dict[int, Coord] | None = None,
+    now_turn: object = None,
 ) -> TaskForceLedger:
     """A ledger for player 1 with dict-backed oracles. `own_kinds` mimics
-    the live-map lookup: present = alive and ours, absent = enemy or dead."""
+    the live-map lookup: present = alive and ours, absent = enemy or dead.
+    `now_turn` defaults to a fixed turn so single-turn canaries read one
+    stamp; pass a callable to stamp events across turns."""
     kinds = own_kinds if own_kinds is not None else {}
     coords = cities if cities is not None else {}
+    clock = now_turn if now_turn is not None else (lambda: _TURN)
     return TaskForceLedger(
         player_id=PlayerId(1),
         registry=lambda: registry,
         own_unit_kind=lambda uid: kinds.get(int(uid)),
         city_coord=lambda cid: coords.get(int(cid)),
+        now_turn=clock,  # type: ignore[arg-type]
     )
 
 
@@ -89,7 +97,7 @@ def test_combat_losses_attribute_to_the_member_task_force_grouped_by_cell() -> N
     ledger.record_unit_removed(UnitRemovedEvent(unit_id=UnitId(3), last_coord=Coord(9, 4)))
     report = ledger.collect()
     assert report.by_task_force == {
-        "1": ("lost #5, #7 at (11,1)", "lost #3 at (9,4)"),
+        "1": ("t50: lost #5, #7 at (11,1)", "t50: lost #3 at (9,4)"),
     }
     assert report.general == ()
 
@@ -113,8 +121,8 @@ def test_own_unassigned_loss_lands_in_the_general_section() -> None:
     ledger.record_unit_removed(UnitRemovedEvent(unit_id=UnitId(16), last_coord=Coord(4, 2)))
     report = ledger.collect()
     assert report.general == (
-        "transport #16 delivered at (1,2)",
-        "lost #16 at (4,2)",
+        "t50: transport #16 produced at (1,2)",
+        "t50: lost #16 at (4,2)",
     )
     assert report.by_task_force == {}
 
@@ -128,7 +136,7 @@ def test_delivery_lines_book_own_production_only() -> None:
     ledger = _ledger(TaskForceRegistry(), own_kinds={16: "transport"})
     ledger.record_unit_placed(UnitPlacedEvent(unit_id=UnitId(16), at=Coord(1, 2)))
     ledger.record_unit_placed(UnitPlacedEvent(unit_id=UnitId(17), at=Coord(8, 8)))
-    assert ledger.collect().general == ("transport #16 delivered at (1,2)",)
+    assert ledger.collect().general == ("t50: transport #16 produced at (1,2)",)
 
 
 # --- city artillery ----------------------------------------------------------------
@@ -150,7 +158,7 @@ def test_artillery_kill_books_the_stated_cause_and_swallows_the_duplicate_remova
     )
     ledger.record_unit_removed(UnitRemovedEvent(unit_id=UnitId(5), last_coord=Coord(10, 1)))
     assert ledger.collect().by_task_force == {
-        "1": ("lost #5 to city artillery at (10,1)",),
+        "1": ("t50: lost #5 to city artillery at (10,1)",),
     }
 
 
@@ -177,7 +185,7 @@ def test_artillery_hit_and_miss_on_a_member() -> None:
         )
     )
     assert ledger.collect().by_task_force == {
-        "1": ("#4 hit by city artillery at (10,2)",),
+        "1": ("t50: #4 hit by city artillery at (10,2)",),
     }
 
 
@@ -218,8 +226,8 @@ def test_capture_attributes_to_the_force_targeting_that_city() -> None:
         CityCapturedEvent(city_id=CityId(4), new_owner_id=PlayerId(2), previous_owner_id=None)
     )
     report = ledger.collect()
-    assert report.by_task_force == {"1": ("captured (11,1) — now ours",)}
-    assert report.general == ("captured (0,5) — now ours",)
+    assert report.by_task_force == {"1": ("t50: captured (11,1) — now ours",)}
+    assert report.general == ("t50: captured (0,5) — now ours",)
 
 
 # --- arrivals ---------------------------------------------------------------------
@@ -237,7 +245,7 @@ def test_arrival_at_the_objective_target_books_once_per_unit() -> None:
     ledger.record_unit_moved(UnitMovedEvent(unit_id=UnitId(4), from_=Coord(5, 1), to=Coord(5, 2)))
     ledger.record_unit_moved(UnitMovedEvent(unit_id=UnitId(3), from_=Coord(5, 2), to=Coord(6, 2)))
     ledger.record_unit_moved(UnitMovedEvent(unit_id=UnitId(3), from_=Coord(6, 2), to=Coord(5, 2)))
-    assert ledger.collect().by_task_force == {"1": ("#3, #4 arrived at (5,2)",)}
+    assert ledger.collect().by_task_force == {"1": ("t50: #3, #4 arrived at (5,2)",)}
 
 
 # --- disbands ---------------------------------------------------------------------
@@ -248,7 +256,7 @@ def test_member_disband_books_under_its_force() -> None:
     whether it was capture-time or support-limit, so neither does the line."""
     ledger = _ledger(TaskForceRegistry(forces=(_tf(),)))
     ledger.record_unit_disbanded(UnitDisbandedEvent(unit_id=UnitId(7), last_coord=Coord(11, 1)))
-    assert ledger.collect().by_task_force == {"1": ("#7 disbanded at (11,1)",)}
+    assert ledger.collect().by_task_force == {"1": ("t50: #7 disbanded at (11,1)",)}
 
 
 # --- refusal replay ----------------------------------------------------------------
@@ -270,10 +278,10 @@ def test_refusals_replay_under_the_addressed_standing_force() -> None:
     )
     report = ledger.collect()
     assert report.by_task_force == {
-        "1": ("order refused: TF 1: REINFORCE UNITS #9 — no such unit: #9",),
+        "1": ("t50: order refused: TF 1: REINFORCE UNITS #9 — no such unit: #9",),
     }
     assert report.general == (
-        "order refused: FORM TF 4: UNITS #8 | CAPTURE (2, 2)"
+        "t50: order refused: FORM TF 4: UNITS #8 | CAPTURE (2, 2)"
         " — already assigned to another task force: #8",
     )
 
@@ -291,7 +299,7 @@ def test_reset_drops_booked_lines_but_keeps_ownership_knowledge() -> None:
     ledger.reset()
     assert ledger.collect() == LedgerReport(by_task_force={}, general=())
     ledger.record_unit_removed(UnitRemovedEvent(unit_id=UnitId(16), last_coord=Coord(2, 2)))
-    assert ledger.collect().general == ("lost #16 at (2,2)",)
+    assert ledger.collect().general == ("t50: lost #16 at (2,2)",)
 
 
 # --- record-time attribution ---------------------------------------------------------
@@ -307,10 +315,46 @@ def test_attribution_happens_at_record_time_not_collect_time() -> None:
         registry=lambda: registry_holder[0],
         own_unit_kind=lambda _uid: None,
         city_coord=lambda _cid: None,
+        now_turn=lambda: 50,
     )
     ledger.record_unit_removed(UnitRemovedEvent(unit_id=UnitId(5), last_coord=Coord(11, 1)))
     registry_holder[0] = registry_holder[0].prune(living_unit_ids=_ids(3, 4, 7))
-    assert ledger.collect().by_task_force == {"1": ("lost #5 at (11,1)",)}
+    assert ledger.collect().by_task_force == {"1": ("t50: lost #5 at (11,1)",)}
+
+
+# --- turn stamping + temporal ordering -------------------------------------------------
+
+
+def test_events_are_turn_stamped_and_rendered_in_turn_order() -> None:
+    """Every line carries the turn it was booked on, and the whole ledger —
+    per-TF `since:` AND the general section — renders in turn order, even when
+    events were recorded out of order. Same-turn deaths at one cell still
+    group into one line."""
+    clock = [80]
+    registry = TaskForceRegistry(forces=(_tf(members=_ids(3, 4, 5)),))
+    ledger = _ledger(registry, own_kinds={16: "transport"}, now_turn=lambda: clock[0])
+
+    clock[0] = 82
+    ledger.record_unit_placed(UnitPlacedEvent(unit_id=UnitId(16), at=Coord(1, 2)))
+    clock[0] = 86
+    ledger.record_unit_removed(UnitRemovedEvent(unit_id=UnitId(16), last_coord=Coord(4, 2)))
+    # A TF loss booked at t84, AFTER the t86 line above: record order != turn.
+    clock[0] = 84
+    ledger.record_unit_removed(UnitRemovedEvent(unit_id=UnitId(3), last_coord=Coord(11, 1)))
+    clock[0] = 88
+    ledger.record_unit_removed(UnitRemovedEvent(unit_id=UnitId(4), last_coord=Coord(11, 1)))
+    ledger.record_unit_removed(UnitRemovedEvent(unit_id=UnitId(5), last_coord=Coord(11, 1)))
+
+    report = ledger.collect()
+    # General section: production at t82 sorts before the t86 loss.
+    assert report.general == (
+        "t82: transport #16 produced at (1,2)",
+        "t86: lost #16 at (4,2)",
+    )
+    # Per-TF: the t84 loss precedes the grouped t88 loss despite record order.
+    assert report.by_task_force == {
+        "1": ("t84: lost #3 at (11,1)", "t88: lost #4, #5 at (11,1)"),
+    }
 
 
 # --- end-to-end over a real Game ------------------------------------------------------
@@ -370,6 +414,7 @@ def test_real_game_turn_feeds_the_ledger_over_a_live_bus() -> None:
             else None
         ),
         city_coord=lambda cid: (c.coord if (c := m.city_by_id(cid)) is not None else None),
+        now_turn=lambda: game.turn,
     )
     ledger.attach(bus)
 
@@ -388,7 +433,8 @@ def test_real_game_turn_feeds_the_ledger_over_a_live_bus() -> None:
 
     assert target.owner is p1
     report = ledger.collect()
+    # run_turn books events during the round, before `game.turn` ticks to 1.
     assert report.by_task_force == {
-        "1": ("#1 disbanded at (2,0)", "captured (2,0) — now ours"),
+        "1": ("t0: #1 disbanded at (2,0)", "t0: captured (2,0) — now ours"),
     }
     assert report.general == ()
