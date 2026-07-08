@@ -23,6 +23,15 @@ VICTORY
   captured by an army, then builds for you — neutrals don't win the game but
   add production.
 
+HOW TO WIN
+  Cities are both the prize and the engine: each one builds units, so more
+  cities means more force. Win the economy before the war.
+  - Take neutral cities early — each is free production for the cost of one
+    army, and a general who does not expand loses the build race.
+  - Hold your cities; a lost city is lost production. Garrison what matters.
+  Grow your production, then spend that edge on the force that takes the
+  enemy's cities.
+
 UNITS  (scan = how far the unit sees)
   name        moves-on  HP  spd  str  scan  carries      build
   ARMY        land       1    1    1    2   —             5
