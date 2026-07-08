@@ -72,16 +72,19 @@ class ProductionPanel(VerticalScroll):
 
     DEFAULT_CSS = """
     ProductionPanel {
-        /* Wide enough for the longest cells without truncation:
-           (xx,yy) + "Battleship" + "Left" + "tNNN", plus border, padding,
-           and the table's inter-column gaps. */
-        width: 40;
+        /* Content area = width - border(2) - padding(2) - scrollbar gutter,
+           and it must clear the widest table row: (xx,yy) + "Battleship" +
+           "Left" + "tNNN" with the inter-column gaps (~32 cols). 48 leaves
+           comfortable margin so the Building column never clips. */
+        width: 48;
         height: 100%;
         border: round $accent;
         border-title-color: $accent;
         border-title-style: bold;
         padding: 0 1;
         background: $surface;
+        overflow-x: hidden;
+        scrollbar-size-vertical: 1;
     }
     ProductionPanel > Static {
         width: 1fr;
