@@ -9,6 +9,13 @@ and the lab file in lockstep.
 
 from __future__ import annotations
 
+# Identity grounding, delivered as the `system` message (ahead of the primer).
+# Kept to a single unambiguous sentence: it tells the model WHO it is, not what
+# it does — the mechanical role lives in the primer's YOUR ROLE section, the
+# character in STANDING DOCTRINE. Being fully static, it is the hardest-cached
+# prefix of every epoch. A/B lever: swap this line, hold everything else.
+PERSONA = "You are the commanding general of an empire at war."
+
 PRIMER = """\
 === FARSHORE — RULES PRIMER ===
 

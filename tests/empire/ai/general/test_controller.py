@@ -98,7 +98,7 @@ class _ScriptedClient:
         self.calls = 0
         self.seeds: list[int] = []
 
-    def complete(self, prompt: str, *, seed: int) -> ChatAnswer:
+    def complete(self, prompt: str, *, seed: int, system: str | None = None) -> ChatAnswer:
         del prompt
         text = self._answers[min(self.calls, len(self._answers) - 1)]
         self.calls += 1
@@ -113,7 +113,7 @@ class _RaisingClient:
         self._error = error
         self.calls = 0
 
-    def complete(self, prompt: str, *, seed: int) -> ChatAnswer:
+    def complete(self, prompt: str, *, seed: int, system: str | None = None) -> ChatAnswer:
         del prompt, seed
         self.calls += 1
         raise self._error
@@ -263,7 +263,7 @@ def test_recovery_after_failed_epoch() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def complete(self, prompt: str, *, seed: int) -> ChatAnswer:
+        def complete(self, prompt: str, *, seed: int, system: str | None = None) -> ChatAnswer:
             del prompt, seed
             self.calls += 1
             if self.calls == 1:
@@ -340,7 +340,7 @@ class _RecordingClient:
         self.prompts: list[str] = []
         self.calls = 0
 
-    def complete(self, prompt: str, *, seed: int) -> ChatAnswer:
+    def complete(self, prompt: str, *, seed: int, system: str | None = None) -> ChatAnswer:
         del seed
         self.prompts.append(prompt)
         text = self._answers[min(self.calls, len(self._answers) - 1)]
@@ -464,7 +464,7 @@ def test_plan_survives_a_failed_epoch() -> None:
             self.prompts: list[str] = []
             self.calls = 0
 
-        def complete(self, prompt: str, *, seed: int) -> ChatAnswer:
+        def complete(self, prompt: str, *, seed: int, system: str | None = None) -> ChatAnswer:
             del seed
             self.prompts.append(prompt)
             self.calls += 1

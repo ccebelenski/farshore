@@ -31,7 +31,7 @@ from empire.ai.general.briefing import BriefingRenderer
 from empire.ai.general.client import ChatAnswer
 from empire.ai.general.compiler import DoctrineCompiler, TaskForceView
 from empire.ai.general.ledger import LedgerReport, TaskForceLedger
-from empire.ai.general.primer import PRIMER
+from empire.ai.general.primer import PERSONA, PRIMER
 from empire.ai.general.registry import TaskForceRegistry
 from empire.ai.general.trace import EpochTraceWriter
 from empire.ai.general.validator import DoctrineValidator, ValidationContext
@@ -56,7 +56,9 @@ class GeneralClient(Protocol):
     `ChatClient` satisfies this; tests substitute scripted stubs. Transport
     failures are expected to raise (any exception degrades the epoch)."""
 
-    def complete(self, prompt: str, *, seed: int) -> ChatAnswer: ...
+    def complete(
+        self, prompt: str, *, seed: int, system: str | None = None
+    ) -> ChatAnswer: ...
 
 
 class LlmGeneralController:
@@ -287,7 +289,9 @@ class LlmGeneralController:
         record: dict[str, object] = {"turn": view.turn, "briefing": briefing.text}
         try:
             answer = self._client.complete(
-                PRIMER + "\n" + briefing.text, seed=self._seed + view.turn
+                PRIMER + "\n" + briefing.text,
+                seed=self._seed + view.turn,
+                system=PERSONA,
             )
         except Exception as exc:  # one seam, one failure path
             self._fail(f"t{view.turn}: general unavailable: {exc}")
@@ -295,6 +299,7 @@ class LlmGeneralController:
             return False
         record |= {
             "answer": answer.text,
+            "reasoning": answer.reasoning,
             "model": answer.model,
             "finish": answer.finish_reason,
             "attempts": answer.attempts,

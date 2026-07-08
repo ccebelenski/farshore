@@ -61,6 +61,7 @@ class ChatAnswer:
     finish_reason: str
     attempts: int
     model: str
+    reasoning: str = ""
 
     @property
     def delivered(self) -> bool:
@@ -92,29 +93,41 @@ class ChatClient:
             self._model = self._discover_model()
         return self._model
 
-    def complete(self, prompt: str, *, seed: int) -> ChatAnswer:
-        """One completion under the pinned delivery profile.
+    def complete(
+        self, prompt: str, *, seed: int, system: str | None = None
+    ) -> ChatAnswer:
+        """One completion under the pinned delivery profile. `system`, when
+        given, is sent as a leading system message (identity grounding) ahead
+        of the user prompt.
 
         Retries on finish=length with seed + 1000·attempt (reproducible
         re-rolls); a still-capped final attempt is RETURNED (delivered is
         False) — non-convergence is the caller's epoch-failure signal, not a
         transport error. Raises `GeneralUnavailableError` for transport failures.
         """
-        answer = self._one_completion(prompt, seed, attempt=1)
+        answer = self._one_completion(prompt, seed, attempt=1, system=system)
         for retry in range(1, 1 + RETRY_ON_LENGTH):
             if answer.finish_reason != "length":
                 break
-            answer = self._one_completion(prompt, seed + 1000 * retry, attempt=retry + 1)
+            answer = self._one_completion(
+                prompt, seed + 1000 * retry, attempt=retry + 1, system=system
+            )
         return answer
 
     # ---- one request ----------------------------------------------------------
 
-    def _one_completion(self, prompt: str, seed: int, attempt: int) -> ChatAnswer:
+    def _one_completion(
+        self, prompt: str, seed: int, attempt: int, system: str | None = None
+    ) -> ChatAnswer:
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
         payload = self._request(
             "/chat/completions",
             {
                 "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": messages,
                 "temperature": TEMPERATURE,
                 "top_p": TOP_P,
                 "presence_penalty": PRESENCE_PENALTY,
@@ -129,7 +142,17 @@ class ChatClient:
         )
         try:
             choice = payload["choices"][0]
-            text = choice["message"].get("content") or ""
+            message = choice["message"]
+            text = message.get("content") or ""
+            # Thinking arrives either in a separate `reasoning_content` field
+            # (llama.cpp / vLLM reasoning parsers) or inline as <think>…</think>
+            # in the content. Capture it for the war diary either way, and keep
+            # `text` the answer only.
+            reasoning = message.get("reasoning_content") or ""
+            if not reasoning and "</think>" in text:
+                pre, _, post = text.partition("</think>")
+                reasoning = pre.replace("<think>", "").strip()
+                text = post.strip()
             finish = str(choice.get("finish_reason"))
         except (KeyError, IndexError, TypeError) as exc:
             raise GeneralUnavailableError(f"malformed chat response: {exc!r}") from exc
@@ -138,6 +161,7 @@ class ChatClient:
             finish_reason=finish,
             attempts=attempt,
             model=str(payload.get("model", self.model)),
+            reasoning=reasoning,
         )
 
     def _discover_model(self) -> str:
