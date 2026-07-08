@@ -902,3 +902,72 @@ async def test_explore_verb_steps_off_own_city_immediately() -> None:
             "the immediate first step must carry the army off the city "
             "(no disband trap)"
         )
+
+
+async def test_production_tile_present_and_lists_own_cities() -> None:
+    """The production tile mounts beside the board and reports exactly the
+    human's cities, each with ETA == current turn + turns-left."""
+    from empire.tui.screens.play_screen import PlayScreen
+    from empire.tui.widgets import ProductionPanel
+
+    app, _, _ = _build_app()
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        assert screen.query_one(ProductionPanel) is not None
+        game = app.game
+        assert game is not None
+        own = [c for c in game.map.cities() if c.owner is screen._human]  # pyright: ignore[reportPrivateUsage]
+        rows = screen._production_rows()  # pyright: ignore[reportPrivateUsage]
+        assert len(rows) == len(own)
+        for r in rows:
+            if r.turns_left is None:
+                assert r.eta is None
+            else:
+                assert r.eta == game.turn + r.turns_left
+
+
+async def test_production_rows_reflect_pending_switch_and_idle_sorts_last() -> None:
+    """A queued (not-yet-applied) production switch shows immediately; an idle
+    city has no ETA and sorts to the bottom."""
+    from empire.core.unit import UnitKind
+    from empire.tui.screens.play_screen import PlayScreen
+
+    app, _, _ = _build_app()
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        game = app.game
+        assert game is not None
+        city = next(c for c in game.map.cities() if c.owner is screen._human)  # pyright: ignore[reportPrivateUsage]
+
+        screen._pending_production[city.id] = UnitKind.DESTROYER  # pyright: ignore[reportPrivateUsage]
+        row = next(
+            r for r in screen._production_rows()  # pyright: ignore[reportPrivateUsage]
+            if r.city_id == int(city.id)
+        )
+        assert row.task == UnitKind.DESTROYER.value
+
+        screen._pending_production[city.id] = None  # idle  # pyright: ignore[reportPrivateUsage]
+        rows = screen._production_rows()  # pyright: ignore[reportPrivateUsage]
+        idle = next(r for r in rows if r.city_id == int(city.id))
+        assert idle.turns_left is None and idle.eta is None
+        assert rows[-1].city_id == idle.city_id  # idle sinks to the bottom
+
+
+def test_production_state_render_handles_idle_and_imminent() -> None:
+    """`ProductionState.render` builds the 4-column table over mixed rows
+    (idle + imminent) without error."""
+    from empire.core.coord import Coord
+    from empire.tui.widgets import ProductionRow, ProductionState
+
+    rows = [
+        ProductionRow(Coord(1, 1), 1, "Army", 1, 153),  # imminent (bold)
+        ProductionRow(Coord(2, 2), 2, "Destroyer", 5, 157),
+        ProductionRow(Coord(3, 3), 3, "idle", None, None),  # idle (dim)
+    ]
+    table = ProductionState(rows).render()
+    assert table.row_count == 3
+    assert [c.header for c in table.columns] == ["City", "Building", "Left", "Done"]
