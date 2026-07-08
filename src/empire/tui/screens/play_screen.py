@@ -19,7 +19,7 @@ from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import ScrollableContainer, Vertical
+from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.geometry import Region, Spacing
 from textual.screen import Screen
 from textual.widgets import Footer
@@ -75,6 +75,9 @@ from empire.tui.widgets import (
     LogPanel,
     MapView,
     MapWidget,
+    ProductionPanel,
+    ProductionRow,
+    ProductionState,
     StatusBar,
     StatusState,
 )
@@ -115,6 +118,11 @@ class PlayScreen(Screen[None]):
     PlayScreen {
         layout: vertical;
     }
+    #board-row {
+        /* Board + production tile, side by side. Sized to the map (auto); the
+           tile matches that height and scrolls internally when it overflows. */
+        height: auto;
+    }
     #map-scroll {
         /* Natural size when the map fits (the log's 1fr takes the surplus);
            a viewport that scrolls — following the cursor — when the map is
@@ -122,6 +130,7 @@ class PlayScreen(Screen[None]):
            that reserves the status/footer/log-minimum rows is set
            programmatically in `_cap_map_viewport` (CSS has no calc()). */
         height: auto;
+        width: 1fr;
         scrollbar-size: 1 1;
     }
     """
@@ -237,8 +246,12 @@ class PlayScreen(Screen[None]):
         scroller = ScrollableContainer(id="map-scroll")
         scroller.can_focus = False
         with Vertical():
-            with scroller:
-                yield MapWidget(provider=self._map_view, id="map")
+            with Horizontal(id="board-row"):
+                with scroller:
+                    yield MapWidget(provider=self._map_view, id="map")
+                yield ProductionPanel(
+                    provider=self._production_state, id="production"
+                )
             yield StatusBar(provider=self._status_state, id="status")
             yield LogPanel(id="log")
             yield Footer()
@@ -278,6 +291,41 @@ class PlayScreen(Screen[None]):
             selected_city=city,
             hint=self._hint,
         )
+
+    def _production_state(self) -> ProductionState:
+        return ProductionState(self._production_rows())
+
+    def _production_rows(self) -> list[ProductionRow]:
+        """Every own city's production line — soonest-finishing first, idle
+        last — reflecting any production change queued this turn but not yet
+        applied. Shared by the production tile and the `c` city-report pop-up
+        so the two can never drift."""
+        rows: list[ProductionRow] = []
+        for city in self._game.map.cities():
+            if city.owner is not self._human:
+                continue
+            # A queued (not-yet-applied) switch wins over the live building.
+            building = self._pending_production.get(city.id, city.production.building)
+            if building is None:
+                rows.append(ProductionRow(city.coord, int(city.id), "idle", None, None))
+                continue
+            build_time = UNIT_REGISTRY[building].build_time
+            # Accumulated work only counts toward the current target; a queued
+            # switch starts effectively from this turn's progress (0 kept).
+            work = city.production.work if building is city.production.building else 0
+            left = max(0, build_time - work)
+            rows.append(
+                ProductionRow(
+                    city.coord,
+                    int(city.id),
+                    building.value,
+                    left,
+                    self._game.turn + left,
+                )
+            )
+        # Soonest ETA first; idle cities (no ETA) sort last.
+        rows.sort(key=lambda r: (r.eta is None, r.eta or 0))
+        return rows
 
     # ---- actions ----------------------------------------------------------
 
@@ -1141,32 +1189,16 @@ class PlayScreen(Screen[None]):
 
     def action_city_report(self) -> None:
         """Pop up a read-only overview of every own city and its production ETA,
-        soonest-finishing first, so you don't have to walk the map city by city."""
-        rows: list[tuple[int, str]] = []
-        for city in self._game.map.cities():
-            if city.owner is not self._human:
-                continue
-            x, y = city.coord.x, city.coord.y
-            # Reflect a queued (not-yet-applied) production change if any.
-            building = self._pending_production.get(city.id, city.production.building)
-            if building is None:
-                rows.append((10**9, f"  city#{int(city.id)} ({x},{y}): idle"))
-                continue
-            build_time = UNIT_REGISTRY[building].build_time
-            # Accumulated work only counts toward the current target; a queued
-            # switch starts effectively from this turn's progress.
-            work = city.production.work if building is city.production.building else 0
-            left = max(0, build_time - work)
-            eta = self._game.turn + left
-            rows.append(
-                (
-                    eta,
-                    f"  city#{int(city.id)} ({x},{y}): {building.value} "
-                    f"— done t{eta} ({left} left)",
-                )
-            )
-        rows.sort(key=lambda r: r[0])  # soonest first; idle (sentinel) last
-        self.app.push_screen(CityReportModal([line for _, line in rows]))
+        soonest-finishing first, so you don't have to walk the map city by city.
+        Same data as the always-on production tile (`_production_rows`)."""
+        lines: list[str] = []
+        for r in self._production_rows():
+            head = f"  city#{r.city_id} ({r.coord.x},{r.coord.y}):"
+            if r.turns_left is None:
+                lines.append(f"{head} idle")
+            else:
+                lines.append(f"{head} {r.task} — done t{r.eta} ({r.turns_left} left)")
+        self.app.push_screen(CityReportModal(lines))
 
     def action_disband(self) -> None:
         """Deliberately scrap the selected (or hovered) own unit, after a
@@ -1680,6 +1712,7 @@ class PlayScreen(Screen[None]):
         map_widget.refresh()
         self._scroll_cursor_into_view()
         self.query_one("#status", StatusBar).refresh_text()
+        self.query_one("#production", ProductionPanel).refresh_table()
 
     def on_resize(self) -> None:
         self._cap_map_viewport()
@@ -1691,8 +1724,12 @@ class PlayScreen(Screen[None]):
         the terminal. (When the map fits, height:auto keeps it at natural
         size and the log's 1fr absorbs the surplus.)"""
         reserved = 2 + 8  # status + footer + LogPanel min-height
-        scroller = self.query_one("#map-scroll", ScrollableContainer)
-        scroller.styles.max_height = max(10, self.size.height - reserved)
+        cap = max(10, self.size.height - reserved)
+        self.query_one("#map-scroll", ScrollableContainer).styles.max_height = cap
+        # The tile shares the board row's height: cap it too so a long city
+        # list scrolls inside the tile instead of pushing the row past the
+        # reserved status/footer/log rows.
+        self.query_one("#production", ProductionPanel).styles.max_height = cap
 
     def _scroll_cursor_into_view(self) -> None:
         """Keep the cursor inside the map viewport (with a margin of context)
