@@ -604,6 +604,41 @@ def test_city_can_produce_ships_only_at_a_port() -> None:
         assert city_can_produce(kind, inland, real_map)
 
 
+def test_city_touching_only_the_map_border_is_not_a_port(p2: Player) -> None:
+    """Regression: the 1-cell map border is water-terrained but on_board=False
+    (no unit may ever enter it). A city whose ONLY adjacent water is that border
+    is not a port — a ship there could never sail — so it must neither offer nor
+    admit ships. The old in-bounds-water check wrongly called it a port."""
+    from empire.core.engine import can_enter_terrain, city_can_produce, is_port
+    from empire.core.map import Map
+    from empire.core.tile import Tile
+
+    center = Coord(1, 1)
+    city = City(id=CityId(1), coord=center, owner=None)
+    tiles: dict[Coord, Tile] = {}
+    for y in range(3):
+        for x in range(3):
+            c = Coord(x, y)
+            if c == center:
+                tiles[c] = Tile(coord=c, terrain=TerrainKind.CITY, city=city)
+            else:  # every surround cell is border WATER: in-bounds but off-board
+                tiles[c] = Tile(coord=c, terrain=TerrainKind.WATER, on_board=False)
+    real_map = Map(width=3, height=3, tiles=tiles)
+
+    assert is_port(center, real_map) is False
+    assert city_can_produce(UnitKind.BATTLESHIP, center, real_map) is False
+    assert city_can_produce(UnitKind.TRANSPORT, center, real_map) is False
+    bs = Battleship(UnitId(1), p2, Coord(0, 0))
+    assert can_enter_terrain(bs, TerrainKind.CITY, real_map, center) is False
+
+    # Positive control: one navigable (on-board) water neighbour makes it a port.
+    real_map._tiles[Coord(1, 0)] = Tile(  # pyright: ignore[reportPrivateUsage]
+        coord=Coord(1, 0), terrain=TerrainKind.WATER, on_board=True
+    )
+    assert is_port(center, real_map) is True
+    assert city_can_produce(UnitKind.BATTLESHIP, center, real_map) is True
+
+
 def test_transport_blocked_by_enemy_unit_instead_of_crashing(p1: Player, p2: Player) -> None:
     """Regression: a non-combatant (transport, strength 0) ordered onto an enemy
     unit must be BLOCKED — it can't attack, so it can't enter. Before the fix the
