@@ -72,7 +72,10 @@ class ProductionPanel(VerticalScroll):
 
     DEFAULT_CSS = """
     ProductionPanel {
-        width: 34;
+        /* Wide enough for the longest cells without truncation:
+           (xx,yy) + "Battleship" + "Left" + "tNNN", plus border, padding,
+           and the table's inter-column gaps. */
+        width: 40;
         height: 100%;
         border: round $accent;
         border-title-color: $accent;
