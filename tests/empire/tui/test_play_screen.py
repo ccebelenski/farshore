@@ -971,3 +971,41 @@ def test_production_state_render_handles_idle_and_imminent() -> None:
     table = ProductionState(rows).render()
     assert table.row_count == 3
     assert [c.header for c in table.columns] == ["City", "Building", "Left", "Done"]
+
+
+async def test_production_tile_content_area_fits_longest_row() -> None:
+    """Regression for the truncation bug: the tile's actual content area must
+    be wide enough to render the widest row (longest unit name + headers)
+    without clipping. Measures the panel's inner width in a live layout, then
+    renders the table at that width and checks nothing is cut."""
+    from rich.console import Console
+
+    from empire.core.unit import UnitKind
+    from empire.tui.screens.play_screen import PlayScreen
+    from empire.tui.widgets import ProductionPanel
+
+    longest = max(UnitKind, key=lambda k: len(k.value)).value  # "battleship"
+
+    app, _, _ = _build_app()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PlayScreen)
+        game = app.game
+        assert game is not None
+        city = next(c for c in game.map.cities() if c.owner is screen._human)  # pyright: ignore[reportPrivateUsage]
+        screen._pending_production[city.id] = UnitKind.BATTLESHIP  # widest name  # pyright: ignore[reportPrivateUsage]
+        screen._refresh_view()  # pyright: ignore[reportPrivateUsage]
+        await pilot.pause()
+
+        panel = screen.query_one(ProductionPanel)
+        body = panel.query_one("#production-body")
+        width = body.content_size.width
+        assert width > 0, "panel content area not laid out"
+
+        console = Console(width=width, legacy_windows=False)
+        with console.capture() as cap:
+            console.print(screen._production_state().render())  # pyright: ignore[reportPrivateUsage]
+        out = cap.get()
+        assert "Building" in out, f"header clipped at content width {width}: {out!r}"
+        assert longest in out, f"'{longest}' clipped at content width {width}: {out!r}"
