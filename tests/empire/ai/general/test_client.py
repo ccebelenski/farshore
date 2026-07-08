@@ -146,6 +146,48 @@ def test_happy_path_delivers_with_pinned_sampling(server: _StubServer) -> None:
     assert body["chat_template_kwargs"] == {"enable_thinking": True}
 
 
+def test_system_message_leads_when_persona_given(server: _StubServer) -> None:
+    """A `system` argument becomes a leading system message (identity
+    grounding) ahead of the user prompt; without it, user-only (above)."""
+    _client(server, model="m").complete("the board", seed=1, system="You are a general.")
+    assert server.posts[0]["body"]["messages"] == [
+        {"role": "system", "content": "You are a general."},
+        {"role": "user", "content": "the board"},
+    ]
+
+
+def _completion_bytes(message: dict[str, Any], finish: str = "stop") -> bytes:
+    return json.dumps(
+        {
+            "object": "chat.completion",
+            "model": "stub-model-q8",
+            "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+        }
+    ).encode("utf-8")
+
+
+def test_reasoning_captured_from_reasoning_content_field(server: _StubServer) -> None:
+    """Servers that split thinking into `reasoning_content` (llama.cpp / vLLM
+    reasoning parsers): the war diary keeps it, `text` stays the answer."""
+    server.raw_response = _completion_bytes(
+        {"role": "assistant", "content": ANSWER_TEXT, "reasoning_content": "weigh the board"}
+    )
+    answer = _client(server, model="m").complete("x", seed=1)
+    assert answer.text == ANSWER_TEXT
+    assert answer.reasoning == "weigh the board"
+
+
+def test_reasoning_peeled_from_inline_think(server: _StubServer) -> None:
+    """Servers that inline `<think>…</think>` in content: the thinking is
+    split out into `reasoning` and `text` is left the answer only."""
+    server.raw_response = _completion_bytes(
+        {"role": "assistant", "content": f"<think>weigh the board</think>{ANSWER_TEXT}"}
+    )
+    answer = _client(server, model="m").complete("x", seed=1)
+    assert answer.text == ANSWER_TEXT
+    assert answer.reasoning == "weigh the board"
+
+
 def test_blank_model_is_discovered_once_and_recorded(server: _StubServer) -> None:
     """An empty configured model triggers ONE /models discovery; the id the
     server claims is used for requests and recorded on the answer (the BYO

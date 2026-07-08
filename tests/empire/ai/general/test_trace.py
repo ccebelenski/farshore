@@ -34,7 +34,7 @@ def test_controller_traces_success_and_failure_epochs(tmp_path: Path) -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def complete(self, prompt: str, *, seed: int) -> ChatAnswer:
+        def complete(self, prompt: str, *, seed: int, system: str | None = None) -> ChatAnswer:
             del prompt, seed
             self.calls += 1
             if self.calls == 1:
