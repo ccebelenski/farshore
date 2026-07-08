@@ -66,37 +66,45 @@ NextUnitIdFn = Callable[[], UnitId]
 # -----------------------------------------------------------------------------
 
 
+def is_port(coord: Coord, real_map: Map) -> bool:
+    """True if `coord` is a port — adjacent to *navigable* water (§3.2).
+
+    The water must be ON-BOARD: the map's 1-cell border is water-terrained but
+    `on_board=False` (unwalkable, no unit may ever enter it), so a city hard
+    against the map edge whose only neighbouring water is that border is NOT a
+    port — a ship built or docked there could never sail. In-bounds alone is
+    too weak; the neighbour must be a cell a ship can actually occupy."""
+    return any(
+        t.terrain is TerrainKind.WATER and t.on_board
+        for t in real_map.neighbors(coord)
+    )
+
+
 def can_enter_terrain(unit: Unit, terrain: TerrainKind, real_map: Map, to: Coord) -> bool:
     """True if `unit` can legally occupy a cell of the given terrain at `to`.
 
     Sea units (those whose `legal_terrain` excludes LAND) may enter a CITY
-    only when the city is adjacent to water — treated as a port per spec
-    §3.2.
+    only when the city is a port — adjacent to navigable water (spec §3.2).
     """
     if terrain not in type(unit).legal_terrain:
         return False
     if terrain is TerrainKind.CITY and TerrainKind.LAND not in type(unit).legal_terrain:
-        # Sea unit: the city must be a port (adjacent to water).
-        for n in to.neighbors():
-            if real_map.in_bounds(n) and real_map.terrain_at(n) is TerrainKind.WATER:
-                return True
-        return False
+        # Sea unit: the city must be a port (adjacent to navigable water).
+        return is_port(to, real_map)
     return True
 
 
 def city_can_produce(kind: UnitKind, coord: Coord, real_map: Map) -> bool:
     """Whether a city at `coord` may build `kind`.
 
-    Sea units need a *port* — a city adjacent to water (§3.2, same rule that lets
-    a ship occupy the city); land/air/satellite build anywhere. The production
-    picker uses this so a landlocked city never offers ships.
+    Sea units need a *port* — a city adjacent to navigable water (§3.2, same
+    rule that lets a ship occupy the city); land/air/satellite build anywhere.
+    The production picker uses this so a landlocked city — including one whose
+    only adjacent water is the unwalkable map border — never offers ships.
     """
     if kind not in _SEA_KINDS:
         return True
-    return any(
-        real_map.in_bounds(n) and real_map.terrain_at(n) is TerrainKind.WATER
-        for n in coord.neighbors()
-    )
+    return is_port(coord, real_map)
 
 
 def is_legal_step(unit: Unit, to: Coord, real_map: Map, rules: RuleSet) -> bool:
