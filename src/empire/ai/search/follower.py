@@ -20,9 +20,12 @@ rings, so both rules below matter:
   must eventually be entered. If masking disconnects a goal, the raw grid
   is the fallback — better to run a gauntlet than to abandon the plan.
 - **Mass before storming**: an assault group stages on the ring just
-  outside its target's range and enters only when every member is staged;
-  the city's one-shot-per-round cannot defeat a simultaneous entry in
-  detail, but kills a trickle one by one.
+  outside its target's range and enters together; the city's one-shot-per-
+  round cannot defeat a simultaneous entry in detail, but kills a trickle
+  one by one. The mass demanded is capped by the shore's *staging capacity*
+  — how many armies physically fit just outside the ring — so a fist too
+  large for a narrow coastal approach streams through with what fits rather
+  than freezing forever waiting for a wall it can never form.
 
 The follower is immutable: one instance per plan. `SearchAI` builds a fresh
 follower for each candidate playout and for each committed turn.
@@ -82,6 +85,24 @@ def idle_step(unit: Unit, view: WorldView) -> UnitMove:
 # follower handles INVADE cargo via `plan_naval`; any *landed* invasion army
 # falls through to here to take the city).
 _STORM_ROLES = frozenset({Role.ASSAULT, Role.INVADE})
+
+
+def _staging_capacity(
+    grid: PassabilityGrid, target: Coord, artillery_range: int
+) -> int:
+    """How many armies the shore can hold ready to storm `target`: passable
+    tiles just outside the fire zone (chebyshev in `(artillery_range,
+    artillery_range + 2]`). A wide front fits a whole fist; a single-wide
+    coastal causeway fits one or two — the storm quorum is capped by this so
+    an over-large fist streams through instead of freezing at the ring."""
+    outer = artillery_range + 2
+    return sum(
+        1
+        for dy in range(-outer, outer + 1)
+        for dx in range(-outer, outer + 1)
+        if artillery_range < max(abs(dx), abs(dy)) <= outer
+        and grid.is_passable(Coord(target.x + dx, target.y + dy))
+    )
 
 
 class PlanFollower:
@@ -184,6 +205,8 @@ class PlanFollower:
         )
         safe_grid = grid.with_blocked(all_ring_cells) if rings else grid
         target_grids: dict[Coord, PassabilityGrid] = {}
+        stage_caps: dict[Coord, int] = {}
+        artillery_range = view.rules.city_artillery_range
         for objective in groups:
             if objective.role in _STORM_ROLES and objective.target not in target_grids:
                 others = frozenset(
@@ -194,6 +217,9 @@ class PlanFollower:
                 )
                 target_grids[objective.target] = (
                     grid.with_blocked(others) if others else grid
+                )
+                stage_caps[objective.target] = _staging_capacity(
+                    grid, objective.target, artillery_range
                 )
 
         surplus_scouts = self._plan.surplus is SurplusPolicy.SCOUT and any(
@@ -221,7 +247,12 @@ class PlanFollower:
                 if approach.steps_to(objective.target) is None:
                     approach = fields_raw[unit.id]  # gauntlet beats abandonment
                 moves[unit.id] = self._assault_move(
-                    unit, objective, groups[objective], approach, view
+                    unit,
+                    objective,
+                    groups[objective],
+                    approach,
+                    view,
+                    stage_caps[objective.target],
                 )
         return moves
 
@@ -291,16 +322,18 @@ class PlanFollower:
         group: list[Unit],
         field: DistanceField,
         view: WorldView,
+        capacity: int,
     ) -> UnitMove:
         """Mass at the ring, then storm together (see module docstring).
 
-        The storm gate is judged over *near* members only (within twice the
-        ring) — assignment is recomputed every turn, so a freshly produced
-        army joining the group from across the map must reinforce, not
-        freeze a staged fist at the ring. The near set must reach the fist
-        size (or the whole group, if smaller) so a lone first-arriver waits
-        rather than trickling in. Once any member is inside the fire zone
-        the storm is latched: late joiners can't stall an entry under fire.
+        The storm gate counts members *staged* just outside the fire zone
+        (chebyshev in `(artillery_range, ring + 1]`) and enters when they
+        reach the quorum. The quorum is the fist size — but never larger than
+        the shore's staging `capacity`, so a fist too big for a narrow coastal
+        approach storms with what physically fits rather than freezing forever
+        waiting for a wall it can never form. Once any member is inside the
+        fire zone the storm is latched: late joiners can't strand a unit
+        already under the guns.
         """
         target = objective.target
         artillery_range = view.rules.city_artillery_range
@@ -311,13 +344,13 @@ class PlanFollower:
             u.coord.chebyshev_to(target) <= artillery_range for u in group
         )
         if not storming:
-            near = [
-                u for u in group if u.coord.chebyshev_to(target) <= 2 * ring
+            staged = [
+                u
+                for u in group
+                if artillery_range < u.coord.chebyshev_to(target) <= ring + 1
             ]
-            quorum = min(objective.strength, len(group))
-            storming = len(near) >= quorum and all(
-                u.coord.chebyshev_to(target) <= ring + 1 for u in near
-            )
+            quorum = min(objective.strength, len(group), max(1, capacity))
+            storming = len(staged) >= quorum
         if storming:
             return self._advance(unit, target, field, view)  # storm together
         if unit.coord.chebyshev_to(target) <= ring:
