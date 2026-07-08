@@ -175,6 +175,48 @@ def test_assault_group_stages_outside_artillery_range_then_storms() -> None:
     assert Coord(*lead_path[0]).chebyshev_to(Coord(13, 0)) <= 2
 
 
+def test_narrow_causeway_assault_storms_instead_of_freezing() -> None:
+    """Terrain-aware storm gate: a fortified city on a single-wide coastal
+    causeway cannot fit a whole fist within the ring, so the old 'wait for
+    everyone' quorum froze the assault at the ring forever. The quorum is
+    capped by the shore's staging capacity — the lead storms with what fits."""
+    from empire.core.ruleset import FORTIFIED_CITIES
+
+    p1 = Player(id=P1, name="P1", is_ai=True, view=ViewMap(), color="red")
+    p2 = Player(id=P2, name="P2", is_ai=True, view=ViewMap(), color="blue")
+    width, height = 11, 5
+    tiles: dict[Coord, Tile] = {}
+    for x in range(width):
+        for y in range(height):
+            c = Coord(x, y)
+            land = x <= 4 or (y == 2 and x <= 9)  # main block + 1-wide causeway
+            tiles[c] = Tile(
+                coord=c, terrain=TerrainKind.LAND if land else TerrainKind.WATER
+            )
+    game = Game(
+        rules=FORTIFIED_CITIES,  # range 2 -> ring at 3; only 2 tiles fit the band
+        real_map=Map(width=width, height=height, tiles=tiles),
+        players=[p1, p2],
+        seed=1,
+    )
+    _see_all(game, p1)
+    city = Coord(10, 2)
+    _add_city(game, None, city, 1)  # neutral fortified city — it fires too
+    # A 5-army fist queued single-file back down the causeway: only (7,2) and
+    # (6,2) sit within the ring+1 band; the rest cannot close (one-per-tile).
+    lead = _add_army(game, p1, Coord(7, 2), 1)  # cheb 3, at the ring
+    for i, x in enumerate((6, 5, 4, 3), start=2):
+        _add_army(game, p1, Coord(x, 2), i)
+    follower = PlanFollower(
+        Plan(objectives=(Objective(city, Role.ASSAULT, 5),))
+    )
+
+    moves = _moves_by_unit(follower, _view(game, p1))
+    lead_path = moves.get(int(lead.id))
+    assert lead_path is not None, "lead army froze at the ring (stall)"
+    assert Coord(*lead_path[0]).chebyshev_to(city) <= 2, "lead did not storm the ring"
+
+
 def test_assignment_is_deterministic() -> None:
     game, p1, _ = _flat_game()
     _see_all(game, p1)
