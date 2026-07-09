@@ -1163,3 +1163,107 @@ def test_explore_skirts_gun_ring_and_keeps_exploring(
     assert army.coord != Coord(2, 1)                 # off its start
     # never stepped into the gun ring (chebyshev > 1 from the fort)
     assert army.coord.chebyshev_to(Coord(4, 1)) > 1
+
+
+# --- friendly jams never cost an order (playtest 'units wake when blocked') ----
+
+
+def test_loop_patrol_detours_around_parked_friendly(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """A loop patrol whose next route cell is squatted by a friendly splices a
+    detour and keeps patrolling — it must not wake (open water on both sides
+    of the route = the 'obvious path around')."""
+    m = _mixed_map(["WWWW", "WWWW", "WWWW"])
+    blocker = Patrol(UnitId(1), p1, Coord(1, 1))
+    m.place_unit(blocker, Coord(1, 1))
+    blocker.standing_order = Sentry()
+    ship = Patrol(UnitId(2), p1, Coord(0, 1))
+    m.place_unit(ship, Coord(0, 1))
+    forward = (Coord(1, 1), Coord(2, 1), Coord(3, 1))
+    cycle = (*forward, Coord(2, 1), Coord(1, 1), Coord(0, 1))
+    ship.standing_order = PatrolPath.new(cycle, loop=True)
+    _see(p1, [Coord(x, y) for x in range(4) for y in range(3)])
+
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+
+    assert ship.coord != Coord(0, 1)  # moved: took the detour lane
+    order = ship.standing_order
+    assert isinstance(order, PatrolPath) and order.loop  # still on patrol
+    assert UnitId(2) not in result.interrupted_unit_ids
+    # And it keeps going in later turns rather than stalling out.
+    for _ in range(4):
+        apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert isinstance(ship.standing_order, PatrolPath)
+
+
+def test_loop_patrol_holds_when_strait_is_jammed(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """No detour exists (1-wide strait): the patrol HOLDS with its order
+    intact instead of waking — friendly traffic is transient. When the jam
+    clears, it resumes on its own."""
+    m = _mixed_map(["WWWW"])
+    blocker = Patrol(UnitId(1), p1, Coord(1, 0))
+    m.place_unit(blocker, Coord(1, 0))
+    blocker.standing_order = Sentry()
+    ship = Patrol(UnitId(2), p1, Coord(0, 0))
+    m.place_unit(ship, Coord(0, 0))
+    forward = (Coord(1, 0), Coord(2, 0), Coord(3, 0))
+    cycle = (*forward, Coord(2, 0), Coord(1, 0), Coord(0, 0))
+    ship.standing_order = PatrolPath.new(cycle, loop=True)
+    _see(p1, [Coord(x, 0) for x in range(4)])
+
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert ship.coord == Coord(0, 0)  # held in place
+    assert isinstance(ship.standing_order, PatrolPath)  # order NOT lost
+    assert UnitId(2) not in result.interrupted_unit_ids
+
+    m.remove_unit(blocker)  # jam clears
+    apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert ship.coord == Coord(1, 0)  # resumed unaided
+    assert isinstance(ship.standing_order, PatrolPath)
+
+
+def test_goto_holds_when_only_route_is_jammed(
+    p1: Player, resolver: CombatResolver
+) -> None:
+    """A go-to whose ONLY terrain route is friendly-jammed holds a turn
+    (destination still reachable over terrain) instead of waking; it resumes
+    when the jam clears. Genuine unreachability still wakes (pinned by
+    test_goto_wakes_when_destination_unreachable)."""
+    m = _land_map(4, 1)
+    blocker = Army(UnitId(1), p1, Coord(1, 0))
+    m.place_unit(blocker, Coord(1, 0))
+    blocker.standing_order = Sentry()
+    mover = Army(UnitId(2), p1, Coord(0, 0))
+    m.place_unit(mover, Coord(0, 0))
+    mover.standing_order = PatrolPath.new((Coord(1, 0), Coord(2, 0), Coord(3, 0)))
+    _see(p1, [Coord(x, 0) for x in range(4)])
+
+    result = apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(0, 0)  # held, not woken
+    assert isinstance(mover.standing_order, PatrolPath)
+    assert UnitId(2) not in result.interrupted_unit_ids
+
+    m.remove_unit(blocker)
+    for _ in range(3):
+        apply_standing_orders(p1, m, STANDARD, resolver, random.Random(0))
+    assert mover.coord == Coord(3, 0)  # arrived once the jam cleared
+
+
+def test_flood_repath_hugs_the_straight_line(p1: Player) -> None:
+    """The standing-order re-path/rally primitive returns a line-hugging
+    shortest path, not an expansion-order staircase."""
+    from empire.core.engine import _flood_path_to
+
+    m = _land_map(9, 5)
+    unit = Army(UnitId(1), p1, Coord(0, 0))
+    m.place_unit(unit, Coord(0, 0))
+    _see(p1, [Coord(x, y) for x in range(9) for y in range(5)])
+
+    cells = _flood_path_to(unit, p1, m, Coord(8, 2))
+    assert cells is not None
+    assert len(cells) == 8  # chebyshev-optimal
+    for c in cells:
+        assert 0 <= c.x <= 8 and 0 <= c.y <= 2  # stays inside the box

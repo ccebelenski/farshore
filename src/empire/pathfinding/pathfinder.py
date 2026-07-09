@@ -71,18 +71,32 @@ class Pathfinder(ABC):
         if start == goal:
             return Path(cells=(start,), total_cost=0)
 
-        # Open set: priority queue keyed on (f_score, tiebreaker, coord).
-        # The tiebreaker prevents heapq from comparing Coord objects when
-        # f_scores tie.
+        # Straightness tiebreak: among equal-cost candidates, prefer cells
+        # nearer the straight start->goal line (integer cross-product
+        # magnitude). 8-way grids admit MANY equal-cost paths; without this
+        # the winner is expansion-order luck and can wander far off the
+        # line — step-optimal but visually "the long way around". Pure
+        # tie-breaking: cost optimality is untouched.
+        line_dx, line_dy = goal.x - start.x, goal.y - start.y
+
+        def deviation(c: Coord) -> int:
+            return abs((c.x - start.x) * line_dy - (c.y - start.y) * line_dx)
+
+        # Open set: priority queue keyed on (f, h, deviation, tiebreaker,
+        # coord) — smaller remaining-cost first among equal f (drives
+        # goal-ward), then line-hugging, then insertion order (prevents
+        # heapq from comparing Coord objects).
         counter = 0
-        open_heap: list[tuple[int, int, Coord]] = [(0, counter, start)]
+        open_heap: list[tuple[int, int, int, int, Coord]] = [
+            (0, self._heuristic(start, goal), deviation(start), counter, start)
+        ]
         counter += 1
 
         came_from: dict[Coord, Coord] = {}
         g_score: dict[Coord, int] = {start: 0}
 
         while open_heap:
-            _, _, current = heapq.heappop(open_heap)
+            _, _, _, _, current = heapq.heappop(open_heap)
 
             if current == goal:
                 return self._reconstruct(came_from, current, g_score[goal])
@@ -113,8 +127,11 @@ class Pathfinder(ABC):
                 if neighbor not in g_score or tentative_g < g_score[neighbor]:
                     came_from[neighbor] = current
                     g_score[neighbor] = tentative_g
-                    f_score = tentative_g + self._heuristic(neighbor, goal)
-                    heapq.heappush(open_heap, (f_score, counter, neighbor))
+                    h = self._heuristic(neighbor, goal)
+                    heapq.heappush(
+                        open_heap,
+                        (tentative_g + h, h, deviation(neighbor), counter, neighbor),
+                    )
                     counter += 1
 
         return None
