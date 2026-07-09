@@ -593,6 +593,12 @@ def execute_unload(
             cities_captured=tuple(captured),
         )
     real_map.unload_cargo(carrier, cargo, to)
+    # A unit landed ashore is AWAKE: a Sentry (or any order) it carried aboard
+    # must not survive the landing, or a force put ashore — a beachhead, often
+    # on a hostile coast — sits dormant, skipped by the auto-cycle and by the
+    # planner. Loading never clears the order (the unit is merely stowed), so
+    # the wake happens here, at the one moment it steps back onto the board.
+    cargo.standing_order = None
     return MoveOutcome(
         last_outcome=StepOutcome.OK,
         steps_taken=1,
