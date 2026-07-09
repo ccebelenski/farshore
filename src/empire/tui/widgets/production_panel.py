@@ -26,9 +26,15 @@ class ProductionRow:
 
     coord: Coord
     city_id: int
+    name: str
     task: str
     turns_left: int | None
     eta: int | None
+
+    def where(self) -> str:
+        """`Name (x,y)`, or just the coordinate for an unnamed (legacy) city."""
+        loc = f"({self.coord.x},{self.coord.y})"
+        return f"{self.name} {loc}" if self.name else loc
 
 
 class ProductionState:
@@ -53,13 +59,12 @@ class ProductionState:
         table.add_column("Left", justify="right", no_wrap=True)
         table.add_column("Done", justify="right", no_wrap=True)
         for row in self.rows:
-            where = f"({row.coord.x},{row.coord.y})"
             if row.turns_left is None:  # idle
-                table.add_row(where, "idle", "—", "—", style="dim")
+                table.add_row(row.where(), "idle", "—", "—", style="dim")
                 continue
             cell = "bold" if row.turns_left <= 1 else ""
             table.add_row(
-                where,
+                row.where(),
                 row.task,
                 Text(str(row.turns_left), style=cell),
                 Text(f"t{row.eta}", style=cell),
@@ -73,10 +78,10 @@ class ProductionPanel(VerticalScroll):
     DEFAULT_CSS = """
     ProductionPanel {
         /* Content area = width - border(2) - padding(2) - scrollbar gutter,
-           and it must clear the widest table row: (xx,yy) + "Battleship" +
-           "Left" + "tNNN" with the inter-column gaps (~32 cols). 48 leaves
-           comfortable margin so the Building column never clips. */
-        width: 48;
+           and it must clear the widest table row: "<Name> (xx,yy)" +
+           "battleship" + "Left" + "tNNN" with the inter-column gaps. Names run
+           to ~12 chars, so 54 keeps the City column from clipping. */
+        width: 54;
         height: 100%;
         border: round $accent;
         border-title-color: $accent;

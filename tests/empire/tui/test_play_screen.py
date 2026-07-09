@@ -964,13 +964,15 @@ def test_production_state_render_handles_idle_and_imminent() -> None:
     from empire.tui.widgets import ProductionRow, ProductionState
 
     rows = [
-        ProductionRow(Coord(1, 1), 1, "Army", 1, 153),  # imminent (bold)
-        ProductionRow(Coord(2, 2), 2, "Destroyer", 5, 157),
-        ProductionRow(Coord(3, 3), 3, "idle", None, None),  # idle (dim)
+        ProductionRow(Coord(1, 1), 1, "Landfall", "Army", 1, 153),  # imminent (bold)
+        ProductionRow(Coord(2, 2), 2, "Cape Mercy", "Destroyer", 5, 157),
+        ProductionRow(Coord(3, 3), 3, "Saltmarsh", "idle", None, None),  # idle (dim)
     ]
     table = ProductionState(rows).render()
     assert table.row_count == 3
     assert [c.header for c in table.columns] == ["City", "Building", "Left", "Done"]
+    # City cell shows "Name (x,y)".
+    assert "Landfall (1,1)" in ProductionRow(Coord(1, 1), 1, "Landfall", "Army", 1, 153).where()
 
 
 async def test_production_tile_content_area_fits_longest_row() -> None:

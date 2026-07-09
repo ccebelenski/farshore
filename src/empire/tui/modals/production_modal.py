@@ -45,6 +45,7 @@ class ProductionModal(ModalScreen[UnitKind | None]):
         self,
         current: UnitKind | None,
         allowed: Sequence[UnitKind] | None = None,
+        city_label: str = "",
     ) -> None:
         super().__init__()
         # Only the kinds this city can build; defaults to all (callers that know
@@ -53,6 +54,7 @@ class ProductionModal(ModalScreen[UnitKind | None]):
             tuple(allowed) if allowed is not None else tuple(UnitKind)
         )
         self._current = current
+        self._city_label = city_label  # e.g. "Landfall (11,2)"; "" hides it
         # Cursor starts on the current target if it's still offered, else "idle".
         self._cursor = (
             self._kinds.index(current)
@@ -70,8 +72,9 @@ class ProductionModal(ModalScreen[UnitKind | None]):
 
     def _repaint(self) -> None:
         current_label = self._current.value if self._current is not None else "idle"
+        at = f"{self._city_label} " if self._city_label else ""
         self.query_one("#prod-title", Static).update(
-            f"build (now: {current_label}) — ↑↓ Enter · Esc cancel"
+            f"build {at}(now: {current_label}) — ↑↓ Enter · Esc cancel"
         )
         rows: list[str] = []
         for i, kind in enumerate(self._kinds):

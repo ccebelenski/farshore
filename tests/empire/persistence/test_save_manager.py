@@ -172,6 +172,21 @@ def test_round_trip_preserves_units_and_their_state() -> None:
         assert loaded_unit.owner.id == original_unit.owner.id
 
 
+def test_round_trip_preserves_city_name_and_unit_home_city() -> None:
+    original = _build_tiny_game()
+    city = next(c for c in original.map.cities() if c.id == CityId(1))
+    city.name = "Bleak Harbor"
+    unit = next(iter(original.map.all_units()))
+    unit.home_city = "Cape Mercy"
+
+    loaded = Serializer().from_dict(Serializer().to_dict(original))
+
+    assert next(c for c in loaded.map.cities() if c.id == CityId(1)).name == "Bleak Harbor"
+    assert next(
+        u for u in loaded.map.all_units() if u.id == unit.id
+    ).home_city == "Cape Mercy"
+
+
 def test_round_trip_preserves_view_maps() -> None:
     original = _build_tiny_game()
     loaded = Serializer().from_dict(Serializer().to_dict(original))

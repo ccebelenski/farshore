@@ -211,6 +211,7 @@ class Serializer:
             "x": c.coord.x,
             "y": c.coord.y,
             "owner_id": int(c.owner.id) if c.owner is not None else None,
+            "name": c.name,
             "production": self._production_to_dict(c.production),
             "default_orders": {
                 kind.value: self._default_order_to_dict(order)
@@ -251,6 +252,7 @@ class Serializer:
             owner=owner,
             production=self._production_from_dict(d["production"]),
             default_orders=orders,
+            name=str(d.get("name", "")),  # back-compat: older saves had no name
         )
 
     def _production_to_dict(self, p: ProductionState) -> dict[str, Any]:
@@ -334,6 +336,7 @@ class Serializer:
             "orbit_direction": (
                 u.orbit_direction.name if u.orbit_direction is not None else None
             ),
+            "home_city": u.home_city,
         }
 
     def _unit_from_dict(
@@ -353,6 +356,7 @@ class Serializer:
         unit.loaded_this_turn = bool(d.get("loaded_this_turn", False))
         orbit = d.get("orbit_direction")
         unit.orbit_direction = Direction[str(orbit)] if orbit is not None else None
+        unit.home_city = str(d.get("home_city", ""))  # back-compat default
         return unit
 
     def _standing_order_to_dict(

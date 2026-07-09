@@ -307,7 +307,9 @@ class PlayScreen(Screen[None]):
             # A queued (not-yet-applied) switch wins over the live building.
             building = self._pending_production.get(city.id, city.production.building)
             if building is None:
-                rows.append(ProductionRow(city.coord, int(city.id), "idle", None, None))
+                rows.append(
+                    ProductionRow(city.coord, int(city.id), city.name, "idle", None, None)
+                )
                 continue
             build_time = UNIT_REGISTRY[building].build_time
             # Accumulated work only counts toward the current target; a queued
@@ -318,6 +320,7 @@ class PlayScreen(Screen[None]):
                 ProductionRow(
                     city.coord,
                     int(city.id),
+                    city.name,
                     building.value,
                     left,
                     self._game.turn + left,
@@ -1122,6 +1125,11 @@ class PlayScreen(Screen[None]):
             if city_can_produce(k, city.coord, self._game.map)
         )
 
+    def _city_label(self, city: City) -> str:
+        """`Name (x,y)`, or just the coordinate for an unnamed (legacy) city."""
+        loc = f"({city.coord.x},{city.coord.y})"
+        return f"{city.name} {loc}" if city.name else loc
+
     def _open_production(self, city: City) -> None:
         current = self._pending_production.get(city.id, city.production.building)
 
@@ -1131,7 +1139,10 @@ class PlayScreen(Screen[None]):
             self._refresh_view()
 
         self.app.push_screen(
-            ProductionModal(current, self._buildable_kinds(city)), _set_target
+            ProductionModal(
+                current, self._buildable_kinds(city), self._city_label(city)
+            ),
+            _set_target,
         )
 
     def _prompt_capture_production(self, city: City) -> None:
@@ -1151,7 +1162,10 @@ class PlayScreen(Screen[None]):
             self._refresh_view()
 
         self.app.push_screen(
-            ProductionModal(current, self._buildable_kinds(city)), _done
+            ProductionModal(
+                current, self._buildable_kinds(city), self._city_label(city)
+            ),
+            _done,
         )
 
     def action_city_orders(self) -> None:
@@ -1193,7 +1207,7 @@ class PlayScreen(Screen[None]):
         Same data as the always-on production tile (`_production_rows`)."""
         lines: list[str] = []
         for r in self._production_rows():
-            head = f"  city#{r.city_id} ({r.coord.x},{r.coord.y}):"
+            head = f"  {r.where()}:"
             if r.turns_left is None:
                 lines.append(f"{head} idle")
             else:
