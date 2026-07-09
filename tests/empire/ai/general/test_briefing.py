@@ -437,3 +437,18 @@ def test_render_is_read_only_over_game_state() -> None:
     assert Serializer().to_dict(game) == before
     assert registry == _registry()
     assert events == _events()
+
+
+def test_stranded_amphibious_note_renders_only_when_flagged() -> None:
+    """The across-water note appears under a flagged CAPTURE TF and nowhere
+    else — gated entirely on the `stranded` set the controller passes."""
+    game = _build_game()
+    view = WorldView(game.map, game.players[0], TURN, STANDARD)
+    reg, ev = _registry(), _events()
+    note = "is across water — this force has no transport"
+
+    flagged = BriefingRenderer().render(view, reg, ev, TURN, stranded=frozenset({"2"})).text
+    assert note in flagged  # TF-2 (CAPTURE) carries the note
+
+    plain = BriefingRenderer().render(view, reg, ev, TURN).text
+    assert note not in plain  # nothing flagged -> no note

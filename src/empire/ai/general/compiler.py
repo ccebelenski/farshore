@@ -72,6 +72,61 @@ _ROLE_OF_VERB: dict[Verb, Role] = {
 }
 
 
+# --- shared CAPTURE geometry (one source of truth for role + the briefing note) --
+# The ASSAULT/INVADE decision and the "stranded amphibious" briefing hint MUST
+# agree, so both are computed from these helpers over the SAME fog-honest army
+# grid the follower routes with — the hint can never contradict what the
+# executor actually does.
+
+
+def _tf_members(tf: TaskForce, view: WorldView) -> list[Unit]:
+    return [u for u in view.own_units if u.id in tf.members]
+
+
+def _ashore_armies(members: list[Unit]) -> list[Unit]:
+    """Landed armies (not aboard) — the troops a CAPTURE must walk onto the city."""
+    return [u for u in members if u.kind is UnitKind.ARMY and u.carried_by is None]
+
+
+def _has_lift(members: list[Unit]) -> bool:
+    """A transport in the force, or an army already aboard one: the force can
+    ferry itself across water."""
+    return any(
+        u.kind is UnitKind.TRANSPORT or u.carried_by is not None for u in members
+    )
+
+
+def _all_can_walk(units: list[Unit], target: Coord, view: WorldView) -> bool:
+    """Every unit can reach `target` over the FOG-HONEST army grid — seen terrain
+    (current or remembered) authoritative, unseen cells optimistically walkable —
+    never real-map truth the player has not earned."""
+    reach = DistanceField(
+        target,
+        PassabilityGrid(view.real_map(), ARMY_COST_PROFILE, view.own_player.view),
+    )
+    return all(reach.steps_to(u.coord) is not None for u in units)
+
+
+def capture_is_stranded(tf: TaskForce, view: WorldView) -> bool:
+    """True when a CAPTURE tasking is a *stranded amphibious assault*: its target
+    is across water (fog-honestly — some member army cannot walk there over SEEN
+    terrain) AND the force carries no transport to lift them.
+
+    Shares the compiler's own reachability + lift tests, so it can never disagree
+    with the ASSAULT/INVADE decision the executor acts on. Fog-honest by
+    construction: unseen cells are optimistically walkable, so it fires only on
+    water the player has actually seen — it reveals no map truth the general has
+    not earned, only restates what its own board already shows."""
+    objective = tf.objective
+    if objective.verb is not Verb.CAPTURE or not isinstance(objective.target, Coord):
+        return False
+    members = _tf_members(tf, view)
+    if _has_lift(members):
+        return False  # can ferry itself — not stranded
+    ashore = _ashore_armies(members)
+    return bool(ashore) and not _all_can_walk(ashore, objective.target, view)
+
+
 class TaskForceView(WorldView):
     """A live view scoped to one task force: identical world, but
     `own_units` reports only the members — the follower plans with the
@@ -166,19 +221,8 @@ class DoctrineCompiler:
         cut-off member (or an all-lift/afloat force) makes it INVADE so the
         naval machinery moves the fist. A force with neither ground troops
         nor lift has nothing to land — plain ASSAULT lets it hold on task."""
-        members = [u for u in view.own_units if u.id in tf.members]
-        ashore = [
-            u for u in members if u.kind is UnitKind.ARMY and u.carried_by is None
-        ]
+        members = _tf_members(tf, view)
+        ashore = _ashore_armies(members)
         if ashore:
-            grid = PassabilityGrid(
-                view.real_map(), ARMY_COST_PROFILE, view.own_player.view
-            )
-            reach = DistanceField(target, grid)
-            if all(reach.steps_to(u.coord) is not None for u in ashore):
-                return Role.ASSAULT
-            return Role.INVADE
-        lifted = any(
-            u.kind is UnitKind.TRANSPORT or u.carried_by is not None for u in members
-        )
-        return Role.INVADE if lifted else Role.ASSAULT
+            return Role.ASSAULT if _all_can_walk(ashore, target, view) else Role.INVADE
+        return Role.INVADE if _has_lift(members) else Role.ASSAULT

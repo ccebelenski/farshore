@@ -4,7 +4,7 @@ force's objective — and nobody else's — through the untouched executor."""
 
 from __future__ import annotations
 
-from empire.ai.general.compiler import DoctrineCompiler
+from empire.ai.general.compiler import DoctrineCompiler, capture_is_stranded
 from empire.ai.general.fake import FakeGeneral
 from empire.ai.general.registry import TaskForceRegistry
 from empire.ai.search.plan import Role
@@ -270,3 +270,88 @@ def test_fake_general_replays_script_then_goes_quiet() -> None:
     assert general.decide(Briefing(turn=2, text="")) is second
     quiet = general.decide(Briefing(turn=9, text=""))
     assert quiet == Doctrine(turn=9, amendments=())
+
+
+# ---- capture_is_stranded (the fog-honest amphibious hint) ----------------------
+
+
+def _armies_across_water(*, seen_all: bool) -> WorldView:
+    """Home continent x0-4, a water strait x5-9, enemy continent x10-13 holding
+    the target city (11,2). A task force of two armies on the home coast, and NO
+    transport. `seen_all` reveals the strait; otherwise only the home continent
+    is seen and the water stays fogged."""
+    p1 = Player(id=PlayerId(1), name="P1", is_ai=True, view=ViewMap(), color="red")
+    p2 = Player(id=PlayerId(2), name="P2", is_ai=True, view=ViewMap(), color="blue")
+    width, height = 14, 6
+    tiles: dict[Coord, Tile] = {}
+    for x in range(width):
+        for y in range(height):
+            c = Coord(x, y)
+            terrain = TerrainKind.LAND if x <= 4 or x >= 10 else TerrainKind.WATER
+            tiles[c] = Tile(coord=c, terrain=terrain)
+    game = Game(
+        rules=STANDARD,
+        real_map=Map(width=width, height=height, tiles=tiles),
+        players=[p1, p2],
+        seed=1,
+    )
+    _add_city(game, p2, OVERSEAS_TARGET, 1)  # (11,2)
+    _add_army(game, p1, Coord(3, 2), 1)
+    _add_army(game, p1, Coord(4, 2), 2)
+    if seen_all:
+        _see_all(game, p1)
+    else:  # only the home continent is scouted; the strait is fog
+        p1.view.visible = {Coord(x, y) for x in range(5) for y in range(height)}
+    return _view(game, p1)
+
+
+def _armies_registry(view: WorldView) -> TaskForceRegistry:
+    registry, refusals = TaskForceRegistry().apply(
+        Doctrine(
+            turn=1,
+            amendments=(
+                FormOrder(
+                    tf_id="1",
+                    unit_ids=(UnitId(1), UnitId(2)),
+                    objective=Objective(Verb.CAPTURE, OVERSEAS_TARGET),
+                    why="storm across the strait",
+                ),
+            ),
+        ),
+        frozenset(u.id for u in view.own_units),
+    )
+    assert refusals == ()
+    return registry
+
+
+def _tf1(registry: TaskForceRegistry):
+    tf = registry.get("1")
+    assert tf is not None
+    return tf
+
+
+def test_capture_across_seen_water_without_lift_is_stranded() -> None:
+    """The armies can't walk to the target and there's no transport — flagged."""
+    view = _armies_across_water(seen_all=True)
+    assert capture_is_stranded(_tf1(_armies_registry(view)), view) is True
+
+
+def test_fog_honesty_across_unseen_water_is_not_flagged() -> None:
+    """THE fog-honesty guarantee: the identical across-water target is NOT
+    flagged while the strait is unseen. The hint may only restate water the
+    general has actually scouted — never reveal terrain it hasn't earned."""
+    view = _armies_across_water(seen_all=False)
+    assert capture_is_stranded(_tf1(_armies_registry(view)), view) is False
+
+
+def test_capture_with_a_transport_is_not_stranded() -> None:
+    """Across water but the task force carries lift — the executor can ferry
+    them, so no note."""
+    _, view, _ = _sea_gap_board()  # includes transport #11 + escort #12
+    assert capture_is_stranded(_tf1(_overseas_registry(view)), view) is False
+
+
+def test_walkable_capture_is_not_stranded() -> None:
+    """A land-reachable CAPTURE is never flagged."""
+    _, view, _ = _staged_board()
+    assert capture_is_stranded(_tf1(_tasked_registry(view)), view) is False

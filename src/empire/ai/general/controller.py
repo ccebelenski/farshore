@@ -29,7 +29,11 @@ from typing import Protocol
 
 from empire.ai.general.briefing import BriefingRenderer
 from empire.ai.general.client import ChatAnswer
-from empire.ai.general.compiler import DoctrineCompiler, TaskForceView
+from empire.ai.general.compiler import (
+    DoctrineCompiler,
+    TaskForceView,
+    capture_is_stranded,
+)
 from empire.ai.general.ledger import LedgerReport, TaskForceLedger
 from empire.ai.general.primer import PERSONA, PRIMER
 from empire.ai.general.registry import TaskForceRegistry
@@ -277,6 +281,12 @@ class LlmGeneralController:
         # refusals). `collect` is read-only; `_book_epoch` resets afterwards.
         report = self._collect_ledger()
         live_events, general_events = self._route_ledger(report, task_forces)
+        # Fog-honest hint: flag any CAPTURE whose target is across seen water and
+        # whose force has no transport — the "stranded amphibious" note the model
+        # needs to stop grinding armies at an unreachable shore.
+        stranded = frozenset(
+            tf_id for tf_id, tf in task_forces.items() if capture_is_stranded(tf, view)
+        )
         briefing = self._renderer.render(
             view,
             task_forces,
@@ -285,6 +295,7 @@ class LlmGeneralController:
             general_events,
             self._last_plan,
             self._last_plan_turn or None,
+            stranded,
         )
         record: dict[str, object] = {"turn": view.turn, "briefing": briefing.text}
         try:
