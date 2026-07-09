@@ -1438,20 +1438,66 @@ def _flood_path_to(
 
     The one re-pathing primitive for standing orders, shared by the
     friendly-jam retry, the terrain-news re-path (fog lifted onto water),
-    and MOVE_TO rally defaults. Deterministic (BFS in Direction-enum
-    order); fog-honest (plans only over terrain `player` knows)."""
-    dist, parent = _explore_flood(
+    and MOVE_TO rally defaults. Deterministic; fog-honest (plans only over
+    terrain `player` knows).
+
+    Reconstruction hugs the straight start->dest line: an 8-way grid admits
+    many shortest paths, and walking the raw BFS parent chain picks one by
+    expansion-order luck — step-optimal, but often a visually wandering
+    staircase. Stepping down the distance field toward the cell of least
+    line deviation keeps the same optimal length and a natural-looking
+    route."""
+    dist, _ = _explore_flood(
         unit, player, real_map, avoid_occupied=avoid_occupied
     )
     if dest not in dist:
         return None
+    line_dx, line_dy = dest.x - unit.coord.x, dest.y - unit.coord.y
+
+    def deviation(c: Coord) -> int:
+        return abs((c.x - unit.coord.x) * line_dy - (c.y - unit.coord.y) * line_dx)
+
     cells: list[Coord] = []
     cur = dest
     while cur != unit.coord:
         cells.append(cur)
-        cur = parent[cur]
+        want = dist[cur] - 1
+        cur = min(
+            (nb for nb in cur.neighbors() if dist.get(nb) == want),
+            key=lambda nb: (deviation(nb), nb.y, nb.x),
+        )
     cells.reverse()
     return tuple(cells)
+
+
+def _splice_patrol_detour(
+    unit: Unit,
+    player: Player,
+    real_map: Map,
+    order: PatrolPath,
+) -> PatrolPath | None:
+    """A loop patrol's route around a friendly jam: detour to the first
+    unoccupied waypoint further along the pass, then rejoin the ORIGINAL
+    tail — the cycle's geometry (and its adjacent-to-start ending, which
+    the re-arm relies on) is preserved, only the blocked head is replaced.
+    None when no clear detour exists this turn (the caller holds)."""
+    for k, waypoint in enumerate(order.remaining):
+        if k == 0:
+            continue  # remaining[0] is the blocked cell itself
+        if any(o.owner is player for o in real_map.units_at(waypoint)):
+            continue  # jammed waypoint: rejoin further along
+        detour = _flood_path_to(
+            unit, player, real_map, waypoint, avoid_occupied=True
+        )
+        if detour is None:
+            return None  # even the detour is walled off this turn
+        return PatrolPath(
+            remaining=(*detour, *order.remaining[k + 1:]),
+            original=order.original,
+            loop=True,
+            contacts=order.contacts,
+        )
+    return None  # every later waypoint jammed (or single-cell pass)
 
 
 def _pick_explore_target(
@@ -1765,9 +1811,13 @@ def apply_standing_orders(
             if not retry:
                 deferred.append(unit)  # blocker may move; try again after
                 return
-            # Still blocked after everyone moved. A one-shot go-to can try a
-            # fresh route around the jam; a heading or a loop patrol has no
-            # alternative geometry — wake on the second attempt.
+            # Still blocked after everyone moved. Friendly traffic is
+            # TRANSIENT — it must never cost the player an order. A go-to
+            # re-routes around the jam, or holds a turn when even the detour
+            # is jammed (waking only if the destination is genuinely
+            # unreachable over known terrain). A loop patrol splices a
+            # detour back onto its route, or holds a turn. Only a heading
+            # still wakes here: it has no goal to re-path toward.
             if isinstance(order, PatrolPath) and not order.loop:
                 cells = _flood_path_to(
                     unit, player, real_map, order.remaining[-1],
@@ -1780,6 +1830,15 @@ def apply_standing_orders(
                     # Re-path is unblocked by construction.
                     _step_move_order(unit, retry=True, repathed=repathed)
                     return
+                if _flood_path_to(unit, player, real_map, order.remaining[-1]):
+                    return  # route exists, just jammed right now: hold a turn
+            elif isinstance(order, PatrolPath) and order.loop:
+                spliced = _splice_patrol_detour(unit, player, real_map, order)
+                if spliced is not None:
+                    unit.standing_order = spliced
+                    _step_move_order(unit, retry=True, repathed=True)
+                    return
+                return  # boxed in this turn: hold; the jam is friendly traffic
             unit.standing_order = None
             interrupted.append(unit.id)
             return

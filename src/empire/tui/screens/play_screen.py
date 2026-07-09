@@ -59,7 +59,7 @@ from empire.core.standing_order import (
 )
 from empire.core.unit import UNIT_REGISTRY, Unit, UnitKind
 from empire.events.bus import EventBus
-from empire.pathfinding.bfs import BFSPathfinder
+from empire.pathfinding.astar import AStarPathfinder
 from empire.pathfinding.cost import AIR, ARMY, SEA
 from empire.persistence.save_manager import SaveManager
 from empire.tui.human_controller import HumanController
@@ -1706,7 +1706,7 @@ class PlayScreen(Screen[None]):
             profile = replace(profile, danger_weight=_GOTO_DANGER_WEIGHT)
             threat_at = lambda c: 1 if (c in danger and c != target) else 0  # noqa: E731
 
-        result = BFSPathfinder().find_path(
+        result = AStarPathfinder().find_path(
             start=unit.coord,
             goal=target,
             real_map=self._game.map,
