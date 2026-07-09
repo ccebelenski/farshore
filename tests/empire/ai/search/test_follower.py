@@ -217,6 +217,38 @@ def test_narrow_causeway_assault_storms_instead_of_freezing() -> None:
     assert Coord(*lead_path[0]).chebyshev_to(city) <= 2, "lead did not storm the ring"
 
 
+def test_open_approach_assault_storms_once_the_floor_is_staged() -> None:
+    """Regression: on an OPEN approach the old quorum was the WHOLE fist, which
+    a straggler that can't pack the ring band leaves permanently unmet — so a
+    committed assault held at the ring forever ('backed off for lack of
+    force'). The punch-through floor storms once a few are staged; the
+    straggler follows."""
+    from empire.core.ruleset import FORTIFIED_CITIES
+
+    game, p1, p2 = _flat_game(width=13, height=5)  # all land -> large capacity
+    game.rules = FORTIFIED_CITIES  # range 2 -> ring 3
+    _see_all(game, p1)
+    city = Coord(10, 2)
+    _add_city(game, p2, city, 1)
+    # Three armies staged at the ring (cheb 3); a fourth stranded far back
+    # (cheb 8) that cannot reach the band this turn.
+    staged = [
+        _add_army(game, p1, Coord(7, 2), 1),
+        _add_army(game, p1, Coord(7, 1), 2),
+        _add_army(game, p1, Coord(7, 3), 3),
+    ]
+    _add_army(game, p1, Coord(2, 2), 4)  # the straggler
+    follower = PlanFollower(Plan(objectives=(Objective(city, Role.ASSAULT, 4),)))
+
+    moves = _moves_by_unit(follower, _view(game, p1))
+    # The three storm — each steps into the fire zone — instead of idling at
+    # the ring waiting for a fourth that isn't coming.
+    for u in staged:
+        path = moves.get(int(u.id))
+        assert path, f"staged army #{int(u.id)} idled instead of storming"
+        assert Coord(*path[0]).chebyshev_to(city) <= 2
+
+
 def test_assignment_is_deterministic() -> None:
     game, p1, _ = _flat_game()
     _see_all(game, p1)
