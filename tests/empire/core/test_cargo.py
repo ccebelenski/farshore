@@ -211,6 +211,25 @@ def test_unload_to_shore_next_turn(p1: Player, resolver: CombatResolver) -> None
     assert list(m.units_at(Coord(2, 0))) == [army]
 
 
+def test_unloaded_unit_lands_awake(p1: Player, resolver: CombatResolver) -> None:
+    """A unit put ashore is AWAKE: a Sentry it carried aboard must not survive
+    the landing, or a beachhead sits dormant — skipped by the TUI auto-cycle
+    and the AI planner. Loading never clears the order (the unit is just
+    stowed), so the wake must happen at unload."""
+    from empire.core.standing_order import Sentry
+
+    m = _build_map(["LWL"])
+    army, _ = _load(p1, m, resolver)
+    army.standing_order = Sentry()  # asleep while stowed aboard
+    army.loaded_this_turn = False  # next round arrives
+
+    outcome = execute_unload(army, Coord(2, 0), m, STANDARD, resolver, random.Random(0))
+
+    assert outcome.last_outcome is StepOutcome.OK
+    assert army.coord == Coord(2, 0)
+    assert army.standing_order is None  # landed awake, ready for orders
+
+
 def test_unload_to_illegal_terrain_rejected(p1: Player, resolver: CombatResolver) -> None:
     m = _build_map(["LWW"])  # only water around the transport
     army, _ = _load(p1, m, resolver)
