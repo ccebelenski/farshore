@@ -118,12 +118,13 @@ class BriefingRenderer:
         general_events: Sequence[str] = (),
         prior_plan: str = "",
         prior_plan_turn: int | None = None,
+        stranded: frozenset[TaskForceId] = frozenset(),
     ) -> Briefing:
         roster = self._roster(view, task_forces)
         visible, stale = self._enemy_sightings(view, turn)
 
         lines: list[str] = [ORDERS_CONTRACT_V7, ""]
-        lines += self._taskings_lines(task_forces, events)
+        lines += self._taskings_lines(task_forces, events, stranded)
         lines.append("")
         if prior_plan:
             lines += self._commanders_plan_lines(prior_plan, prior_plan_turn)
@@ -155,6 +156,7 @@ class BriefingRenderer:
         self,
         task_forces: Mapping[TaskForceId, TaskForce],
         events: Mapping[TaskForceId, Sequence[str]],
+        stranded: frozenset[TaskForceId] = frozenset(),
     ) -> list[str]:
         lines = [
             "CURRENT TASKINGS  (standing orders; your stated reason in quotes;",
@@ -170,6 +172,12 @@ class BriefingRenderer:
             tf = task_forces[tf_id]
             objective = f"{tf.objective.verb.value} {self._target_text(tf.objective.target)}"
             lines.append(f'  TF-{tf.tf_id}  formed t{tf.formed_turn} · {objective} — "{tf.why}"')
+            if tf_id in stranded:
+                where = self._target_text(tf.objective.target)
+                lines.append(
+                    f"    note: {where} is across water — this force has no "
+                    "transport; its armies cannot reach it."
+                )
             reported = list(events.get(tf_id, ()))
             if not reported:
                 lines.append("    since: (nothing reported)")
