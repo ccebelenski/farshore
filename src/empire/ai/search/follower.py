@@ -86,6 +86,17 @@ def idle_step(unit: Unit, view: WorldView) -> UnitMove:
 # falls through to here to take the city).
 _STORM_ROLES = frozenset({Role.ASSAULT, Role.INVADE})
 
+# The storm quorum's punch-through floor. A fortified city fires ONE shot per
+# round, so ~3 attackers entering together already overwhelm it — the shot
+# stops at most one and the rest land (and once anyone is inside the fire zone
+# the whole fist follows). Requiring the ENTIRE fist to mass first was both
+# unnecessary and, on an open approach, unsatisfiable: first-arrivers idle at
+# the ring while stragglers can't all pack into the band at once, so a
+# committed assault held there forever. Capping the quorum at this floor makes
+# it reliably met — the fist storms instead of freezing — while still refusing
+# to trickle in one at a time.
+_STORM_FLOOR = 3
+
 
 def _staging_capacity(
     grid: PassabilityGrid, target: Coord, artillery_range: int
@@ -328,12 +339,15 @@ class PlanFollower:
 
         The storm gate counts members *staged* just outside the fire zone
         (chebyshev in `(artillery_range, ring + 1]`) and enters when they
-        reach the quorum. The quorum is the fist size — but never larger than
-        the shore's staging `capacity`, so a fist too big for a narrow coastal
-        approach storms with what physically fits rather than freezing forever
-        waiting for a wall it can never form. Once any member is inside the
-        fire zone the storm is latched: late joiners can't strand a unit
-        already under the guns.
+        reach the quorum. The quorum is the punch-through floor (`_STORM_FLOOR`
+        — enough to overwhelm the city's one-shot-per-round), never larger than
+        the fist itself or the shore's staging `capacity`. Capping it there is
+        what lets a committed assault actually press home: waiting for the
+        WHOLE fist to mass is unsatisfiable on an open approach (first-arrivers
+        idle at the ring; stragglers can't all pack the band at once) and it
+        froze the assault indefinitely. Once any member is inside the fire zone
+        the storm is latched and the whole fist follows: late joiners can't
+        strand a unit already under the guns.
         """
         target = objective.target
         artillery_range = view.rules.city_artillery_range
@@ -349,7 +363,9 @@ class PlanFollower:
                 for u in group
                 if artillery_range < u.coord.chebyshev_to(target) <= ring + 1
             ]
-            quorum = min(objective.strength, len(group), max(1, capacity))
+            quorum = min(
+                objective.strength, len(group), max(1, capacity), _STORM_FLOOR
+            )
             storming = len(staged) >= quorum
         if storming:
             return self._advance(unit, target, field, view)  # storm together
