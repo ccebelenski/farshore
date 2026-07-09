@@ -209,6 +209,7 @@ def run_production_tick(
         kind = city.production.building
         unit_cls = UNIT_REGISTRY[kind]
         new_unit = unit_cls(next_unit_id_fn(), player, city.coord)
+        new_unit.home_city = city.name  # birthplace stamp (cosmetic)
         # Apply the ruleset's range knobs to range-limited units (spec §2.1).
         if kind is UnitKind.FIGHTER:
             new_unit.range = rules.fighter_base_range

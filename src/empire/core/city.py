@@ -104,6 +104,10 @@ class City:
     # at the start of each round; consumed (hit or miss) when the city fires.
     # Not serialized — it is purely within-round state.
     artillery_ready: bool = True
+    # Cosmetic frontier name, assigned once at map generation. No bearing on
+    # play; shown wherever the city's coordinates are (default "" for maps or
+    # saves that predate names).
+    name: str = ""
 
     @property
     def scan_range(self) -> int:

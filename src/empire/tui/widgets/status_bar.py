@@ -64,9 +64,10 @@ class StatusState:
         parts: list[str] = [f"T{self.turn:>3d}", self.player_name]
         if self.selected_unit is not None:
             u = self.selected_unit
+            home = f" from {u.home_city}" if u.home_city else ""
             parts.append(
                 f"{u.kind.value.upper()}#{int(u.id):<3d}"
-                f" @({u.coord.x},{u.coord.y}) hits={u.hits}/{type(u).max_hits}",
+                f" @({u.coord.x},{u.coord.y}) hits={u.hits}/{type(u).max_hits}{home}",
             )
             so = u.standing_order
             if isinstance(so, Heading):
@@ -81,8 +82,9 @@ class StatusState:
             c = self.selected_city
             prod = c.production
             build = prod.building.value if prod.building is not None else "idle"
+            label = c.name or f"city#{int(c.id)}"
             parts.append(
-                f"city#{int(c.id):<2d} @({c.coord.x},{c.coord.y}) {build} {prod.work}",
+                f"{label} @({c.coord.x},{c.coord.y}) {build} {prod.work}",
             )
         parts.append("|")
         parts.append(self.hint)

@@ -53,6 +53,7 @@ from empire.core.identity import CityId
 from empire.core.map import Map
 from empire.core.ruleset import MapProfile
 from empire.core.tile import TerrainKind, Tile
+from empire.mapgen.city_names import generate_city_names
 from empire.mapgen.generator import MapGenerationError, MapGenerator
 
 
@@ -86,7 +87,7 @@ class HeightFieldMapGenerator(MapGenerator):
                 and self._all_continents_have_coastal_cities(terrain_grid, chosen, profile)
                 and self._every_city_continent_has_paired_city(terrain_grid, chosen, profile)
             ):
-                return self._assemble(terrain_grid, chosen, profile)
+                return self._assemble(terrain_grid, chosen, profile, rng)
             self._last_regen_count = attempt + 1
         raise MapGenerationError(
             f"Could not produce valid map for profile "
@@ -546,9 +547,13 @@ class HeightFieldMapGenerator(MapGenerator):
         terrain_grid: list[list[TerrainKind]],
         city_coords: list[Coord],
         profile: MapProfile,
+        rng: random.Random,
     ) -> tuple[Map, list[City]]:
+        # Names are the final, terminal use of `rng` (generate() returns this
+        # result), so drawing them here never perturbs terrain/city placement.
+        names = generate_city_names(len(city_coords), rng)
         cities: list[City] = [
-            City(id=CityId(i + 1), coord=c, owner=None)
+            City(id=CityId(i + 1), coord=c, owner=None, name=names[i])
             for i, c in enumerate(city_coords)
         ]
         cities_by_coord = {c.coord: c for c in cities}

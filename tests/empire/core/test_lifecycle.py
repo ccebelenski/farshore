@@ -296,6 +296,27 @@ def test_satellite_production_launch_defaults(p1: Player, p2: Player) -> None:
         m.remove_unit(produced[0])
 
 
+def test_produced_unit_is_stamped_with_its_home_city(p1: Player) -> None:
+    """A unit rolling off the line carries its city's name as `home_city`
+    (cosmetic birthplace stamp)."""
+    from empire.core.city import City
+    from empire.core.engine import run_production_tick
+    from empire.core.identity import CityId
+    from empire.core.ruleset import STANDARD
+    from empire.core.unit import Army, UnitKind
+
+    m = _build_map(["LLL"])
+    city = City(id=CityId(1), coord=Coord(1, 0), owner=p1, name="Cape Mercy")
+    m._tiles[Coord(1, 0)] = type(m.tile(Coord(1, 0)))(  # pyright: ignore[reportPrivateUsage]
+        coord=Coord(1, 0), terrain=m.tile(Coord(1, 0)).terrain, city=city
+    )
+    city.production.building = UnitKind.ARMY
+    city.production.work = Army.build_time - 1
+    produced = run_production_tick(p1, m, STANDARD, lambda: UnitId(1))
+    assert len(produced) == 1
+    assert produced[0].home_city == "Cape Mercy"
+
+
 def test_satellite_is_never_path_movable(p1: Player) -> None:
     """Engine-level lockout: satellites cannot be single-moved by any path
     (manual step, goto, heading, AI plan) — orbit is the only motion."""

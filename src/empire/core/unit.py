@@ -91,6 +91,10 @@ class Unit(ABC):
         # (spec §4.7), cleared at the start of each round. A pinned land/air
         # unit cannot move this round; a pinned naval unit moves at half budget.
         self.pinned: bool = False
+        # Cosmetic: the name of the city that produced this unit — its "home",
+        # stamped at production and never changed (birthplace is history). No
+        # bearing on play; "" for units placed at setup or before names.
+        self.home_city: str = ""
 
     def is_aboard(self) -> bool:
         """True if this unit is currently cargo aboard a carrier."""
